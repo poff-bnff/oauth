@@ -1,13 +1,23 @@
 {
+  "name": "poff-hunt",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "nuxt build",
+    "lint": "eslint . --ext .vue,.js,.ts --fix --ignore-path .gitignore",
     "dev": "nuxt dev",
+    "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare"
   },
   "devDependencies": {
+    "@nuxtjs/eslint-config": "12.0.0",
+    "eslint": "8.35.0",
+    "eslint-config-standard": "17.0.0",
+    "eslint-plugin-import": "2.27.5",
+    "eslint-plugin-n": "15.6.1",
+    "eslint-plugin-promise": "6.1.1",
+    "eslint-plugin-vue": "9.9.0",
     "nuxt": "3.2.3"
   }
 }
