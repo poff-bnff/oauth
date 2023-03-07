@@ -72,6 +72,7 @@ main {
   @apply w-full md:w-96;
   @apply mx-auto p-8;
   @apply flex flex-col items-center justify-center gap-16;
+  font-family: 'Fira Sans Extra Condensed', sans-serif;
 }
 
 p {
@@ -88,6 +89,5 @@ a.auth {
   @apply border border-gray-500;
   @apply hover:text-white hover:bg-orange-400 hover:border-orange-400;
   @apply font-normal;
-  font-family: 'Fira Sans Extra Condensed', sans-serif;
 }
 </style>
