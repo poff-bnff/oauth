@@ -5,11 +5,11 @@ export default defineEventHandler(async (event) => {
   const redirectCookie = getCookie(event, 'redirect_uri')
   const stateCookie = getCookie(event, 'state')
 
-  const { oauthClientId, oauthClientSecret } = useRuntimeConfig()
+  const config = useRuntimeConfig()
 
   const body = {
-    client_id: oauthClientId,
-    client_secret: oauthClientSecret,
+    client_id: config.public.oauthClientId,
+    client_secret: config.oauthClientSecret,
     code: query.code,
     grant_type: 'authorization_code',
     state: stateCookie
