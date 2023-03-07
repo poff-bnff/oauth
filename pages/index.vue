@@ -1,8 +1,8 @@
 <script setup>
 const { eventivalClientId, oauthClientId } = useRuntimeConfig()
 const route = useRoute()
-const redirectCookie = useCookie('redirect_uri', { maxAge: 300, secure: true })
-const stateCookie = useCookie('state', { maxAge: 300, secure: true })
+const redirectCookie = useCookie('redirect_uri')
+const stateCookie = useCookie('state')
 
 redirectCookie.value = route.query.redirect_uri
 
