@@ -1,7 +1,11 @@
 <script setup>
 const { eventivalClientId, oauthClientId } = useRuntimeConfig()
+const route = useRoute()
+const redirectCookie = useCookie('redirect_uri', { maxAge: 300, secure: true })
+const stateCookie = useCookie('state', { maxAge: 300, secure: true })
 
-const state = computed(() => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15))
+redirectCookie.value = route.query.redirect_uri || 'https://hunt.poff.ee'
+stateCookie.value = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
 
 function getOauthUrl (provider) {
   const query = new URLSearchParams({
@@ -9,7 +13,7 @@ function getOauthUrl (provider) {
     redirect_uri: 'https://hunt.poff.ee/api/auth/oauth',
     response_type: 'code',
     scope: 'openid',
-    state: state.value
+    state: stateCookie.value
   }).toString()
 
   return `https://oauth.ee/auth/${provider}?${query}`
@@ -21,7 +25,7 @@ function getEventivalUrl () {
     redirect_uri: 'https://hunt.poff.ee/api/auth/eventival',
     response_type: 'code',
     scope: 'openid',
-    state: state.value
+    state: stateCookie.value
   }).toString()
 
   return `https://account.eventival.com/auth/realms/Eventival/protocol/openid-connect/auth?${query}`
