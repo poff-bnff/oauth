@@ -10,7 +10,7 @@ if (!stateCookie.value) {
   stateCookie.value = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
 }
 
-function getOauthUrl (provider) {
+function getOauthUrl (provider, isApi) {
   const query = new URLSearchParams({
     client_id: oauthClientId,
     redirect_uri: 'https://hunt.poff.ee/api/auth/oauth',
@@ -19,7 +19,7 @@ function getOauthUrl (provider) {
     state: stateCookie.value
   }).toString()
 
-  return `https://oauth.ee/auth/${provider}?${query}`
+  return `https://oauth.ee/${isApi ? 'api' : 'auth'}/${provider}?${query}`
 }
 
 function getEventivalUrl () {
@@ -45,15 +45,15 @@ function getEventivalUrl () {
     </a>
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
-        <a class="auth" :href="getOauthUrl('apple')">Apple</a>
-        <a class="auth" :href="getOauthUrl('google')">Google</a>
+        <a class="auth" :href="getOauthUrl('apple', true)">Apple</a>
+        <a class="auth" :href="getOauthUrl('google', true)">Google</a>
         <a class="auth" :href="getEventivalUrl()">Eventival</a>
         <a class="auth" :href="getOauthUrl('e-mail')">E-mail</a>
       </div>
       <div class="w-full flex flex-col gap-4">
         <a class="auth" :href="getOauthUrl('smart-id')">Smart-ID</a>
         <a class="auth" :href="getOauthUrl('mobile-id')">Mobile-ID</a>
-        <a class="auth" :href="getOauthUrl('id-card')">ID-card</a>
+        <a class="auth" :href="getOauthUrl('id-card', true)">ID-card</a>
       </div>
     </div>
     <div>
