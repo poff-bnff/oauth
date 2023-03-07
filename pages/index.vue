@@ -4,7 +4,7 @@ const route = useRoute()
 const redirectCookie = useCookie('redirect_uri', { maxAge: 300, secure: true })
 const stateCookie = useCookie('state', { maxAge: 300, secure: true })
 
-redirectCookie.value = route.query.redirect_uri || 'https://hunt.poff.ee'
+redirectCookie.value = route.query.redirect_uri
 stateCookie.value = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
 
 function getOauthUrl (provider) {

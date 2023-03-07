@@ -1,11 +1,12 @@
 export default defineEventHandler(async (event) => {
-  const headers = getRequestHeaders(event)
+  const config = useRuntimeConfig()
   const query = getQuery(event)
-
-  const redirectCookie = getCookie(event, 'redirect_uri')
+  const redirectUri = getCookie(event, 'redirect_uri') || '/'
   const stateCookie = getCookie(event, 'state')
 
-  const config = useRuntimeConfig()
+  if (!query.code || !query.state || query.state !== stateCookie) {
+    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+  }
 
   const body = {
     client_id: config.public.oauthClientId,
@@ -15,8 +16,14 @@ export default defineEventHandler(async (event) => {
     state: stateCookie
   }
 
-  const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
-  const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
+  try {
+    const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
+    const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
 
-  return { headers, query, redirectCookie, stateCookie, user }
+    const jwtToken = jwt.sign({ user }, config.jwtSecret, { expiresIn: '14d' })
+
+    return sendRedirect(event, redirectUri + jwtToken, 302)
+  } catch (error) {
+    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+  }
 })
