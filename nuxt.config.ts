@@ -4,6 +4,9 @@ export default defineNuxtConfig({
     head: {
       htmlAttrs: { lang: 'en' },
       title: 'PÖFF | BNFF',
+      meta: [
+        { hid: 'description', name: 'description', content: 'User Authentication for PÖFF | BNFF' }
+      ],
       link: [
         { rel: 'icon', type: 'image/png', href: '/BNFF-192.png' }
       ]
