@@ -6,7 +6,7 @@
       </div>
       Back to PÖFF
     </a>
-    <div class="w-full flex flex-col md:flex-row items-start justify-center gap-4">
+    <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
         <a class="auth" href="">Apple</a>
         <a class="auth" href="">Google</a>
@@ -31,8 +31,8 @@
 </template>
 <style scoped>
 main {
-  @apply w-80;
-  @apply mx-auto p-4;
+  @apply w-full md:w-80;
+  @apply mx-auto p-8;
   @apply flex flex-col items-center justify-center gap-16;
 }
 
