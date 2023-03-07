@@ -47,13 +47,16 @@ function getEventivalUrl () {
   <main>
     <div class="w-full flex items-start justify-between gap-4">
       <a class="back" href="javascript:history.back()">
-        <div class="h-5 w-5 flex">
-          <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 16"><g fill="none"><path d="M13.5 8.5a.5.5 0 0 0 0-1H3.803l4.031-3.628a.5.5 0 1 0-.668-.744l-5 4.5a.5.5 0 0 0 0 .744l5 4.5a.5.5 0 1 0 .668-.744L3.803 8.5H13.5z" fill="currentColor" /></g></svg>
-        </div>
+        <svg class="h-5 w-5 flex" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 16">
+          <g fill="none">
+            <path d="M13.5 8.5a.5.5 0 0 0 0-1H3.803l4.031-3.628a.5.5 0 1 0-.668-.744l-5 4.5a.5.5 0 0 0 0 .744l5 4.5a.5.5 0 1 0 .668-.744L3.803 8.5H13.5z" fill="currentColor" />
+          </g>
+        </svg>
         Back
       </a>
-      <a v-if="locale === 'et'" @click.prevent="() => locale = 'en'">EN</a>
-      <a v-if="locale === 'en'" @click.prevent="() => locale = 'et'">ET</a>
+
+      <a v-if="locale !== 'en'" @click.prevent="() => locale = 'en'">EN</a>
+      <a v-else @click.prevent="() => locale = 'et'">ET</a>
     </div>
 
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
