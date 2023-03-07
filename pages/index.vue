@@ -43,6 +43,7 @@ function getEventivalUrl () {
       </div>
       Back
     </a>
+
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
         <a class="auth" :href="getOauthUrl('apple', true)">Apple</a>
@@ -56,6 +57,7 @@ function getEventivalUrl () {
         <a class="auth" :href="getOauthUrl('id-card', true)">ID-card</a>
       </div>
     </div>
+
     <div>
       <p>
         Lorem ipsum dolor sit amet, consectetur adipiscing elit. Cras nec sodales magna, eget scelerisque odio. Pellentesque felis orci, elementum id egestas eu, molestie ac lacus. Integer felis mauris, condimentum ut pretium sed, dapibus commodo ex.
