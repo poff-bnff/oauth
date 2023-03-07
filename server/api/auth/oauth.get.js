@@ -5,7 +5,7 @@ export default defineEventHandler(async (event) => {
   const stateCookie = getCookie(event, 'state')
 
   if (!query.code || !query.state || query.state !== stateCookie) {
-    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+    throw createError({ statusCode: 400, statusMessage: 'Invalid arguments' })
   }
 
   const body = {
@@ -24,6 +24,6 @@ export default defineEventHandler(async (event) => {
 
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
-    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+    throw createError({ statusCode: 500, statusMessage: 'OAuth.ee error' })
   }
 })
