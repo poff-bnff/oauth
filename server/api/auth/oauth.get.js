@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken'
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const query = getQuery(event)
-  const redirectUri = getCookie(event, 'redirect_uri') || '/'
+  const redirectUri = getCookie(event, 'redirect_uri') || '/?jwt='
   const stateCookie = getCookie(event, 'state')
 
   setCookie(event, 'redirect_uri', null)
@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
     const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
 
-    const jwtToken = jwt.sign({ user }, config.jwtSecret, { expiresIn: '14d' })
+    const jwtToken = jwt.sign({ user }, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: user.id })
 
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
