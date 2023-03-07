@@ -15,8 +15,8 @@ export default defineEventHandler(async (event) => {
     state: stateCookie.value
   }
 
-  const { data: token } = await useFetch('https://oauth.ee/token', { method: 'POST', body })
-  const { data: user } = await useFetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token.access_token}` } })
+  const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
+  const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
 
   return { headers, query, redirectCookie: redirectCookie.value, stateCookie: stateCookie.value, user }
 })
