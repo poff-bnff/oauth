@@ -12,11 +12,11 @@ export default defineEventHandler(async (event) => {
     client_secret: oauthClientSecret,
     code: query.code,
     grant_type: 'authorization_code',
-    state: stateCookie.value
+    state: stateCookie
   }
 
   const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
   const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
 
-  return { headers, query, redirectCookie: redirectCookie.value, stateCookie: stateCookie.value, user }
+  return { headers, query, redirectCookie, stateCookie, user }
 })
