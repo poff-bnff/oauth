@@ -24,8 +24,11 @@ export default defineEventHandler(async (event) => {
   try {
     const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
     const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
+    const tokenData = {}
 
-    const jwtToken = jwt.sign({ user }, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: user.id })
+    if (user.name) tokenData.name = user.name
+
+    const jwtToken = jwt.sign(tokenData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: user.email })
 
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
