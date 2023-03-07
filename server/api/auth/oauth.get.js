@@ -1,3 +1,5 @@
+const jwt = require('jsonwebtoken')
+
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const query = getQuery(event)
