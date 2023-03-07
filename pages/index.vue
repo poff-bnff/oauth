@@ -31,7 +31,7 @@
 </template>
 <style scoped>
 main {
-  @apply w-full md:w-80;
+  @apply w-full md:w-96;
   @apply mx-auto p-8;
   @apply flex flex-col items-center justify-center gap-16;
 }
