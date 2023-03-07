@@ -24,6 +24,8 @@ export default defineEventHandler(async (event) => {
 
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
+    console.error(error)
+
     throw createError({ statusCode: 500, statusMessage: 'OAuth.ee error' })
   }
 })
