@@ -1,3 +1,33 @@
+<script setup>
+const { eventivalClientId, oauthClientId } = useRuntimeConfig()
+
+const state = computed(() => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15))
+
+function getOauthUrl (provider) {
+  const query = new URLSearchParams({
+    client_id: oauthClientId,
+    redirect_uri: 'https://hunt.poff.ee/api/auth/oauth',
+    response_type: 'code',
+    scope: 'openid',
+    state: state.value
+  }).toString()
+
+  return `https://oauth.ee/auth/${provider}?${query}`
+}
+
+function getEventivalUrl () {
+  const query = new URLSearchParams({
+    client_id: eventivalClientId,
+    redirect_uri: 'https://hunt.poff.ee/api/auth/eventival',
+    response_type: 'code',
+    scope: 'openid',
+    state: state.value
+  }).toString()
+
+  return `https://account.eventival.com/auth/realms/Eventival/protocol/openid-connect/auth?${query}`
+}
+</script>
+
 <template>
   <main>
     <a class="back" href="https://poff.ee">
@@ -8,15 +38,15 @@
     </a>
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
-        <a class="auth" href="">Apple</a>
-        <a class="auth" href="">Google</a>
-        <a class="auth" href="">Eventival</a>
-        <a class="auth" href="">E-mail</a>
+        <a class="auth" :href="getOauthUrl('apple')">Apple</a>
+        <a class="auth" :href="getOauthUrl('google')">Google</a>
+        <a class="auth" :href="getEventivalUrl()">Eventival</a>
+        <a class="auth" :href="getOauthUrl('e-mail')">E-mail</a>
       </div>
       <div class="w-full flex flex-col gap-4">
-        <a class="auth" href="">Smart-ID</a>
-        <a class="auth" href="">Mobile-ID</a>
-        <a class="auth" href="">ID-card</a>
+        <a class="auth" :href="getOauthUrl('smart-id')">Smart-ID</a>
+        <a class="auth" :href="getOauthUrl('mobile-id')">Mobile-ID</a>
+        <a class="auth" :href="getOauthUrl('id-card')">ID-card</a>
       </div>
     </div>
     <div>
@@ -29,6 +59,7 @@
     </div>
   </main>
 </template>
+
 <style scoped>
 main {
   @apply w-full md:w-96;

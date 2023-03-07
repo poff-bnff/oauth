@@ -5,7 +5,7 @@ export default defineNuxtConfig({
       htmlAttrs: { lang: 'en' },
       title: 'PÖFF | BNFF',
       meta: [
-        { hid: 'description', name: 'description', content: 'User Authentication for PÖFF | BNFF' }
+        { name: 'description', content: 'User Authentication for PÖFF | BNFF' }
       ],
       link: [
         { rel: 'icon', type: 'image/png', href: '/BNFF-192.png' }
@@ -26,6 +26,17 @@ export default defineNuxtConfig({
     plugins: {
       tailwindcss: {},
       autoprefixer: {}
+    }
+  },
+  runtimeConfig: {
+    strapiApi: '',
+    strapiToken: '',
+    jwtSecret: '',
+    eventivalClientSecret: '',
+    oauthClientSecret: '',
+    public: {
+      eventivalClientId: '',
+      oauthClientId: ''
     }
   }
 })
