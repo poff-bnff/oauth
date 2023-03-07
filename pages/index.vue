@@ -37,12 +37,14 @@ function getEventivalUrl () {
 
 <template>
   <main>
-    <a class="back" href="https://poff.ee">
-      <div class="h-5 w-5 flex">
-        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 16"><g fill="none"><path d="M13.5 8.5a.5.5 0 0 0 0-1H3.803l4.031-3.628a.5.5 0 1 0-.668-.744l-5 4.5a.5.5 0 0 0 0 .744l5 4.5a.5.5 0 1 0 .668-.744L3.803 8.5H13.5z" fill="currentColor" /></g></svg>
-      </div>
-      Back to PÖFF
-    </a>
+    <client-only>
+      <a class="back" :href="document?.referrer || 'https://poff.ee'">
+        <div class="h-5 w-5 flex">
+          <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 16 16"><g fill="none"><path d="M13.5 8.5a.5.5 0 0 0 0-1H3.803l4.031-3.628a.5.5 0 1 0-.668-.744l-5 4.5a.5.5 0 0 0 0 .744l5 4.5a.5.5 0 1 0 .668-.744L3.803 8.5H13.5z" fill="currentColor" /></g></svg>
+        </div>
+        Back
+      </a>
+    </client-only>
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
         <a class="auth" :href="getOauthUrl('apple', true)">Apple</a>
