@@ -6,6 +6,9 @@ export default defineEventHandler(async (event) => {
   const redirectUri = getCookie(event, 'redirect_uri') || '/'
   const stateCookie = getCookie(event, 'state')
 
+  setCookie(event, 'redirect_uri', null)
+  setCookie(event, 'state', null)
+
   if (!query.code || !query.state || query.state !== stateCookie) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid arguments' })
   }
