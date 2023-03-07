@@ -8,7 +8,8 @@ export default defineNuxtConfig({
         { name: 'description', content: 'User Authentication for PÖFF | BNFF' }
       ],
       link: [
-        { rel: 'icon', type: 'image/png', href: '/BNFF-192.png' }
+        { rel: 'icon', type: 'image/png', href: '/BNFF-192.png' },
+        { rel: 'apple-touch-icon', type: 'image/png', href: '/BNFF-57.png' }
       ]
     }
   },
