@@ -31,13 +31,14 @@ export default defineNuxtConfig({
     }
   },
   runtimeConfig: {
+    jwtSecret: '',
     strapiUrl: '',
     strapiUser: '',
     strapiPassword: '',
-    jwtSecret: '',
     oauthClientSecret: '',
     eventivalClientSecret: '',
     public: {
+      url: '',
       oauthUrl: '',
       oauthClientId: '',
       eventivalUrl: '',

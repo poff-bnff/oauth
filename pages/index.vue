@@ -1,7 +1,7 @@
 <script setup>
 import crypto from 'crypto'
 
-const { eventivalClientId, oauthClientId } = useRuntimeConfig()
+const { url, eventivalClientId, eventivalUrl, oauthClientId, oauthUrl } = useRuntimeConfig()
 const { locale, t } = useI18n()
 const route = useRoute()
 const router = useRouter()
@@ -23,25 +23,25 @@ watch(() => locale.value, (value) => {
 function getOauthUrl (provider, isApi) {
   const query = new URLSearchParams({
     client_id: oauthClientId,
-    redirect_uri: 'https://hunt.poff.ee/api/auth/oauth',
+    redirect_uri: `${url}/api/auth/oauth`,
     response_type: 'code',
     scope: 'openid',
     state: stateCookie.value
   }).toString()
 
-  return `https://oauth.ee/${isApi ? 'api' : 'auth'}/${provider}?${query}`
+  return `${oauthUrl}/${isApi ? 'api' : 'auth'}/${provider}?${query}`
 }
 
 function getEventivalUrl () {
   const query = new URLSearchParams({
     client_id: eventivalClientId,
-    redirect_uri: 'https://hunt.poff.ee/api/auth/eventival',
+    redirect_uri: `${url}/api/auth/eventival`,
     response_type: 'code',
     scope: 'openid',
     state: stateCookie.value
   }).toString()
 
-  return `https://account.eventival.com/auth/realms/Eventival/protocol/openid-connect/auth?${query}`
+  return `${eventivalUrl}/auth/realms/Eventival/protocol/openid-connect/auth?${query}`
 }
 </script>
 
