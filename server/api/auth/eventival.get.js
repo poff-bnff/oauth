@@ -13,30 +13,29 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid arguments' })
   }
 
-  const body = {
+  const body = new URLSearchParams({
     client_id: config.public.eventivalClientId,
     client_secret: config.eventivalClientSecret,
     code: query.code,
     grant_type: 'authorization_code',
+    redirect_uri: `${config.public.url}/api/auth/eventival`,
     state: stateCookie
-  }
+  })
 
   try {
-    const token = await $fetch(`${config.public.eventivalUrl}/auth/realms/Eventival/protocol/openid-connect/token`, { method: 'POST', body })
+    const { id_token: token } = await $fetch(`${config.public.eventivalUrl}/auth/realms/Eventival/protocol/openid-connect/token`, { method: 'POST', body })
+    const user = jwt.decode(token)
 
-    return { token }
-    // const user = await $fetch(`${config.public.eventivalUrl}/user`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No Eventival e-mail' })
 
-    // if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No Eventival e-mail' })
+    const strapiUser = await getStrapiUser(user.email)
 
-    // const strapiUser = await getStrapiUser(user.email)
+    const jwtData = { ...strapiUser }
+    delete jwtData.id
 
-    // const jwtData = { ...strapiUser }
-    // delete jwtData.id
+    const jwtToken = jwt.sign(jwtData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
 
-    // const jwtToken = jwt.sign(jwtData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
-
-    // return sendRedirect(event, redirectUri + jwtToken, 302)
+    return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
     console.error(error)
 
