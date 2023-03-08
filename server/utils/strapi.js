@@ -23,7 +23,7 @@ export async function getStrapiUser (email) {
 
     return result
   } else {
-    const newUser = await $fetch(`${config.strapiUrl}/api/auth/local/register`, {
+    const newUser = await $fetch(`${config.strapiUrl}/auth/local/register`, {
       method: 'POST',
       body: {
         email,
