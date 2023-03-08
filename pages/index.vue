@@ -1,4 +1,6 @@
 <script setup>
+import crypto from 'crypto'
+
 const { eventivalClientId, oauthClientId } = useRuntimeConfig()
 const { locale, t } = useI18n()
 const route = useRoute()
@@ -11,7 +13,7 @@ redirectCookie.value = route.query.redirect_uri
 locale.value = route.query.locale || 'et'
 
 if (!stateCookie.value) {
-  stateCookie.value = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+  stateCookie.value = crypto.randomBytes(16).toString('hex')
 }
 
 watch(() => locale.value, (value) => {

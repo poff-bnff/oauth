@@ -1,3 +1,5 @@
+import crypto from 'crypto'
+
 export async function getStrapiUser (email) {
   const config = useRuntimeConfig()
 
@@ -28,7 +30,7 @@ export async function getStrapiUser (email) {
       body: {
         email,
         username: email,
-        password: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+        password: crypto.randomBytes(32).toString('hex')
       }
     })
 
