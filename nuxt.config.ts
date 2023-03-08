@@ -31,8 +31,8 @@ export default defineNuxtConfig({
     }
   },
   runtimeConfig: {
-    strapiApi: '',
-    strapiToken: '',
+    strapiUser: '',
+    strapiPassword: '',
     jwtSecret: '',
     eventivalClientSecret: '',
     oauthClientSecret: '',

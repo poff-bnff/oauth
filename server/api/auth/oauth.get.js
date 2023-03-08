@@ -24,11 +24,12 @@ export default defineEventHandler(async (event) => {
   try {
     const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
     const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
-    const tokenData = {}
 
-    if (user.name) tokenData.name = user.name
+    if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No OAuth.ee e-mail' })
 
-    const jwtToken = jwt.sign(tokenData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: user.email })
+    const strapiUser = await getStrapiUser(user.email)
+
+    const jwtToken = jwt.sign(strapiUser, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
 
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
