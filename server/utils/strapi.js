@@ -33,7 +33,8 @@ function getUser (user) {
   const result = {
     id: user.id.toString(),
     email: user.email,
-    confirmed: user.confirmed
+    confirmed: user.confirmed === true,
+    profile: user.profileFilled === true
   }
 
   if (user.user_profile?.firstName) result.firstName = user.user_profile.firstName
