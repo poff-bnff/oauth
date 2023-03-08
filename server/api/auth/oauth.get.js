@@ -29,7 +29,10 @@ export default defineEventHandler(async (event) => {
 
     const strapiUser = await getStrapiUser(user.email)
 
-    const jwtToken = jwt.sign(strapiUser, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
+    jwtData = { ...strapiUser }
+    delete jwtData.id
+
+    const jwtToken = jwt.sign(jwtData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
 
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
