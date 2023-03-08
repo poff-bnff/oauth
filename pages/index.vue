@@ -8,7 +8,7 @@ const stateCookie = useCookie('state')
 
 redirectCookie.value = route.query.redirect_uri
 
-locale.value = route.query.locale || 'en'
+locale.value = route.query.locale || 'et'
 
 if (!stateCookie.value) {
   stateCookie.value = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
