@@ -22,8 +22,8 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const { access_token: token } = await $fetch('https://oauth.ee/token', { method: 'POST', body })
-    const user = await $fetch('https://oauth.ee/user', { headers: { Authorization: `Bearer ${token}` } })
+    const { access_token: token } = await $fetch(`${config.public.oauthUrl}/token`, { method: 'POST', body })
+    const user = await $fetch(`${config.public.oauthUrl}/user`, { headers: { Authorization: `Bearer ${token}` } })
 
     if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No OAuth.ee e-mail' })
 

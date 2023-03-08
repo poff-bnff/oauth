@@ -1,7 +1,7 @@
 export async function getStrapiUser (email) {
   const config = useRuntimeConfig()
 
-  const { jwt: token } = await $fetch('https://admin.poff.ee/auth/local', {
+  const { jwt: token } = await $fetch(`${config.strapiUrl}/auth/local`, {
     method: 'POST',
     body: {
       identifier: config.strapiUser,
@@ -9,7 +9,7 @@ export async function getStrapiUser (email) {
     }
   })
 
-  const [user] = await $fetch(`https://admin.poff.ee/users?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
+  const [user] = await $fetch(`${config.strapiUrl}/users?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
 
   if (user) {
     const result = {
@@ -23,7 +23,7 @@ export async function getStrapiUser (email) {
 
     return result
   } else {
-    const newUser = await $fetch('https://admin.poff.ee/api/auth/local/register', {
+    const newUser = await $fetch(`${config.strapiUrl}/api/auth/local/register`, {
       method: 'POST',
       body: {
         email,
