@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
 
     const strapiUser = await getStrapiUser(user.email)
 
-    jwtData = { ...strapiUser }
+    const jwtData = { ...strapiUser }
     delete jwtData.id
 
     const jwtToken = jwt.sign(jwtData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
