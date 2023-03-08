@@ -14,18 +14,9 @@ export async function getStrapiUser (email) {
   const [user] = await $fetch(`${config.strapiUrl}/users?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
 
   if (user) {
-    const result = {
-      id: user.id,
-      email: user.email,
-      profile: user.profileFilled
-    }
-
-    if (user.user_profile?.firstName) result.firstName = user.user_profile.firstName
-    if (user.user_profile?.lastName) result.lastName = user.user_profile.lastName
-
-    return result
+    return getUser(user)
   } else {
-    const newUser = await $fetch(`${config.strapiUrl}/auth/local/register`, {
+    const { user: newUser } = await $fetch(`${config.strapiUrl}/auth/local/register`, {
       method: 'POST',
       body: {
         email,
@@ -34,6 +25,18 @@ export async function getStrapiUser (email) {
       }
     })
 
-    console.log('New user created', newUser)
+    return getUser(newUser)
   }
+}
+
+function getUser (user) {
+  const result = {
+    id: user.id,
+    email: user.email
+  }
+
+  if (user.user_profile?.firstName) result.firstName = user.user_profile.firstName
+  if (user.user_profile?.lastName) result.lastName = user.user_profile.lastName
+
+  return result
 }
