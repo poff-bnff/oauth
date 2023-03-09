@@ -54,7 +54,7 @@ function getEventivalUrl () {
             <path d="M13.5 8.5a.5.5 0 0 0 0-1H3.803l4.031-3.628a.5.5 0 1 0-.668-.744l-5 4.5a.5.5 0 0 0 0 .744l5 4.5a.5.5 0 1 0 .668-.744L3.803 8.5H13.5z" fill="currentColor" />
           </g>
         </svg>
-        Back
+        {{ t('back') }}
       </a>
 
       <a v-if="locale !== 'en'" @click.prevent="() => locale = 'en'">EN</a>
@@ -83,11 +83,13 @@ function getEventivalUrl () {
 
 <i18n lang="yaml">
   en:
+    back: Back
     idcard: ID-card
     mobileid: Mobile-ID
     email: E-Mail
     info: Lorem ipsum dolor sit amet, consectetur adipiscing elit. Cras nec sodales magna, eget scelerisque odio. Pellentesque felis orci, elementum id egestas eu, molestie ac lacus. Integer felis mauris, condimentum ut pretium sed, dapibus commodo ex.
   et:
+    back: Tagasi
     idcard: ID-kaart
     mobileid: Mobiil-ID
     email: E-post
