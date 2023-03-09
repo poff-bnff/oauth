@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 
 const config = useRuntimeConfig()
 
@@ -33,10 +34,8 @@ export async function getStrapiUser (id) {
   return await $fetch(`${config.strapiUrl}/users/${id}`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
-export function getUserIdFromHeader (event) {
+export function getUserIdFromEvent (event) {
   const headers = getRequestHeaders(event)
-
-  console.log(headers)
 
   const token = headers?.authorization?.split(' ')[1]
 
@@ -47,7 +46,7 @@ export function getUserIdFromHeader (event) {
 
     return sub
   } catch (error) {
-    return null
+    throw createError({ statusCode: 401, statusMessage: 'Invalid token' })
   }
 }
 
