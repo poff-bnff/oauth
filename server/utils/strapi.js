@@ -39,7 +39,7 @@ export function getUserIdFromEvent (event) {
 
   const token = headers?.authorization?.split(' ')[1]
 
-  if (!token) return null
+  if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
   try {
     const { sub } = jwt.verify(token, config.jwtSecret)
