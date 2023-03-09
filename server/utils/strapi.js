@@ -33,8 +33,12 @@ export async function getStrapiUser (id) {
   return await $fetch(`${config.strapiUrl}/users/${id}`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
-export function getUserIdFromHeader (header) {
-  const token = header?.authorization?.split(' ')[1]
+export function getUserIdFromHeader (event) {
+  const headers = getRequestHeaders(event)
+
+  console.log(headers)
+
+  const token = headers?.authorization?.split(' ')[1]
 
   if (!token) return null
 

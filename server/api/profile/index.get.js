@@ -1,7 +1,5 @@
 export default defineEventHandler(async (event) => {
-  const headers = getRequestHeaders(event)
-
-  const id = getUserIdFromHeader(headers)
+  const id = getUserIdFromEvent(event)
 
   if (!id) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
