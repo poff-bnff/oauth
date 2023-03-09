@@ -1,6 +1,10 @@
 export default defineEventHandler(async (event) => {
   const headers = getRequestHeaders(event)
-  const query = getQuery(event)
 
-  return { headers, query }
+  const id = getUserIdFromHeader(headers)
+  const user = getStrapiUser(id)
+
+  if (!user) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+
+  return user
 })

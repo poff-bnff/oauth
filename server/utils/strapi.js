@@ -1,20 +1,14 @@
 import crypto from 'crypto'
 
-export async function getStrapiUser (email) {
-  const config = useRuntimeConfig()
+const config = useRuntimeConfig()
 
-  const { jwt: token } = await $fetch(`${config.strapiUrl}/auth/local`, {
-    method: 'POST',
-    body: {
-      identifier: config.strapiUser,
-      password: config.strapiPassword
-    }
-  })
+export async function authenticateStrapiUser (email) {
+  const token = await getStrapiToken()
 
   const [user] = await $fetch(`${config.strapiUrl}/users?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
 
   if (user) {
-    return getUser(user)
+    return getUserObject(user)
   } else {
     const { user: newUser } = await $fetch(`${config.strapiUrl}/auth/local/register`, {
       method: 'POST',
@@ -25,11 +19,43 @@ export async function getStrapiUser (email) {
       }
     })
 
-    return getUser(newUser)
+    return getUserObject(newUser)
   }
 }
 
-function getUser (user) {
+export async function getStrapiUser (id) {
+  const token = await getStrapiToken()
+
+  return await $fetch(`${config.strapiUrl}/users/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+}
+
+export function getUserIdFromHeader (header) {
+  const token = header?.authorization?.split(' ')[1]
+
+  if (!token) return null
+
+  try {
+    const { sub } = jwt.verify(token, config.jwtSecret)
+
+    return sub
+  } catch (error) {
+    return null
+  }
+}
+
+async function getStrapiToken () {
+  const { jwt: token } = await $fetch(`${config.strapiUrl}/auth/local`, {
+    method: 'POST',
+    body: {
+      identifier: config.strapiUser,
+      password: config.strapiPassword
+    }
+  })
+
+  return token
+}
+
+function getUserObject (user) {
   const result = {
     id: user.id.toString(),
     email: user.email,

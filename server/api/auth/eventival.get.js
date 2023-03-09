@@ -9,9 +9,9 @@ export default defineEventHandler(async (event) => {
   setCookie(event, 'redirect_uri', null)
   setCookie(event, 'state', null)
 
-  if (!query.code || !query.state || query.state !== stateCookie) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid arguments' })
-  }
+  // if (!query.code || !query.state || query.state !== stateCookie) {
+  //   throw createError({ statusCode: 400, statusMessage: 'Invalid arguments' })
+  // }
 
   const body = new URLSearchParams({
     client_id: config.public.eventivalClientId,
@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
 
     if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No Eventival e-mail' })
 
-    const strapiUser = await getStrapiUser(user.email)
+    const strapiUser = await authenticateStrapiUser(user.email)
 
     const jwtData = { ...strapiUser }
     delete jwtData.id
