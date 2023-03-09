@@ -3,6 +3,8 @@ import crypto from 'crypto'
 const config = useRuntimeConfig()
 
 export async function authenticateStrapiUser (email) {
+  if (!email) return null
+
   const token = await getStrapiToken()
 
   const [user] = await $fetch(`${config.strapiUrl}/users?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -24,6 +26,8 @@ export async function authenticateStrapiUser (email) {
 }
 
 export async function getStrapiUser (id) {
+  if (!id) return null
+
   const token = await getStrapiToken()
 
   return await $fetch(`${config.strapiUrl}/users/${id}`, { headers: { Authorization: `Bearer ${token}` } })
