@@ -8,6 +8,8 @@ Make sure to install the dependencies:
 npm install
 ```
 
+Make .env file from .env.example and fill in the values.
+
 ## Development Server
 
 Start the development server on http://localhost:3000
