@@ -87,7 +87,7 @@ function getEventivalUrl () {
     idcard: ID-card
     mobileid: Mobile-ID
     email: E-Mail
-    info: |
+    info:
       This website uses OAuth to enable users to authenticate and connect their accounts with third-party services. By using OAuth, you agree to share your account information, including your name, email address, profile picture, and other relevant details with these services.
 
       Please note that we do not store any passwords or sensitive information related to your account. The authentication process is handled securely by the third-party service provider.
@@ -100,7 +100,7 @@ function getEventivalUrl () {
     idcard: ID-kaart
     mobileid: Mobiil-ID
     email: E-post
-    info: |
+    info:
       See veebisait kasutab OAuth-i, et võimaldada kasutajatel autentida ja ühendada oma kontod kolmandate teenustega. Kasutades OAuth-i, nõustute oma konto teabe, sealhulgas nime, e-posti aadressi, profiilipildi ja muude asjakohaste üksikasjadega nende teenustega jagamisega.
 
       Palun pange tähele, et me ei salvesta ühtegi parooli ega tundlikku teavet teie konto kohta. Autentimisprotsessi haldab turvaliselt kolmanda osapoole teenusepakkuja.
