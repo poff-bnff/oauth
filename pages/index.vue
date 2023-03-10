@@ -121,6 +121,7 @@ main {
 p {
   @apply mb-4 last-of-type:mb-0;
   @apply font-extralight;
+  white-space: pre-line;
 }
 
 a {
