@@ -87,13 +87,15 @@ function getEventivalUrl () {
     idcard: ID-card
     mobileid: Mobile-ID
     email: E-Mail
-    info: Lorem ipsum dolor sit amet, consectetur adipiscing elit. Cras nec sodales magna, eget scelerisque odio. Pellentesque felis orci, elementum id egestas eu, molestie ac lacus. Integer felis mauris, condimentum ut pretium sed, dapibus commodo ex.
+    info: |
+      PÖFF (Tallinn Balck Nights Film Festival) authentication servide lets you authenticate yourself via OAuth services of Apple, Google and Eventival; authentication via password, Estonian ID-card, Mobile-ID and Smart-ID is provided by oauth.ee.
   et:
     back: Tagasi
     idcard: ID-kaart
     mobileid: Mobiil-ID
     email: E-post
-    info: Donec sit amet velit massa. Pellentesque diam urna, vehicula in aliquam eget, egestas at urna. Curabitur egestas risus sit amet dolor tempus fringilla.
+    info: |
+      PÖFFi kasutajate tuvastamisteenus lubab sul end tuvastada Apple, Google ja Eventivali OAuth teenuse kaudu; paroolikonto, Eesti Id kaardi, Mobiil-ID ja Smart-ID kaudu tuvastamist vahendab oauth.ee.
 </i18n>
 
 <style scoped>
@@ -107,6 +109,7 @@ main {
 p {
   @apply mb-4 last-of-type:mb-0;
   @apply font-extralight;
+  white-space: pre-line;
 }
 
 a {
