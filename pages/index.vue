@@ -20,7 +20,7 @@ watch(() => locale.value, (value) => {
   router.replace({ query: { ...route.query, locale: value } })
 })
 
-function getOauthUrl (provider, isApi) {
+function getOauthUrl (provider) {
   const query = new URLSearchParams({
     client_id: oauthClientId,
     redirect_uri: `${url}/api/auth/oauth`,
@@ -29,7 +29,7 @@ function getOauthUrl (provider, isApi) {
     state: stateCookie.value
   }).toString()
 
-  return `${oauthUrl}/${isApi ? 'api' : 'auth'}/${provider}?${query}`
+  return `${oauthUrl}/auth/${provider}?${query}`
 }
 
 function getEventivalUrl () {
@@ -63,8 +63,8 @@ function getEventivalUrl () {
 
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
-        <a class="auth" :href="getOauthUrl('apple', true)">Apple</a>
-        <a class="auth" :href="getOauthUrl('google', true)">Google</a>
+        <a class="auth" :href="getOauthUrl('apple')">Apple</a>
+        <a class="auth" :href="getOauthUrl('google')">Google</a>
         <a class="auth" :href="getEventivalUrl()">Eventival</a>
         <a class="auth" :href="getOauthUrl('e-mail')">{{ t('email') }}</a>
       </div>
