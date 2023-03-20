@@ -15,6 +15,7 @@ export default defineNuxtConfig({
   },
   css: ['~/assets/css/tailwind.css'],
   modules: [
+    '@nuxt/devtools',
     '@nuxtjs/i18n',
     ['@nuxtjs/google-fonts', {
       base64: true,
