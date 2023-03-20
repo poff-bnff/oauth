@@ -67,10 +67,6 @@ export async function setStrapiMyFavorite (user, cassetteId) {
     myFavorites.push({ id: cassetteId })
   }
 
-  // Cleanup cassette objects in favorites list; leave only id properties of each cassette
-  user.my_favorites = myFavorites.map(favorite => ({ id: favorite.id }))
-  console.log(user)
-
   // Update user's favorites list
   const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
@@ -78,10 +74,14 @@ export async function setStrapiMyFavorite (user, cassetteId) {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
-    user
+    body: {
+      "id": user.id,
+      // Cleanup cassette objects in favorites list; leave only id properties of each cassette
+      "my_favorites": myFavorites.map(favorite => ({ id: favorite.id }))
+    }
   })
 
-  return result // .my_favorites
+  return result.my_favorites
 }
 
 export function getUserIdFromEvent (event) {

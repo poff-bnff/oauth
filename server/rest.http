@@ -17,13 +17,14 @@ Authorization: token {{jwt}}
 get {{hunt_url}}/api/film/my HTTP/1.1
 Authorization: token {{jwt}}
 
-### POST switch my favorite film
+### PUT switch my favorite film
+### Add cassette to favs. If cassette already in favs, remove it
 put {{hunt_url}}/api/my/favorite HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 
 {
-  "cassetteId": 41
+  "cassetteId": 1599
 }
 
 ### GET screenings
