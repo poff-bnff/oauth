@@ -1,0 +1,42 @@
+@jwt = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJteSBKV1QgdG9rZW4gZnJvbSBodW50In0.XvWmEPZViqVkwMuZEpRBq2Owi8qLR9HUZI9Knyb1x4I
+@hunt_url = http://localhost:3000
+
+### GET user profile
+get {{hunt_url}}/api/profile HTTP/1.1
+Authorization: token {{jwt}}
+
+### GET films
+get {{hunt_url}}/api/film HTTP/1.1
+Authorization: token {{jwt}}
+
+### GET my favorite films
+get {{hunt_url}}/api/film/my HTTP/1.1
+Authorization: token {{jwt}}
+
+### POST switch my favorite film
+post {{hunt_url}}/api/film/my HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
+{
+  "id": 1
+}
+
+### GET screenings
+get {{hunt_url}}/api/screening HTTP/1.1
+Authorization: token {{jwt}}
+
+### GET my screenings calendar
+get {{hunt_url}}/api/screening/my HTTP/1.1
+Authorization: token {{jwt}}
+
+### POST switch event in my screenings calendar
+post {{hunt_url}}/api/screening/my HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
+{
+  "id": 1
+}
+
+
