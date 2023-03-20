@@ -9,17 +9,21 @@ Authorization: token {{jwt}}
 get {{hunt_url}}/api/film HTTP/1.1
 Authorization: token {{jwt}}
 
+### GET my stuff
+get {{hunt_url}}/api/my HTTP/1.1
+Authorization: token {{jwt}}
+
 ### GET my favorite films
 get {{hunt_url}}/api/film/my HTTP/1.1
 Authorization: token {{jwt}}
 
 ### POST switch my favorite film
-post {{hunt_url}}/api/film/my HTTP/1.1
+put {{hunt_url}}/api/my/favorite HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 
 {
-  "id": 1
+  "cassetteId": 41
 }
 
 ### GET screenings
@@ -40,3 +44,31 @@ Content-Type: application/json
 }
 
 
+### post user profile
+put {{hunt_url}}/api/profile HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
+{
+  "id": 14813,
+  "my_films": [
+    {
+      "id": 15447,
+      "type": "favorite",
+      "cassettes": [
+        {
+          "id": 41
+        },
+        {
+          "id": 43
+        },
+        {
+          "id": 419
+        },
+        {
+          "id": 42
+        }
+      ]
+    }
+  ]
+}
