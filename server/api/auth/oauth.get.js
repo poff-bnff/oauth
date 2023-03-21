@@ -36,6 +36,7 @@ export default defineEventHandler(async (event) => {
 
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error(error)
 
     throw createError({ statusCode: 500, statusMessage: 'OAuth.ee error' })
