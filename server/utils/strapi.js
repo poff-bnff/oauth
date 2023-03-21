@@ -75,9 +75,10 @@ export async function setStrapiMyFavorite (user, cassetteId) {
       'Content-Type': 'application/json'
     },
     body: {
-      "id": user.id,
-      // Cleanup cassette objects in favorites list; leave only id properties of each cassette
-      "my_favorites": myFavorites.map(favorite => ({ id: favorite.id }))
+      id: user.id,
+      // Cleanup cassette objects in favorites list;
+      // leave only id properties of each cassette
+      my_favorites: myFavorites.map(favorite => ({ id: favorite.id }))
     }
   })
 
