@@ -1,4 +1,4 @@
-@jwt = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJteSBKV1QgdG9rZW4gZnJvbSBodW50In0.XvWmEPZViqVkwMuZEpRBq2Owi8qLR9HUZI9Knyb1x4I
+@jwt =
 @hunt_url = http://localhost:3000
 
 ### GET user profile
@@ -6,11 +6,18 @@ get {{hunt_url}}/api/profile HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Switch my favorite film
-put {{hunt_url}}/api/favorite?18 HTTP/1.1
+put {{hunt_url}}/api/my/favorite HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 
 1599
+
+### Switch my screening
+put {{hunt_url}}/api/my/screening HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
+2366
 
 ### GET films
 get {{hunt_url}}/api/film HTTP/1.1
@@ -23,24 +30,17 @@ Content-Type: application/json
 
 {
   "id": 14813,
-  "my_films": [
-    {
-      "id": 15447,
-      "type": "favorite",
-      "cassettes": [
-        {
-          "id": 41
-        },
-        {
-          "id": 43
-        },
-        {
-          "id": 419
-        },
-        {
-          "id": 42
-        }
-      ]
-    }
-  ]
+  "username": "Mihkel-Mikelis Putrinš",
+  "My": {
+    "id": 1,
+    "favorites": [
+      { "id": 20 },
+      { "id": 3792 }
+    ],
+    "screenings": [
+      { "id": 1670 },
+      { "id": 2366 },
+      { "id": 2766 }
+    ]
+  }
 }

@@ -41,13 +41,11 @@ export async function setStrapiUser (user) {
 
   return await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
-
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
-
-    user
+    body: user
   })
 }
 
@@ -56,7 +54,7 @@ export async function setStrapiMyFavorite (user, cassetteId) {
   if (!user) return null
 
   const token = await getStrapiToken()
-  const myFavorites = (user.my_favorites || [])
+  const myFavorites = (user.My.favorites || []).map(favorite => ({ id: favorite.id }))
 
   // If the cassette was already in the user's favorites, remove it.
   // Otherwise, add it.
@@ -76,13 +74,49 @@ export async function setStrapiMyFavorite (user, cassetteId) {
     },
     body: {
       id: user.id,
-      // Cleanup cassette objects in favorites list;
-      // leave only id properties of each cassette
-      my_favorites: myFavorites.map(favorite => ({ id: favorite.id }))
+      My: {
+        id: 1,
+        favorites: myFavorites
+      }
     }
   })
 
-  return result.my_favorites
+  return result.My
+}
+
+export async function setStrapiMyScreening (user, screeningId) {
+  if (!screeningId) return null
+  if (!user) return null
+
+  const token = await getStrapiToken()
+  const myScreenings = (user.My.screenings || []).map(screening => ({ id: screening.id }))
+
+  // If the screening was already in the user's screenings, remove it.
+  // Otherwise, add it.
+  const index = myScreenings.findIndex(screening => screening.id === screeningId)
+  if (index > -1) {
+    myScreenings.splice(index, 1)
+  } else {
+    myScreenings.push({ id: screeningId })
+  }
+
+  // Update user's screenings list
+  const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      id: user.id,
+      My: {
+        id: 1,
+        screenings: myScreenings
+      }
+    }
+  })
+
+  return result.My
 }
 
 export function getUserIdFromEvent (event) {
