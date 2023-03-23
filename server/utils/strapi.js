@@ -54,10 +54,10 @@ export async function setStrapiMyFilm (user, cassetteId) {
   if (!user) return null
 
   const token = await getStrapiToken()
-  const myFilms = (user.My.films || []).map(film => ({ id: film.id }))
+  const my = user.My || { films: [] }
+  const myFilms = (my.films || []).map(film => ({ id: film.id }))
 
-  // If the cassette was already in the user's favorites, remove it.
-  // Otherwise, add it.
+  // If the cassette was already in the user's favorites, remove it. Otherwise, add it.
   const index = myFilms.findIndex(film => film.id === cassetteId)
   if (index > -1) {
     myFilms.splice(index, 1)
@@ -65,7 +65,6 @@ export async function setStrapiMyFilm (user, cassetteId) {
     myFilms.push({ id: cassetteId })
   }
 
-  const my = user.My || {}
   my.films = myFilms
 
   // Update user's favorites list
@@ -89,10 +88,10 @@ export async function setStrapiMyScreening (user, screeningId) {
   if (!user) return null
 
   const token = await getStrapiToken()
-  const myScreenings = (user.My.screenings || []).map(screening => ({ id: screening.id }))
+  const my = user.My || { screenings: [] }
+  const myScreenings = (my.screenings || []).map(screening => ({ id: screening.id }))
 
-  // If the screening was already in the user's screenings, remove it.
-  // Otherwise, add it.
+  // If the screening was already in the user's screenings, remove it. Otherwise, add it.
   const index = myScreenings.findIndex(screening => screening.id === screeningId)
   if (index > -1) {
     myScreenings.splice(index, 1)
@@ -100,7 +99,6 @@ export async function setStrapiMyScreening (user, screeningId) {
     myScreenings.push({ id: screeningId })
   }
 
-  const my = user.My || {}
   my.screenings = myScreenings
 
   // Update user's screenings list
