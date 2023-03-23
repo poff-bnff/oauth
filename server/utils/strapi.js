@@ -49,7 +49,7 @@ export async function setStrapiUser (user) {
   })
 }
 
-export async function setStrapiMyFavorite (user, cassetteId) {
+export async function setStrapiMyFilm (user, cassetteId) {
   if (!cassetteId) return null
   if (!user) return null
 

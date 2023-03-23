@@ -6,7 +6,7 @@ get {{hunt_url}}/api/profile HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Switch my favorite film
-put {{hunt_url}}/api/my/favorite HTTP/1.1
+put {{hunt_url}}/api/my/film HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 

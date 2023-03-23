@@ -4,5 +4,5 @@ export default defineEventHandler(async (event) => {
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
   const cassetteId = await readBody(event)
-  return await setStrapiMyFavorite(user, cassetteId)
+  return await setStrapiMyFilm(user, cassetteId)
 })
