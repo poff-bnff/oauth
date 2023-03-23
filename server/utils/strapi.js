@@ -54,16 +54,19 @@ export async function setStrapiMyFilm (user, cassetteId) {
   if (!user) return null
 
   const token = await getStrapiToken()
-  const myFavorites = (user.My.favorites || []).map(favorite => ({ id: favorite.id }))
+  const myFilms = (user.My.films || []).map(film => ({ id: film.id }))
 
   // If the cassette was already in the user's favorites, remove it.
   // Otherwise, add it.
-  const index = myFavorites.findIndex(favorite => favorite.id === cassetteId)
+  const index = myFilms.findIndex(film => film.id === cassetteId)
   if (index > -1) {
-    myFavorites.splice(index, 1)
+    myFilms.splice(index, 1)
   } else {
-    myFavorites.push({ id: cassetteId })
+    myFilms.push({ id: cassetteId })
   }
+
+  const my = user.My || {}
+  my.films = myFilms
 
   // Update user's favorites list
   const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
@@ -74,10 +77,7 @@ export async function setStrapiMyFilm (user, cassetteId) {
     },
     body: {
       id: user.id,
-      My: {
-        id: 1,
-        favorites: myFavorites
-      }
+      My: my
     }
   })
 
@@ -100,6 +100,9 @@ export async function setStrapiMyScreening (user, screeningId) {
     myScreenings.push({ id: screeningId })
   }
 
+  const my = user.My || {}
+  my.screenings = myScreenings
+
   // Update user's screenings list
   const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
@@ -109,10 +112,7 @@ export async function setStrapiMyScreening (user, screeningId) {
     },
     body: {
       id: user.id,
-      My: {
-        id: 1,
-        screenings: myScreenings
-      }
+      My: my
     }
   })
 
