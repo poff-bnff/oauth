@@ -165,6 +165,12 @@ export async function getStrapiFilms () {
   return await $fetch(`${config.strapiUrl}/cassettes`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
+export async function getStrapiCinemas () {
+  const token = await getStrapiToken()
+
+  return await $fetch(`${config.strapiUrl}/cinemas`, { headers: { Authorization: `Bearer ${token}` } })
+}
+
 export async function getStrapiFilm (id) {
   const token = await getStrapiToken()
 
