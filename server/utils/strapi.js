@@ -159,15 +159,43 @@ function getUserObject (user) {
   return result
 }
 
-export async function getStrapiFilms () {
+export async function getStrapiFilms (limit, page) {
   const token = await getStrapiToken()
+  // set default limit and page values
+  limit = limit || 5
+  page = page || 1
+  console.log('getStrapiFilms', limit, page)
 
-  return await $fetch(`${config.strapiUrl}/cassettes`, { headers: { Authorization: `Bearer ${token}` } })
+  const options = {
+    headers: { Authorization: `Bearer ${token}` },
+    query: {
+      _limit: limit,
+      _start: (page - 1) * limit
+    }
+  }
+  return await $fetch(`${config.strapiUrl}/films`, options)
+}
+
+export async function getStrapiCassettes (limit, page) {
+  const token = await getStrapiToken()
+  // set default limit and page values
+  limit = limit || 5
+  page = page || 1
+  console.log('getStrapiCassettes', limit, page)
+
+  const options = {
+    headers: { Authorization: `Bearer ${token}` },
+    query: {
+      _limit: limit,
+      _start: (page - 1) * limit
+    }
+  }
+  return await $fetch(`${config.strapiUrl}/cassettes`, options)
 }
 
 export async function getStrapiCinemas () {
   const token = await getStrapiToken()
-
+  console.log('getStrapiCinemas', token)
   return await $fetch(`${config.strapiUrl}/cinemas`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
