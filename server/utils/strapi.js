@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken'
 
 const config = useRuntimeConfig()
 
-export async function authenticateStrapiUser (email) {
+export async function authenticateStrapiUser(email) {
   if (!email) return null
 
   const token = await getStrapiToken()
@@ -26,20 +26,23 @@ export async function authenticateStrapiUser (email) {
   }
 }
 
-export async function getStrapiUser (id) {
+export async function getStrapiUser(id) {
   if (!id) return null
-
+  console.log(id)
   const token = await getStrapiToken()
 
-  return await $fetch(`${config.strapiUrl}/users/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+  return await $fetch(`${config.strapiUrl}/users/me/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
 }
 
-export async function setStrapiUser (user) {
+export async function setStrapiUser(user) {
+  console.log(`setStrapiUser`, user);
   if (!user) return null
 
   const token = await getStrapiToken()
 
-  return await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+  return await $fetch(`${config.strapiUrl}/users/updateme`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -49,7 +52,7 @@ export async function setStrapiUser (user) {
   })
 }
 
-export async function setStrapiMyFilm (user, cassetteId) {
+export async function setStrapiMyFilm(user, cassetteId) {
   if (!cassetteId) return null
   if (!user) return null
 
@@ -83,7 +86,7 @@ export async function setStrapiMyFilm (user, cassetteId) {
   return result.My
 }
 
-export async function setStrapiMyScreening (user, screeningId) {
+export async function setStrapiMyScreening(user, screeningId) {
   if (!screeningId) return null
   if (!user) return null
 
@@ -117,7 +120,7 @@ export async function setStrapiMyScreening (user, screeningId) {
   return result.My
 }
 
-export function getUserIdFromEvent (event) {
+export function getUserIdFromEvent(event) {
   const headers = getRequestHeaders(event)
 
   const token = headers?.authorization?.split(' ')[1]
@@ -133,7 +136,7 @@ export function getUserIdFromEvent (event) {
   }
 }
 
-async function getStrapiToken () {
+async function getStrapiToken() {
   const { jwt: token } = await $fetch(`${config.strapiUrl}/auth/local`, {
     method: 'POST',
     body: {
@@ -145,7 +148,7 @@ async function getStrapiToken () {
   return token
 }
 
-function getUserObject (user) {
+function getUserObject(user) {
   const result = {
     id: user.id.toString(),
     email: user.email,
@@ -159,13 +162,13 @@ function getUserObject (user) {
   return result
 }
 
-export async function getStrapiFilms () {
+export async function getStrapiFilms() {
   const token = await getStrapiToken()
 
   return await $fetch(`${config.strapiUrl}/cassettes`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
-export async function getStrapiFilm (id) {
+export async function getStrapiFilm(id) {
   const token = await getStrapiToken()
 
   return await $fetch(`${config.strapiUrl}/films/${id}`, { headers: { Authorization: `Bearer ${token}` } })

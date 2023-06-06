@@ -2,7 +2,7 @@
 @hunt_url = http://localhost:3000
 
 ### GET user profile
-get {{hunt_url}}/api/profile HTTP/1.1
+get {{hunt_url}}/api/me HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Switch my favorite film
@@ -24,23 +24,30 @@ get {{hunt_url}}/api/film HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Update user profile
-put {{hunt_url}}/api/profile HTTP/1.1
+put {{hunt_url}}/api/me HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 
 {
-  "id": 14813,
-  "username": "Mihkel-Mikelis Putrinš",
-  "My": {
-    "id": 1,
-    "favorites": [
-      { "id": 20 },
-      { "id": 3792 }
-    ],
-    "screenings": [
-      { "id": 1670 },
-      { "id": 2366 },
-      { "id": 2766 }
-    ]
-  }
+  "id": 14500,
+  "username": "Martin Pennaste"
 }
+
+
+# {
+#   "id": 14813,
+#   "username": "Mihkel-Mikelis Putrinš",
+#   "My": {
+#     "id": 1,
+#     "favorites": [
+#       { "id": 20 },
+#       { "id": 3792 }
+#     ],
+#     "screenings": [
+#       { "id": 1670 },
+#       { "id": 2366 },
+#       { "id": 2766 }
+#     ]
+#   }
+# }
+
