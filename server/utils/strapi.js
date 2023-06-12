@@ -86,6 +86,29 @@ export async function setStrapiMyFilm(user, cassetteId) {
   return result.My
 }
 
+export async function setFavorites(user, favorites) {
+  if (!favorites) return null
+  if (!user) return null
+
+  const token = await getStrapiToken()
+
+  favorites.userId = user.id
+
+  console.log('setFavorites', favorites);
+
+  // Update user's favorites list
+  const result = await $fetch(`${config.strapiUrl}/users/favorites/`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: favorites
+  })
+
+  return result.My
+}
+
 export async function setStrapiMyScreening(user, screeningId) {
   if (!screeningId) return null
   if (!user) return null
@@ -117,7 +140,7 @@ export async function setStrapiMyScreening(user, screeningId) {
     }
   })
 
-  return result.My
+  return result
 }
 
 export function getUserIdFromEvent(event) {
