@@ -3,6 +3,11 @@ import jwt from 'jsonwebtoken'
 
 const config = useRuntimeConfig()
 
+const STRAPI_TOKEN = {
+  token: null,
+  expires: null
+}
+
 export async function authenticateStrapiUser (email) {
   if (!email) return null
 
@@ -134,6 +139,15 @@ export function getUserIdFromEvent (event) {
 }
 
 async function getStrapiToken () {
+  // If a cached token exists, and it's not expired, return it
+  if (STRAPI_TOKEN.token && STRAPI_TOKEN.expires > Date.now()) {
+    return STRAPI_TOKEN.token
+  } else {
+    return await refreshStrapiToken()
+  }
+}
+
+async function refreshStrapiToken () {
   const { jwt: token } = await $fetch(`${config.strapiUrl}/auth/local`, {
     method: 'POST',
     body: {
@@ -141,7 +155,9 @@ async function getStrapiToken () {
       password: config.strapiPassword
     }
   })
-
+  STRAPI_TOKEN.token = token
+  // Read expiration from token and subtract 5 minutes
+  STRAPI_TOKEN.expires = (jwt.decode(token).exp - 5 * 60) * 1e3
   return token
 }
 
