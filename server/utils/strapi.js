@@ -3,7 +3,12 @@ import jwt from 'jsonwebtoken'
 
 const config = useRuntimeConfig()
 
-export async function authenticateStrapiUser(email) {
+const STRAPI_TOKEN = {
+  token: null,
+  expires: null
+}
+
+export async function authenticateStrapiUser (email) {
   if (!email) return null
 
   const token = await getStrapiToken()
@@ -159,7 +164,16 @@ export function getUserIdFromEvent(event) {
   }
 }
 
-async function getStrapiToken() {
+async function getStrapiToken () {
+  // If a cached token exists, and it's not expired, return it
+  if (STRAPI_TOKEN.token && STRAPI_TOKEN.expires > Date.now()) {
+    return STRAPI_TOKEN.token
+  } else {
+    return await refreshStrapiToken()
+  }
+}
+
+async function refreshStrapiToken () {
   const { jwt: token } = await $fetch(`${config.strapiUrl}/auth/local`, {
     method: 'POST',
     body: {
@@ -167,7 +181,9 @@ async function getStrapiToken() {
       password: config.strapiPassword
     }
   })
-
+  STRAPI_TOKEN.token = token
+  // Read expiration from token and subtract 5 minutes
+  STRAPI_TOKEN.expires = (jwt.decode(token).exp - 5 * 60) * 1e3
   return token
 }
 
@@ -185,10 +201,44 @@ function getUserObject(user) {
   return result
 }
 
-export async function getStrapiFilms() {
+export async function getStrapiFilms (limit, page) {
   const token = await getStrapiToken()
+  // set default limit and page values
+  limit = limit || 5
+  page = page || 1
+  console.log('getStrapiFilms', limit, page)
 
-  return await $fetch(`${config.strapiUrl}/cassettes`, { headers: { Authorization: `Bearer ${token}` } })
+  const options = {
+    headers: { Authorization: `Bearer ${token}` },
+    query: {
+      _limit: limit,
+      _start: (page - 1) * limit
+    }
+  }
+  return await $fetch(`${config.strapiUrl}/films`, options)
+}
+
+export async function getStrapiCassettes (limit, page) {
+  const token = await getStrapiToken()
+  // set default limit and page values
+  limit = limit || 5
+  page = page || 1
+  console.log('getStrapiCassettes', limit, page)
+
+  const options = {
+    headers: { Authorization: `Bearer ${token}` },
+    query: {
+      _limit: limit,
+      _start: (page - 1) * limit
+    }
+  }
+  return await $fetch(`${config.strapiUrl}/cassettes`, options)
+}
+
+export async function getStrapiCinemas () {
+  const token = await getStrapiToken()
+  console.log('getStrapiCinemas', token)
+  return await $fetch(`${config.strapiUrl}/cinemas`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
 export async function getStrapiFilm(id) {

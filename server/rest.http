@@ -1,9 +1,13 @@
-@jwt =
 @hunt_url = http://localhost:3000
 
 ### GET user profile
 get {{hunt_url}}/api/me HTTP/1.1
 Authorization: token {{jwt}}
+
+### Get my favorite films
+get {{hunt_url}}/api/my/film HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
 
 ### Switch my favorite film
 put {{hunt_url}}/api/my/film HTTP/1.1
@@ -19,8 +23,22 @@ Content-Type: application/json
 
 2366
 
-### GET films
-get {{hunt_url}}/api/film HTTP/1.1
+### GET strapi cinemas
+get https://admin.poff.ee/cinemas HTTP/1.1
+Authorization: token {{jwt}}
+
+### GET films with limit and page
+### default limit is -1 and page is 1
+get {{hunt_url}}/api/film?limit=1 HTTP/1.1
+Authorization: token {{jwt}}
+
+### GET cassettes with limit and page
+### default limit is -1 and page is 1
+get {{hunt_url}}/api/cassette?limit=1 HTTP/1.1
+Authorization: token {{jwt}}
+
+### GET cinemas
+get {{hunt_url}}/api/cinema HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Update user profile
