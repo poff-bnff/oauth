@@ -11,7 +11,7 @@ redirectCookie.value = route.query.redirect_uri
 locale.value = route.query.locale || 'et'
 
 // signout, if signout url parameter is set
-console.log('route.query', route.query)
+console.log('FOO: route.query', route.query)
 if (route.query.signout === null) {
   jwtCookie.value = ''
   console.log('signout')
@@ -74,8 +74,6 @@ const films = await fetch(`${url}/api/cassette?limit=${limit}&page=${page}`, {
   .catch((err) => {
     console.log('request failed', err)
   })
-
-const myFilms = profile?.My?.films.map()
 
 console.log('number of films', films.length)
 

@@ -62,3 +62,18 @@ Content-Type: application/json
     ]
   }
 }
+
+### update profile image
+PUT {{hunt_url}}/api/profile HTTP/1.1
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryPOFF04
+
+------WebKitFormBoundaryPOFF04
+Content-Disposition: form-data; name="username"
+
+Mihkel-Mikelis Putrinshsh
+------WebKitFormBoundaryPOFF04
+Content-Disposition: form-data; name="image"; filename="mitselek.png"
+Content-Type: image/png
+
+< ./mitselek.png
+------WebKitFormBoundaryPOFF04--
