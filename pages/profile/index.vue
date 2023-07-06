@@ -1,10 +1,17 @@
 <!-- eslint-disable no-console -->
 <script setup>
 import { ref } from 'vue'
-defineProps(['firstnameInputValue', 'lastnameInputValue', 'profilePicInputValue'])
+
+defineProps([
+  'profileId',
+  'firstnameInputValue',
+  'lastnameInputValue',
+  'profilePicInputValue'
+])
+const profileId = ref(0)
 const firstnameInputValue = ref('J:O:H:N')
 const lastnameInputValue = ref('D:O:E')
-const profilePicInputValue = ref('https://admin.poff.ee/uploads/U_mihkel_putrin_d286184110.jpeg')
+const profilePicInputValue = ref()
 
 const { url } = useRuntimeConfig()
 const { locale, t } = useI18n()
@@ -15,88 +22,102 @@ const jwtCookie = useCookie('jwt')
 
 const uploadsHost = 'https://admin.poff.ee'
 
-redirectCookie.value = route.query.redirect_uri
+function startup () {
+  redirectCookie.value = route.query.redirect_uri
 
-locale.value = route.query.locale || 'et'
+  locale.value = route.query.locale || 'et'
 
 // signout, if signout url parameter is set
-console.log('PROFILE: route.query', route.query)
-if (route.query.signout === null) {
-  jwtCookie.value = ''
-  console.log('signout')
-  router.replace({
-    path: '/profile',
-    force: true
-  })
-}
-
-// if jwt cookie is not set, redirect to login page at /
-if (!jwtCookie.value) {
-  if (route.query.jwt) {
-    jwtCookie.value = route.query.jwt
-  } else {
-    console.log('no jwt cookie')
-    console.log('route.query.jwt', route.query.jwt)
+// console.log('PROFILE: route.query', route.query)
+  if (route.query.signout === null) {
+    jwtCookie.value = ''
+    console.log('signout')
     router.replace({
-      path: '/',
-      query: { redirect_uri: 'http://localhost:3000/profile/?jwt=' }
+      path: '/profile',
+      force: true
     })
   }
-}
-// router.replace('/foo')
-console.log('jwt in cookie', jwtCookie.value)
 
-// make a http request to /api/profile to get user profile
-const profile = await fetch(`${url}/api/profile`, {
-  headers: {
-    authorization: `Bearer ${jwtCookie.value}`
+// if jwt cookie is not set, redirect to login page at /
+  if (!jwtCookie.value) {
+    if (route.query.jwt) {
+      jwtCookie.value = route.query.jwt
+    } else {
+      console.log('no jwt cookie')
+      console.log('route.query.jwt', route.query.jwt)
+      router.replace({
+        path: '/',
+        query: { redirect_uri: 'http://localhost:3000/profile/?jwt=' }
+      })
+    }
   }
+}; startup()
+// console.log('jwt in cookie', jwtCookie.value)
+
+const profile = await fetch(`${url}/api/profile`, {
+  headers: { authorization: `Bearer ${jwtCookie.value}` }
 })
-  .then((res) => {
-    return res.json()
-  })
-  .catch((err) => {
-    console.log('request failed', err)
-  })
+  .then((res) => { return res.json() })
+  .catch((err) => { console.log('request failed', err) })
 
-console.log(profile.user_profile)
-console.log({ My: profile?.My?.id })
+const getUsername = () => profile?.username || 'Jon Doe'
+const getEmail = () => profile?.email || 'john.doe@cem'
 
-function getUsername () {
-  return profile ? profile.username : 'Jon Doe'
-}
-function getEmail () {
-  return profile ? profile.email : 'john.doe@cem'
-}
-function getFirstname () {
-  return profile?.user_profile?.firstName || 'Jon'
-}
-function getLastname () {
-  return profile?.user_profile?.lastName || 'Doe'
-}
-firstnameInputValue.value = getFirstname()
-lastnameInputValue.value = getLastname()
+profileId.value = profile?.user_profile?.id
+firstnameInputValue.value = profile?.user_profile?.firstName || 'Jon'
+lastnameInputValue.value = profile?.user_profile?.lastName || 'Doe'
+console.log({ UserProfile: profileId.value, firstName: firstnameInputValue.value, lastName: lastnameInputValue.value })
 
 function onProfilePicChange () {
-  console.log('onProfilePicChange')
-  console.log(`onProfilePicChange file name: ${profilePicInputValue.value.files[0].name}`)
-  console.log(`onProfilePicChange: ${profilePicInputValue.value}`)
+  const file = profilePicInputValue.value.files[0]
+  console.log(`onProfilePicChange file name: ${file.name}`)
+  console.log(`onProfilePicChange file type: ${file.type}`)
+  console.log(`onProfilePicChange file size: ${file.size}`)
+  if (!file.type.startsWith('image/')) {
+    console.log('onProfilePicChange file is not an image.')
+    return
+  }
+  if (file.size / 1024 / 1024 > 2) { // 2MB
+    console.log('onProfilePicChange file is too big.')
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const img = new Image()
+    img.onload = () => {
+      console.log(`onProfilePicChange image width: ${img.width}`)
+      console.log(`onProfilePicChange image height: ${img.height}`)
+      if (img.width > 2000 || img.height > 2000) {
+        console.log('onProfilePicChange image should fit in 2000x2000.')
+        return
+      }
+      console.log('onProfilePicChange image is ok.')
+      const profilePicThumbnail = document.getElementById('profilePicThumbnail')
+      profilePicThumbnail.src = e.target.result
+    }
+    img.src = e.target.result
+  }
+  reader.readAsDataURL(file)
 }
 
 function submitProfile () {
   console.log(`submitProfile: ${firstnameInputValue.value} ${lastnameInputValue.value}`)
   const formData = new FormData()
-  formData.append('firstName', firstnameInputValue.value)
-  formData.append('lastName', lastnameInputValue.value)
-  formData.append('files.picture', profilePicInputValue.value.files[0], profilePicInputValue.value.files[0].name)
-  const headers = {
-    'Content-Type': 'multipart/form-data',
-    authorization: `Bearer ${jwtCookie.value}`
+  formData.append('picture', profilePicInputValue.value.files[0])
+  const headers = { authorization: `Bearer ${jwtCookie.value}` }
+  formData.append('id', profile?.user_profile?.id)
+  formData.append('firstName', firstnameInputValue.value.value)
+  formData.append('lastName', lastnameInputValue.value.value)
+  console.log('Formdata:')
+  for (const pair of formData.entries()) {
+    console.log(pair[0] + ', ' + pair[1])
   }
+
   const body = formData
   const method = 'PUT'
-  const url = '/api/profile'
+  const url = '/api/prfl'
   const options = { headers, body, method }
+
   fetch(url, options)
     .then((res) => {
       console.log('submitProfile res', res)
@@ -153,6 +174,7 @@ watch(
       <!-- thumbnail of profile picture -->
       <div class="w-full flex flex-col gap-4">
         <img
+          id="profilePicThumbnail"
           class="rounded-full w-32 h-32"
           :src="
             uploadsHost +
@@ -170,71 +192,75 @@ watch(
     </div>
 
     <div class="w-full flex flex-col gap-4">
-      <table class="w-full">
-        <thead>
-          <tr>
-            <th class="text-left" colspan="2">
-              {{ t("form.title") }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr class="">
-            <td class="text-left">
-              {{ t("firstname") }}
-            </td>
-            <td class="text-left">
-              <!-- default value from getFirstname() -->
-              <input
-                type="text"
-                name="firstname"
-                class="w-full form-input"
-                :value="firstnameInputValue"
-              >
-            </td>
-          </tr>
-          <tr class="">
-            <td class="text-left">
-              {{ t("lastname") }}
-            </td>
-            <td class="text-left">
-              <input
-                type="text"
-                name="lastname"
-                class="w-full form-input"
-                :value="lastnameInputValue"
-              >
-            </td>
-          </tr>
-          <tr class="">
-            <!-- profile picture file upload -->
-            <td class="text-left">
-              {{ t("picture") }}
-            </td>
-            <td class="text-left">
-              <input
-                ref="profilePicInputValue"
-                type="file"
-                class="w-full form-input"
-                name="picture"
-                @change="onProfilePicChange"
-              >
-            </td>
-          </tr>
-          <!-- submit -->
-          <tr class="">
-            <td class="text-left" colspan="2">
-              <button
-                class="w-full btn btn-primary"
-                type="submit"
-                @click.prevent="submitProfile"
-              >
-                {{ t("submit") }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <form class="w-full flex flex-col gap-4" action="/api/prfl" method="PUT" enctype="multipart/form-data">
+        <input type="hidden" name="id" :value="profile?.user_profile?.id">
+        <table class="w-full">
+          <thead>
+            <tr>
+              <th class="text-left" colspan="2">
+                {{ t("form.title") }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="">
+              <td class="text-left">
+                {{ t("firstname") }}
+              </td>
+              <td class="text-left">
+                <input
+                  ref="firstnameInputValue"
+                  type="text"
+                  class="w-full form-input"
+                  name="firstname"
+                  :value="profile?.user_profile?.firstName"
+                >
+              </td>
+            </tr>
+            <tr class="">
+              <td class="text-left">
+                {{ t("lastname") }}
+              </td>
+              <td class="text-left">
+                <input
+                  ref="lastnameInputValue"
+                  type="text"
+                  class="w-full form-input"
+                  name="lastname"
+                  :value="profile?.user_profile?.lastName"
+                >
+              </td>
+            </tr>
+            <tr class="">
+              <!-- profile picture file upload -->
+              <td class="text-left">
+                {{ t("picture") }}
+              </td>
+              <td class="text-left">
+                <input
+                  ref="profilePicInputValue"
+                  type="file"
+                  class="w-full form-input"
+                  name="picture"
+                  @change="onProfilePicChange"
+                >
+              </td>
+            </tr>
+            <!-- submit -->
+            <tr class="">
+              <td class="text-left" colspan="2">
+                <button
+                  class="w-full btn btn-primary"
+                  type="submit"
+                  @click.prevent="submitProfile"
+                >
+                  {{ t("submit") }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </form>
     </div>
   </main>
 </template>
