@@ -60,6 +60,9 @@ const profile = await fetch(`${url}/api/profile`, {
   .then((res) => { return res.json() })
   .catch((err) => { console.log('request failed', err) })
 
+const profilePic = profile?.user_profile?.picture?.formats?.thumbnail?.url || profile?.user_profile?.picture?.url
+
+console.log('profilePic', profilePic)
 const getUsername = () => profile?.username || 'Jon Doe'
 const getEmail = () => profile?.email || 'john.doe@cem'
 
@@ -105,7 +108,12 @@ function submitProfile () {
   const formData = new FormData()
   formData.append('picture', profilePicInputValue.value.files[0])
   const headers = { authorization: `Bearer ${jwtCookie.value}` }
-  formData.append('id', profile?.user_profile?.id)
+  // const userData = {
+  //   firstName: firstnameInputValue.value.value,
+  //   lastName: lastnameInputValue.value.value
+  // }
+  // formData.append('data', JSON.stringify(userData))
+  // formData.append('id', profile?.user_profile?.id)
   formData.append('firstName', firstnameInputValue.value.value)
   formData.append('lastName', lastnameInputValue.value.value)
   console.log('Formdata:')
@@ -115,7 +123,7 @@ function submitProfile () {
 
   const body = formData
   const method = 'PUT'
-  const url = '/api/prfl'
+  const url = '/api/profile'
   const options = { headers, body, method }
 
   fetch(url, options)
@@ -176,10 +184,7 @@ watch(
         <img
           id="profilePicThumbnail"
           class="rounded-full w-32 h-32"
-          :src="
-            uploadsHost +
-              profile?.user_profile?.picture?.formats?.thumbnail?.url
-          "
+          :src="uploadsHost + profilePic"
           alt="profile picture"
         >
       </div>
@@ -192,7 +197,7 @@ watch(
     </div>
 
     <div class="w-full flex flex-col gap-4">
-      <form class="w-full flex flex-col gap-4" action="/api/prfl" method="PUT" enctype="multipart/form-data">
+      <form class="w-full flex flex-col gap-4">
         <input type="hidden" name="id" :value="profile?.user_profile?.id">
         <table class="w-full">
           <thead>
