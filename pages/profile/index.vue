@@ -47,7 +47,7 @@ function startup () {
       console.log('route.query.jwt', route.query.jwt)
       router.replace({
         path: '/',
-        query: { redirect_uri: 'http://localhost:3000/profile/?jwt=' }
+        query: { redirect_uri: `${url}/profile/?jwt=` }
       })
     }
   }
