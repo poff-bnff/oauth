@@ -161,7 +161,7 @@ watch(
     <!-- logout -->
 
     <div class="w-full flex items-start justify-between gap-4">
-      <a class="signout" href="profile?signout">
+      <a class="signout" href="/profile?signout">
         <svg
           class="h-5 w-5 flex"
           xmlns="http://www.w3.org/2000/svg"
