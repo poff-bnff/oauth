@@ -57,7 +57,48 @@ export async function setStrapiUser(user) {
   })
 }
 
-export async function setStrapiMyFilm(user, cassetteId) {
+export async function setStrapiUserProfile (profileId, body) {
+  if (!profileId) return new Error('No profile ID provided. Endpoint: "/user-profiles/:id"')
+  if (!body) return null
+  body.id = profileId
+  const token = await getStrapiToken()
+
+  return await $fetch(`${config.strapiUrl}/user-profiles/${profileId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body
+  })
+}
+
+export async function uploadStrapiImage (file) {
+  if (!file) return null
+
+  const token = await getStrapiToken()
+  const formData = new FormData()
+
+  const { name, filename, type, data: databuff, profileId } = file
+  const blob = new Blob([databuff])
+
+  formData.append('files', blob, filename)
+  formData.append('ref', 'user-profile')
+  formData.append('refId', profileId)
+  formData.append('field', name)
+  try {
+    const pics = await $fetch(`${config.strapiUrl}/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    })
+    return pics[0]
+  } catch (error) {
+    throw new Error(error)
+  }
+}
+
+export async function setStrapiMyFilm (user, cassetteId) {
   if (!cassetteId) return null
   if (!user) return null
 
@@ -157,8 +198,7 @@ export function getUserIdFromEvent(event) {
 
   try {
     const { sub } = jwt.verify(token, config.jwtSecret)
-
-    return sub
+    return parseInt(sub)
   } catch (error) {
     throw createError({ statusCode: 401, statusMessage: 'Invalid token' })
   }
