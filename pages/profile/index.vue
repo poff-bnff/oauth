@@ -95,6 +95,7 @@ function onProfilePicChange () {
         return
       }
       console.log('onProfilePicChange image is ok.')
+      submitButton.disabled = false
       const profilePicThumbnail = document.getElementById('profilePicThumbnail')
       profilePicThumbnail.src = e.target.result
     }
@@ -104,6 +105,10 @@ function onProfilePicChange () {
 }
 
 function submitProfile () {
+  // disable submit button while submitting
+  const submitButton = document.getElementById('submitButton')
+  submitButton.disabled = true
+
   console.log(`submitProfile: ${firstnameInputValue.value} ${lastnameInputValue.value}`)
   const formData = new FormData()
   formData.append('picture', profilePicInputValue.value.files[0])
@@ -132,6 +137,7 @@ function submitProfile () {
       return res.json()
     })
     .then((data) => {
+      submitButton.disabled = false
       console.log('submitProfile data', data)
     })
     .catch((err) => {
@@ -255,8 +261,10 @@ watch(
             <tr class="">
               <td class="text-left" colspan="2">
                 <button
+                  id="submitButton"
                   class="w-full btn btn-primary"
                   type="submit"
+                  disabled
                   @click.prevent="submitProfile"
                 >
                   {{ t("submit") }}
@@ -340,5 +348,10 @@ a.auth {
   @apply hover:bg-orange-500;
   @apply text-white;
   @apply font-normal;
+}
+:disabled {
+  @apply bg-gray-400;
+  @apply hover:bg-gray-400;
+  @apply cursor-not-allowed;
 }
 </style>
