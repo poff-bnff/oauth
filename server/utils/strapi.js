@@ -8,7 +8,7 @@ const STRAPI_TOKEN = {
   expires: null
 }
 
-export async function authenticateStrapiUser (email) {
+export async function authenticateStrapiUser(email) {
   if (!email) return null
 
   const token = await getStrapiToken()
@@ -164,7 +164,7 @@ export function getUserIdFromEvent(event) {
   }
 }
 
-async function getStrapiToken () {
+async function getStrapiToken() {
   // If a cached token exists, and it's not expired, return it
   if (STRAPI_TOKEN.token && STRAPI_TOKEN.expires > Date.now()) {
     return STRAPI_TOKEN.token
@@ -173,7 +173,7 @@ async function getStrapiToken () {
   }
 }
 
-async function refreshStrapiToken () {
+async function refreshStrapiToken() {
   const { jwt: token } = await $fetch(`${config.strapiUrl}/auth/local`, {
     method: 'POST',
     body: {
@@ -201,7 +201,7 @@ function getUserObject(user) {
   return result
 }
 
-export async function getStrapiFilms (limit, page) {
+export async function getStrapiFilms(limit, page) {
   const token = await getStrapiToken()
   // set default limit and page values
   limit = limit || 5
@@ -218,7 +218,7 @@ export async function getStrapiFilms (limit, page) {
   return await $fetch(`${config.strapiUrl}/films`, options)
 }
 
-export async function getStrapiCassettes (limit, page) {
+export async function getStrapiCassettes(limit, page) {
   const token = await getStrapiToken()
   // set default limit and page values
   limit = limit || 5
@@ -235,7 +235,7 @@ export async function getStrapiCassettes (limit, page) {
   return await $fetch(`${config.strapiUrl}/cassettes`, options)
 }
 
-export async function getStrapiCinemas () {
+export async function getStrapiCinemas() {
   const token = await getStrapiToken()
   console.log('getStrapiCinemas', token)
   return await $fetch(`${config.strapiUrl}/cinemas`, { headers: { Authorization: `Bearer ${token}` } })
@@ -245,4 +245,26 @@ export async function getStrapiFilm(id) {
   const token = await getStrapiToken()
 
   return await $fetch(`${config.strapiUrl}/films/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+}
+
+export async function getPaymentMethods(id) {
+  console.log('getPaymentMethods');
+  const token = await getStrapiToken()
+  return await $fetch(`${config.strapiUrl}/users-permissions/users/paymentmethods/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+}
+
+export async function buyProduct(body) {
+  console.log('buyProduct', body);
+  const token = await getStrapiToken()
+
+  const result = await $fetch(`${config.strapiUrl}/users-permissions/users/buyproduct/`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: body
+  })
+
+  return result
 }
