@@ -12,7 +12,13 @@ export default defineEventHandler(async (event) => {
     statusCode: 200
   }
 
+  // Add all properties sans picture to profileData
   const profileData = {}
+  body.forEach(({ name, data, filename, type }) => {
+    if (name !== 'picture') {
+      profileData[name] = data.toString()
+    }
+  })
 
   // Forward profile to Strapi
 
