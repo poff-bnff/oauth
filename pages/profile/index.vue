@@ -1,6 +1,12 @@
 <!-- eslint-disable no-console -->
 <script setup>
 import { ref } from 'vue'
+import TableLogger from 'tablelogger'
+
+const logTable = new TableLogger({
+  border: 'single',
+  padding: 1
+})
 
 defineProps([
   'profileId',
@@ -71,6 +77,15 @@ firstnameInputValue.value = profile?.user_profile?.firstName || 'Jon'
 lastnameInputValue.value = profile?.user_profile?.lastName || 'Doe'
 console.log({ UserProfile: profileId.value, firstName: firstnameInputValue.value, lastName: lastnameInputValue.value })
 
+logTable.setHeader('Profile')
+logTable.setRow({ key: 'profile picture', value: profilePic })
+logTable.setRow({ key: 'Username', value: getUsername() })
+logTable.setRow({ key: 'Email', value: getEmail() })
+logTable.setRow({ key: 'ProfileId', value: profileId.value })
+logTable.setRow({ key: 'Firstname', value: firstnameInputValue.value })
+logTable.setRow({ key: 'Lastname', value: lastnameInputValue.value })
+logTable.log()
+
 function onProfilePicChange () {
   const file = profilePicInputValue.value.files[0]
   console.log(`onProfilePicChange file name: ${file.name}`)
@@ -111,7 +126,9 @@ function submitProfile () {
 
   console.log(`submitProfile: ${firstnameInputValue.value} ${lastnameInputValue.value}`)
   const formData = new FormData()
-  formData.append('picture', profilePicInputValue.value.files[0])
+  if (profilePicInputValue.value.files[0]) {
+    formData.append('picture', profilePicInputValue.value.files[0])
+  }
   const headers = { authorization: `Bearer ${jwtCookie.value}` }
   // const userData = {
   //   firstName: firstnameInputValue.value.value,
@@ -264,7 +281,6 @@ watch(
                   id="submitButton"
                   class="w-full btn btn-primary"
                   type="submit"
-                  disabled
                   @click.prevent="submitProfile"
                 >
                   {{ t("submit") }}
