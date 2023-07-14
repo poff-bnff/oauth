@@ -33,7 +33,6 @@ export async function authenticateStrapiUser (email) {
 
 export async function getStrapiUser (id) {
   if (!id) return null
-  console.log(id)
   const token = await getStrapiToken()
 
   return await $fetch(`${config.strapiUrl}/users/${id}`, {
