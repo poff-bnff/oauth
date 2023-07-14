@@ -28,6 +28,8 @@ const jwtCookie = useCookie('jwt')
 
 const uploadsHost = 'https://admin.poff.ee'
 
+console.log('route', route)
+
 function startup () {
   redirectCookie.value = route.query.redirect_uri
 
