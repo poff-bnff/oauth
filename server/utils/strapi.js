@@ -42,7 +42,7 @@ export async function getStrapiUser(id) {
 }
 
 export async function setStrapiUser(user) {
-  console.log(`setStrapiUser`, user);
+  // console.log(`setStrapiUser`, user);
   if (!user) return null
 
   const token = await getStrapiToken()
@@ -298,6 +298,22 @@ export async function buyProduct(body) {
   const token = await getStrapiToken()
 
   const result = await $fetch(`${config.strapiUrl}/users-permissions/users/buyproduct/`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: body
+  })
+
+  return result
+}
+
+export async function roleCheck(body) {
+  console.log('roleCheck', body);
+  const token = await getStrapiToken()
+
+  const result = await $fetch(`${config.strapiUrl}/users-permissions/users/rolecheck`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
