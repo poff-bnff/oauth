@@ -19,14 +19,13 @@ const firstnameInputValue = ref('J:O:H:N')
 const lastnameInputValue = ref('D:O:E')
 const profilePicInputValue = ref()
 
-const { url } = useRuntimeConfig()
+const { url } = useRuntimeConfig().public
+const { strapiUrl: uploadsHost } = useRuntimeConfig()
 const { locale, t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const redirectCookie = useCookie('redirect_uri')
 const jwtCookie = useCookie('jwt')
-
-const uploadsHost = 'https://admin.poff.ee'
 
 function startup () {
   redirectCookie.value = route.query.redirect_uri
@@ -66,16 +65,14 @@ const profile = await fetch(`${url}/api/profile`, {
   .then((res) => { return res.json() })
   .catch((err) => { console.log('request failed', err) })
 
-const profilePic = profile?.user_profile?.picture?.formats?.thumbnail?.url || profile?.user_profile?.picture?.url
+const profilePic = profile?.user_profile?.picture?.formats?.thumbnail?.url || profile?.user_profile?.picture?.url || 'N/A'
 
-console.log('profilePic', profilePic)
 const getUsername = () => profile?.username || 'Jon Doe'
 const getEmail = () => profile?.email || 'john.doe@cem'
 
 profileId.value = profile?.user_profile?.id
 firstnameInputValue.value = profile?.user_profile?.firstName || 'Jon'
 lastnameInputValue.value = profile?.user_profile?.lastName || 'Doe'
-console.log({ UserProfile: profileId.value, firstName: firstnameInputValue.value, lastName: lastnameInputValue.value })
 
 logTable.setHeader('Profile')
 logTable.setRow({ key: 'profile picture', value: profilePic })
