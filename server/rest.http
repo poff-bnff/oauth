@@ -1,7 +1,8 @@
 @hunt_url = http://localhost:3000
+@jwt =
 
 ### GET user profile
-get {{hunt_url}}/api/profile HTTP/1.1
+get {{hunt_url}}/api/me HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Get my favorite films
@@ -42,25 +43,13 @@ get {{hunt_url}}/api/cinema HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Update user profile
-put {{hunt_url}}/api/profile HTTP/1.1
+put {{hunt_url}}/api/me HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 
 {
-  "id": 14813,
-  "username": "Mihkel-Mikelis Putrinš",
-  "My": {
-    "id": 1,
-    "favorites": [
-      { "id": 20 },
-      { "id": 3792 }
-    ],
-    "screenings": [
-      { "id": 1670 },
-      { "id": 2366 },
-      { "id": 2766 }
-    ]
-  }
+  "id": 14500,
+  "username": "Martin Pennaste"
 }
 
 ### update profile image
@@ -77,3 +66,29 @@ Content-Type: image/png
 
 < ./mitselek.png
 ------WebKitFormBoundaryPOFF04--
+
+
+### Get payment methods
+get {{hunt_url}}/api/product HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
+34
+
+# {
+#   "id": 14813,
+#   "username": "Mihkel-Mikelis Putrinš",
+#   "My": {
+#     "id": 1,
+#     "favorites": [
+#       { "id": 20 },
+#       { "id": 3792 }
+#     ],
+#     "screenings": [
+#       { "id": 1670 },
+#       { "id": 2366 },
+#       { "id": 2766 }
+#     ]
+#   }
+# }
+
