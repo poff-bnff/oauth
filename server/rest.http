@@ -1,3 +1,4 @@
+# @hunt_url = https://hunt.poff.ee
 @hunt_url = http://localhost:3000
 @jwt =
 
@@ -43,52 +44,21 @@ get {{hunt_url}}/api/cinema HTTP/1.1
 Authorization: token {{jwt}}
 
 ### Update user profile
-put {{hunt_url}}/api/me HTTP/1.1
+put {{hunt_url}}/api/profile HTTP/1.1
 Authorization: token {{jwt}}
-Content-Type: application/json
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
 
-{
-  "id": 14500,
-  "username": "Martin Pennaste"
-}
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="files"; filename="60x60bb.jpg"
+Content-Type: image/jpg
 
-### update profile image
-PUT {{hunt_url}}/api/profile HTTP/1.1
-Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryPOFF04
+< ./JonDoe.jpg
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="firstName"
 
-------WebKitFormBoundaryPOFF04
-Content-Disposition: form-data; name="username"
+Jon
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="lastName"
 
-Mihkel-Mikelis Putrinshsh
-------WebKitFormBoundaryPOFF04
-Content-Disposition: form-data; name="image"; filename="mitselek.png"
-Content-Type: image/png
-
-< ./mitselek.png
-------WebKitFormBoundaryPOFF04--
-
-
-### Get payment methods
-get {{hunt_url}}/api/product HTTP/1.1
-Authorization: token {{jwt}}
-Content-Type: application/json
-
-34
-
-# {
-#   "id": 14813,
-#   "username": "Mihkel-Mikelis Putrinš",
-#   "My": {
-#     "id": 1,
-#     "favorites": [
-#       { "id": 20 },
-#       { "id": 3792 }
-#     ],
-#     "screenings": [
-#       { "id": 1670 },
-#       { "id": 2366 },
-#       { "id": 2766 }
-#     ]
-#   }
-# }
-
+Doe
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
