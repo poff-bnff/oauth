@@ -66,7 +66,7 @@ const profile = await fetch(`${url}/api/profile`, {
   .then((res) => { return res.json() })
   .catch((err) => { console.log('request failed', err) })
 
-const profilePic = profile?.user_profile?.picture?.formats?.thumbnail?.url || profile?.user_profile?.picture?.url
+const profilePic = profile?.user_profile?.picture?.formats?.thumbnail?.url || profile?.user_profile?.picture?.url || 'N/A'
 
 console.log('profilePic', profilePic)
 const getUsername = () => profile?.username || 'Jon Doe'
@@ -77,13 +77,21 @@ firstnameInputValue.value = profile?.user_profile?.firstName || 'Jon'
 lastnameInputValue.value = profile?.user_profile?.lastName || 'Doe'
 console.log({ UserProfile: profileId.value, firstName: firstnameInputValue.value, lastName: lastnameInputValue.value })
 
+let c = 0
 logTable.setHeader('Profile')
+console.log(`c: ${c++}`)
 logTable.setRow({ key: 'profile picture', value: profilePic })
+console.log(`c: ${c++}`)
 logTable.setRow({ key: 'Username', value: getUsername() })
+console.log(`c: ${c++}`)
 logTable.setRow({ key: 'Email', value: getEmail() })
+console.log(`c: ${c++}, profileId.value: ${profileId.value}`)
 logTable.setRow({ key: 'ProfileId', value: profileId.value })
+console.log(`c: ${c++}`)
 logTable.setRow({ key: 'Firstname', value: firstnameInputValue.value })
+console.log(`c: ${c++}`)
 logTable.setRow({ key: 'Lastname', value: lastnameInputValue.value })
+console.log(`c: ${c++}`)
 logTable.log()
 
 function onProfilePicChange () {
