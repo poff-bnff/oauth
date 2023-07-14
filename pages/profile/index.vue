@@ -19,14 +19,13 @@ const firstnameInputValue = ref('J:O:H:N')
 const lastnameInputValue = ref('D:O:E')
 const profilePicInputValue = ref()
 
-const { url } = useRuntimeConfig()
+const { url } = useRuntimeConfig().public
+const { strapiUrl: uploadsHost } = useRuntimeConfig()
 const { locale, t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const redirectCookie = useCookie('redirect_uri')
 const jwtCookie = useCookie('jwt')
-
-const uploadsHost = 'https://devs.poff.ee'
 
 function startup () {
   redirectCookie.value = route.query.redirect_uri
