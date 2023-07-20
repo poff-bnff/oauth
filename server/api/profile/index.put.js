@@ -12,6 +12,7 @@ const logTable = new TableLogger({
 export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
   const id = getUserIdFromEvent(event)
+  console.log('api::profile PUT - user id', id)
   const user = await getStrapiUser(id)
   // logTable.setHeader('Profile from user')
   // for (const [key, value] of Object.entries(user.user_profile)) {
