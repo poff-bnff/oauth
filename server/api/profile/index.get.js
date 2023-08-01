@@ -4,5 +4,5 @@ export default defineEventHandler(async (event) => {
   const user = await getStrapiUser(id)
 
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
-  return user
+  return user.user_profile
 })
