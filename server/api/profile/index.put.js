@@ -42,7 +42,7 @@ export default defineEventHandler(async (event) => {
   ].join('-')
 
   logTable.setHeader('New profile data')
-  for (const [key, value] of Object.entries(profileData)) {
+  for (let [key, value] of Object.entries(profileData)) {
     if (value.length > 100) value = `${value.length} bytes...`
     logTable.setRow({ key, value })
   }
