@@ -42,6 +42,8 @@ export default defineEventHandler(async (event) => {
   ].join('-')
 
   logTable.setHeader('New profile data')
+  logTable.setRow({ key: 'user id', value: user.id })
+  logTable.setRow({ key: 'profile id', value: user.user_profile.id })
   for (let [key, value] of Object.entries(profileData)) {
     if (value.length > 100) value = `${value.length} bytes...`
     logTable.setRow({ key, value })
@@ -50,6 +52,7 @@ export default defineEventHandler(async (event) => {
 
   // 1. Upload picture via POST /upload
   const pictureFile = body.find(({ name }) => name === 'picture')
+  logTable.setRow({ key: 'picture', value: pictureFile })
   if (pictureFile) {
     pictureFile.filename = pictureFileName + '.' + pictureFile.type.split('/')[1]
     pictureFile.profile_id = user.user_profile.id
