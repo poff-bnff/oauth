@@ -35,9 +35,12 @@ export async function getStrapiUser (id) {
   if (!id) return null
   const token = await getStrapiToken()
 
-  return await $fetch(`${config.strapiUrl}/users/${id}`, {
+  const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
+  // merge .my_products and .My.products
+  user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+  return user
 }
 
 export async function setStrapiUser (user) {
