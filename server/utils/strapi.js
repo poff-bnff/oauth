@@ -185,7 +185,7 @@ export async function setStrapiMyScreening (user, screeningId) {
     }
   })
 
-  return result
+  return result.My
 }
 
 export function getUserIdFromEvent (event) {
