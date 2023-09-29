@@ -34,6 +34,7 @@ export async function authenticateStrapiUser (email) {
 export async function getStrapiUser (id) {
   if (!id) return null
   const token = await getStrapiToken()
+  console.log(`getStrapiUser, id: ${id}, token: ${token}`)
 
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
