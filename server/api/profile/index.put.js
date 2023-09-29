@@ -15,12 +15,6 @@ export default defineEventHandler(async (event) => {
   console.log('api::profile PUT - user id', id)
   const user = await getStrapiUser(id)
 
-  if (user.user_profile === null) {
-    // create profile
-    console.log('api::profile PUT - creating profile for user', id)
-    user.user_profile = await createStrapiUserProfile(user)
-  }
-
   // logTable.setHeader('Profile from user')
   // for (const [key, value] of Object.entries(user.user_profile)) {
   //   logTable.setRow({ key, value })

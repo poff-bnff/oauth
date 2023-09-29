@@ -38,6 +38,18 @@ export async function getStrapiUser (id) {
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
+
+  if (user.user_profile === null) {
+    // create profile
+    console.log('api::getStrapiUser - creating profile for user', id)
+    user.user_profile = await createStrapiUserProfile(user)
+  }
+
+  if (user.My === null) {
+    // create My
+    console.log('api::getStrapiUser - creating My for user', id)
+    user.My = {}
+  }
   // merge .my_products and .My.products
   user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
   return user
