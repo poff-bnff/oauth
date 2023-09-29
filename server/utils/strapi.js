@@ -57,9 +57,7 @@ export async function getStrapiUser (id) {
 }
 
 export async function setStrapiUser (user) {
-  // console.log(`setStrapiUser`, user);
   if (!user) return null
-
   const token = await getStrapiToken()
 
   return await $fetch(`${config.strapiUrl}/users/updateme`, {
@@ -73,6 +71,9 @@ export async function setStrapiUser (user) {
 }
 
 export async function createStrapiUserProfile (user) {
+  if (!user) return null
+  const token = await getStrapiToken()
+
   return await $fetch(`${config.strapiUrl}/user-profiles`, {
     method: 'POST',
     headers: {
