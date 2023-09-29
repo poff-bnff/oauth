@@ -43,8 +43,7 @@ export default defineEventHandler(async (event) => {
   const slugify = str => (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
   const pictureFileName = [
     'U',
-    slugify(profileData.firstName || user.user_profile.firstName),
-    slugify(profileData.lastName || user.user_profile.lastName),
+    slugify(user.user_profile.email),
     user.id
   ].join('-')
 
