@@ -59,6 +59,19 @@ export async function setStrapiUser (user) {
   })
 }
 
+export async function createStrapiUserProfile (user) {
+  return await $fetch(`${config.strapiUrl}/user-profiles`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      user: user.id
+    }
+  })
+}
+
 export async function setStrapiUserProfile (profileId, body) {
   if (!profileId) return new Error('No profile ID provided. Endpoint: "/user-profiles/:id"')
   if (!body) return null
@@ -296,7 +309,7 @@ export async function getPaymentMethods (id) {
 }
 
 export async function buyProduct (body) {
-  console.log('buyProduct', body)
+  console.log('strapi:buyProduct', body)
   const token = await getStrapiToken()
 
   const result = await $fetch(`${config.strapiUrl}/users-permissions/users/buyproduct/`, {
