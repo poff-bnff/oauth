@@ -21,6 +21,12 @@ export default defineEventHandler(async (event) => {
   // }
   // logTable.log()
 
+  if (user.profile === null) {
+    // create profile
+    console.log('api::profile PUT - creating profile for user', id)
+    user.user_profile = await createStrapiUserProfile(user)
+  }
+
   const returnValue = {
     profileId: user.user_profile.id,
     statusCode: 200

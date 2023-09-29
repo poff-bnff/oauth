@@ -74,7 +74,8 @@ export async function createStrapiUserProfile (user) {
   if (!user) return null
   const token = await getStrapiToken()
   const userProfile = {
-    user: user.id
+    user: user.id,
+    email: user.email
   }
   console.log('createStrapiUserProfile', userProfile)
 
