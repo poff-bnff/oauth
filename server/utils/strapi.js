@@ -73,6 +73,10 @@ export async function setStrapiUser (user) {
 export async function createStrapiUserProfile (user) {
   if (!user) return null
   const token = await getStrapiToken()
+  const userProfile = {
+    user: user.id
+  }
+  console.log('createStrapiUserProfile', userProfile)
 
   return await $fetch(`${config.strapiUrl}/user-profiles`, {
     method: 'POST',
@@ -80,9 +84,7 @@ export async function createStrapiUserProfile (user) {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
-    body: {
-      user: user.id
-    }
+    body: userProfile
   })
 }
 
