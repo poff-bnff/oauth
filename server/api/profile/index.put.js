@@ -12,12 +12,20 @@ const logTable = new TableLogger({
 export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
   const id = getUserIdFromEvent(event)
+  console.log('api::profile PUT - user id', id)
   const user = await getStrapiUser(id)
+
   // logTable.setHeader('Profile from user')
   // for (const [key, value] of Object.entries(user.user_profile)) {
   //   logTable.setRow({ key, value })
   // }
   // logTable.log()
+
+  if (user.profile === null) {
+    // create profile
+    console.log('api::profile PUT - creating profile for user', id)
+    user.user_profile = await createStrapiUserProfile(user)
+  }
 
   const returnValue = {
     profileId: user.user_profile.id,
@@ -32,7 +40,7 @@ export default defineEventHandler(async (event) => {
     }
   })
 
-  const slugify = str => str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+  const slugify = str => (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
   const pictureFileName = [
     'U',
     slugify(profileData.firstName || user.user_profile.firstName),
@@ -41,13 +49,17 @@ export default defineEventHandler(async (event) => {
   ].join('-')
 
   logTable.setHeader('New profile data')
-  for (const [key, value] of Object.entries(profileData)) {
+  logTable.setRow({ key: 'user id', value: user.id })
+  logTable.setRow({ key: 'profile id', value: user.user_profile.id })
+  for (let [key, value] of Object.entries(profileData)) {
+    if (value.length > 100) value = `${value.length} bytes...`
     logTable.setRow({ key, value })
   }
   // Forward profile to Strapi
 
   // 1. Upload picture via POST /upload
   const pictureFile = body.find(({ name }) => name === 'picture')
+  logTable.setRow({ key: 'picture', value: pictureFile })
   if (pictureFile) {
     pictureFile.filename = pictureFileName + '.' + pictureFile.type.split('/')[1]
     pictureFile.profile_id = user.user_profile.id

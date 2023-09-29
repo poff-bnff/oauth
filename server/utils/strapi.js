@@ -34,16 +34,30 @@ export async function authenticateStrapiUser (email) {
 export async function getStrapiUser (id) {
   if (!id) return null
   const token = await getStrapiToken()
+  console.log(`getStrapiUser, id: ${id}, token: ${token}`)
 
-  return await $fetch(`${config.strapiUrl}/users/${id}`, {
+  const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
+
+  if (user.user_profile === null) {
+    // create profile
+    console.log('api::getStrapiUser - creating profile for user', id)
+    user.user_profile = await createStrapiUserProfile(user)
+  }
+
+  if (user.My === null) {
+    // create My
+    console.log('api::getStrapiUser - creating My for user', id)
+    user.My = {}
+  }
+  // merge .my_products and .My.products
+  user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+  return user
 }
 
 export async function setStrapiUser (user) {
-  // console.log(`setStrapiUser`, user);
   if (!user) return null
-
   const token = await getStrapiToken()
 
   return await $fetch(`${config.strapiUrl}/users/updateme`, {
@@ -53,6 +67,25 @@ export async function setStrapiUser (user) {
       'Content-Type': 'application/json'
     },
     body: user
+  })
+}
+
+export async function createStrapiUserProfile (user) {
+  if (!user) return null
+  const token = await getStrapiToken()
+  const userProfile = {
+    user: user.id,
+    email: user.email
+  }
+  console.log('createStrapiUserProfile', userProfile)
+
+  return await $fetch(`${config.strapiUrl}/user-profiles`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: userProfile
   })
 }
 
@@ -293,7 +326,7 @@ export async function getPaymentMethods (id) {
 }
 
 export async function buyProduct (body) {
-  console.log('buyProduct', body)
+  console.log('strapi:buyProduct', body)
   const token = await getStrapiToken()
 
   const result = await $fetch(`${config.strapiUrl}/users-permissions/users/buyproduct/`, {

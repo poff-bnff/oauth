@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
 
   body.userId = userId
 
-  console.log('Product productToBuy put', body);
+  console.log('api::product/buy PUT', body);
 
   const productToBuy = await buyProduct(body)
   if (!productToBuy) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
