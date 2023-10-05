@@ -1,13 +1,13 @@
 // helpful article: https://www.freecodecamp.org/news/handle-file-uploads-on-the-backend-in-node-js-nuxt/
 
-import TableLogger from 'tablelogger'
+// import TableLogger from 'tablelogger'
 import { setStrapiUserProfile } from '~/server/utils/strapi'
 
 // console log table with week days
-const logTable = new TableLogger({
-  border: 'single',
-  padding: 1
-})
+// const logTable = new TableLogger({
+//   border: 'single',
+//   padding: 1
+// })
 
 export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
 
   // logTable.setHeader('Profile from user')
   // for (const [key, value] of Object.entries(user.user_profile)) {
-  //   logTable.setRow({ key, value })
+  // logTable.setRow({ key, value })
   // }
   // logTable.log()
 
@@ -47,22 +47,22 @@ export default defineEventHandler(async (event) => {
     user.id
   ].join('_')
 
-  console.log('logTable New profile data')
-  logTable.setHeader('New profile data')
-  console.log('logTable user id', user.id)
-  logTable.setRow({ key: 'user id', value: user.id })
-  console.log('logTable profile id', user.user_profile.id)
-  logTable.setRow({ key: 'profile id', value: user.user_profile.id })
+  console.log('New profile data')
+  // logTable.setHeader('New profile data')
+  console.log('user id', user.id)
+  // logTable.setRow({ key: 'user id', value: user.id })
+  console.log('profile id', user.user_profile.id)
+  // logTable.setRow({ key: 'profile id', value: user.user_profile.id })
   for (let [key, value] of Object.entries(profileData)) {
     if (value.length > 100) value = `${value.length} bytes...`
-    console.log('logTable profileData row', key, value)
-    logTable.setRow({ key, value })
+    console.log('profileData row', key, value)
+    // logTable.setRow({ key, value })
   }
   // Forward profile to Strapi
 
   // 1. Upload picture via POST /upload
   const pictureFile = body.find(({ name }) => name === 'picture')
-  logTable.setRow({ key: 'picture', value: pictureFile })
+  // logTable.setRow({ key: 'picture', value: pictureFile })
   if (pictureFile) {
     pictureFile.filename = pictureFileName + '.' + pictureFile.type.split('/')[1]
     pictureFile.profile_id = user.user_profile.id
@@ -71,15 +71,15 @@ export default defineEventHandler(async (event) => {
       profileData.picture = picture.id
       returnValue.pictureId = picture.id
     }
-    logTable.setRow({ key: 'picture id', value: picture.id })
+    // logTable.setRow({ key: 'picture id', value: picture.id })
     for (const [key, value] of Object.entries(pictureFile)) {
       if (key === 'data') continue
-      logTable.setRow({ key, value })
+      // logTable.setRow({ key, value })
     }
   }
 
-  console.log('logTable log')
-  logTable.log()
+  // console.log('logTable log')
+  // logTable.log()
 
   // 2. Update profile via PUT /user-profiles/:id
   try {
