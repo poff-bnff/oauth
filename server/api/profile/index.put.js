@@ -47,11 +47,15 @@ export default defineEventHandler(async (event) => {
     user.id
   ].join('_')
 
+  console.log('logTable New profile data')
   logTable.setHeader('New profile data')
+  console.log('logTable user id', user.id)
   logTable.setRow({ key: 'user id', value: user.id })
+  console.log('logTable profile id', user.user_profile.id)
   logTable.setRow({ key: 'profile id', value: user.user_profile.id })
   for (let [key, value] of Object.entries(profileData)) {
     if (value.length > 100) value = `${value.length} bytes...`
+    console.log('logTable profileData row', key, value)
     logTable.setRow({ key, value })
   }
   // Forward profile to Strapi
@@ -74,6 +78,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  console.log('logTable log')
   logTable.log()
 
   // 2. Update profile via PUT /user-profiles/:id
