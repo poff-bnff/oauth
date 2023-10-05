@@ -45,7 +45,7 @@ export default defineEventHandler(async (event) => {
     'U',
     slugify(user.user_profile.email),
     user.id
-  ].join('-')
+  ].join('_')
 
   logTable.setHeader('New profile data')
   logTable.setRow({ key: 'user id', value: user.id })
