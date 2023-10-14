@@ -14,5 +14,6 @@
   "tailwindCSS.includeLanguages": {
     "vue": "html",
     "vue-html": "html"
-  }
+  },
+  "vue3snippets.enable-compile-vue-file-on-did-save-code": true
 }
