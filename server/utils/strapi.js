@@ -68,6 +68,8 @@ export async function getStrapiUser (id) {
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
+  user.allIDs = user.allIDs || []
+  user.allIDs.push(user.id)
 
   if (user.user_profile === null) {
     // create profile
@@ -92,6 +94,9 @@ export async function getStrapiUser (id) {
     if (user.mainUser.id === user.id) {
       // user is main user
       user.mainUser = 'selfref'
+    } else if (user.allIDs.includes(user.mainUser.id)) {
+      // user is not main user, but main user is in allIDs
+      user.mainUser = 'circularref'
     } else {
       // fetch main user and combine data
       const mainUser = await getStrapiUser(user.mainUser.id)
@@ -99,6 +104,7 @@ export async function getStrapiUser (id) {
       user.My.films = [...(user.My.films || []), ...(mainUser.My.films || [])]
       user.My.screenings = [...(user.My.screenings || []), ...(mainUser.My.screenings || [])]
       user.badges = [...(user.badges || []), ...(mainUser.badges || [])]
+      user.allIDs = [...(user.allIDs || []), ...(mainUser.allIDs || [])]
     }
   }
   return user
