@@ -61,7 +61,7 @@ export async function getEventivalBadges(email) {
   }
 }
 
-export async function getStrapiUser (id) {
+export async function getStrapiUser (id, allIDs = []) {
   if (!id) return null
   const token = await getStrapiToken()
   console.log(`getStrapiUser, id: ${id}, token: ${token}`)
@@ -69,7 +69,7 @@ export async function getStrapiUser (id) {
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  user.allIDs = user.allIDs || []
+  user.allIDs = allIDs || []
   user.allIDs.push(user.id)
 
   if (user.user_profile === null) {
@@ -97,10 +97,10 @@ export async function getStrapiUser (id) {
       user.mainUser = 'selfref'
     } else if (user.allIDs.includes(user.mainUser.id)) {
       // user is not main user, but main user is in allIDs
-      user.mainUser = 'circularref'
+      user.mainUser = JSON.stringify(user.allIDs)
     } else {
       // fetch main user and combine data
-      const mainUser = await getStrapiUser(user.mainUser.id)
+      const mainUser = await getStrapiUser(user.mainUser.id, user.allIDs)
       if (mainUser) {
         user.My.products = [...(user.My.products || []), ...(mainUser.My.products || [])]
         user.My.films = [...(user.My.films || []), ...(mainUser.My.films || [])]
