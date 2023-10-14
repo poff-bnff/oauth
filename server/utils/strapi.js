@@ -80,11 +80,27 @@ export async function getStrapiUser (id) {
     console.log('api::getStrapiUser - creating My for user', id)
     user.My = {}
   }
-  // merge .my_products and .My.products
+  // merge .my_... and .My....
   user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+  user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
+  user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
 
   // fetch badges from eventival
   user.badges = await getEventivalBadges(user.email)
+
+  if (user.mainUser) {
+    if (user.mainUser.id === user.id) {
+      // user is main user
+      user.mainUser = 'selfref'
+    } else {
+      // fetch main user and combine data
+      const mainUser = await getStrapiUser(user.mainUser.id)
+      user.My.products = [...(user.My.products || []), ...(mainUser.My.products || [])]
+      user.My.films = [...(user.My.films || []), ...(mainUser.My.films || [])]
+      user.My.screenings = [...(user.My.screenings || []), ...(mainUser.My.screenings || [])]
+      user.badges = [...(user.badges || []), ...(mainUser.badges || [])]
+    }
+  }
   return user
 }
 
