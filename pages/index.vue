@@ -20,6 +20,11 @@ watch(() => locale.value, (value) => {
   router.replace({ query: { ...route.query, locale: value } })
 })
 
+// if referrer hostname contains 'industry', then redirect to eventival
+if (document.referrer.includes('industry')) {
+  window.location.href = getEventivalUrl()
+}
+
 function getOauthUrl (provider) {
   const query = new URLSearchParams({
     client_id: oauthClientId,
