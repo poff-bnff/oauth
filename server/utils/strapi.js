@@ -34,6 +34,8 @@ export async function authenticateStrapiUser (email) {
 export async function getEventivalBadges(email) {
   if (!email) return []
 
+  console.log (config)
+  return []
   const edition = config.public.eventivalEdition
   const token = config.eventivalApiToken
   const options = {
