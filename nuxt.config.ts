@@ -38,12 +38,14 @@ export default defineNuxtConfig({
     strapiPassword: '',
     oauthClientSecret: '',
     eventivalClientSecret: '',
+    eventivalApiToken: '',
     public: {
       url: '',
       oauthUrl: '',
       oauthClientId: '',
       eventivalUrl: '',
-      eventivalClientId: ''
+      eventivalClientId: '',
+      eventivalEdition: ''
     }
   }
 })
