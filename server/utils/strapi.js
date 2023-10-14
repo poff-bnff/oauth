@@ -31,6 +31,35 @@ export async function authenticateStrapiUser (email) {
   }
 }
 
+export async function getEventivalBadges(email) {
+  if (!email) return []
+
+  const edition = config.public.eventivalEdition
+  const token = config.eventivalApiToken
+  const options = {
+    headers: {
+      'x-api-key': token
+    },
+    method: 'GET'
+  }
+
+  const eUser = await $fetch(`https://bo.eventival.com/poff/${edition}/api/people?account_email=${email}`, options)
+
+  if (eUser) {
+    return eUser[0]['badges']
+      .filter(badge => !badge['cancelled'])
+      .map(badge => {
+          return {
+              type: badge['type'],
+              barcode: badge['barcode'],
+              validity_dates: badge['validity_dates']
+          }
+      })
+  } else {
+    return []
+  }
+}
+
 export async function getStrapiUser (id) {
   if (!id) return null
   const token = await getStrapiToken()
@@ -53,6 +82,9 @@ export async function getStrapiUser (id) {
   }
   // merge .my_products and .My.products
   user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+
+  // fetch badges from eventival
+  user.badges = await getEventivalBadges(user.email)
   return user
 }
 
