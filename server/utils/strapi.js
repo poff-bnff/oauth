@@ -46,7 +46,8 @@ export async function getEventivalBadges(email) {
   const eUser = await $fetch(`https://bo.eventival.com/poff/${edition}/api/people?account_email=${email}`, options)
 
   if (eUser) {
-    return eUser[0]['badges']
+    const badges = eUser[0]['badges'] || []
+    return badges
       .filter(badge => !badge['cancelled'])
       .map(badge => {
           return {
@@ -100,11 +101,15 @@ export async function getStrapiUser (id) {
     } else {
       // fetch main user and combine data
       const mainUser = await getStrapiUser(user.mainUser.id)
-      user.My.products = [...(user.My.products || []), ...(mainUser.My.products || [])]
-      user.My.films = [...(user.My.films || []), ...(mainUser.My.films || [])]
-      user.My.screenings = [...(user.My.screenings || []), ...(mainUser.My.screenings || [])]
-      user.badges = [...(user.badges || []), ...(mainUser.badges || [])]
-      user.allIDs = [...(user.allIDs || []), ...(mainUser.allIDs || [])]
+      if (mainUser) {
+        user.My.products = [...(user.My.products || []), ...(mainUser.My.products || [])]
+        user.My.films = [...(user.My.films || []), ...(mainUser.My.films || [])]
+        user.My.screenings = [...(user.My.screenings || []), ...(mainUser.My.screenings || [])]
+        user.badges = [...(user.badges || []), ...(mainUser.badges || [])]
+        user.allIDs = [...(user.allIDs || []), ...(mainUser.allIDs || [])]
+      } else {
+        console.log('api::getStrapiUser - main user not found for user', user.id)
+      }
     }
   }
   return user
