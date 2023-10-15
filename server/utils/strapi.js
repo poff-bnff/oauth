@@ -91,11 +91,10 @@ export async function getStrapiUser (id, linkedIDs = []) {
     userMyUpdated = true
   }
   // merge .my_... and .My....
-  if (user.my_products) {
+  if (user.my_products && user.my_products.length > 0) {
     console.log('api::getStrapiUser - merging my_products for user', id)
-    for (const my_product of user.my_products) {
-      user.My.products = [...(user.My.products || []), ...(my_product.products || [])]
-    }
+    user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+    user.my_products = []
     userMyUpdated = true
   }
   if (user.my_films && user.my_films.length > 0) {
@@ -103,16 +102,14 @@ export async function getStrapiUser (id, linkedIDs = []) {
     for (const my_film of user.my_films) {
       user.My.films = [...(user.My.films || []), ...(my_film.films || [])]
     }
+    user.my_films = []
     userMyUpdated = true
   }
   if (user.my_screenings && user.my_screenings.length > 0) {
     console.log('api::getStrapiUser - merging my_screenings for user', id)
-    console.log('api::getStrapiUser - My.screenings', user.My.screenings.map(s => s.id))
     for (const my_screening of user.my_screenings) {
-      console.log('api::getStrapiUser - merging my_screening for user', id, my_screening.screenings.map(s => s.id))
       user.My.screenings = [...(user.My.screenings || []), ...(my_screening.screenings || [])]
     }
-    console.log('api::getStrapiUser - My.screenings after merge', user.My.screenings.map(s => s.id))
     user.my_screenings = []
     userMyUpdated = true
   }
