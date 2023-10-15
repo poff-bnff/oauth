@@ -93,13 +93,13 @@ export async function getStrapiUser (id, linkedIDs = []) {
 
   if (user.linkedUser) {
     if (user.linkedUser.id === user.id) {
-      user.linkedUser = 'selfref: ' + JSON.stringify(user.linkedIDs)
+      delete user.linkedUser
     } else if (user.linkedIDs.includes(user.linkedUser.id)) {
-      user.linkedUser = 'circular ref' + JSON.stringify(user.linkedIDs)
+      delete user.linkedUser
     } else {
       // fetch linked user and combine data
       const linkedUser = await getStrapiUser(user.linkedUser.id, user.linkedIDs)
-      user.linkedUser = 'resolved' + JSON.stringify(user.linkedIDs)
+      delete user.linkedUser
       if (linkedUser) {
         user.My.products = [...(user.My.products || []), ...(linkedUser.My.products || [])]
         user.My.films = [...(user.My.films || []), ...(linkedUser.My.films || [])]
@@ -111,6 +111,9 @@ export async function getStrapiUser (id, linkedIDs = []) {
       }
     }
   }
+  // remove properties with null values from profile
+  Object.keys(user.user_profile).forEach(key => user.user_profile[key] === null && delete user.user_profile[key])
+
   return user
 }
 
