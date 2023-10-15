@@ -91,24 +91,22 @@ export async function getStrapiUser (id, allIDs = []) {
   // fetch badges from eventival
   user.badges = await getEventivalBadges(user.email)
 
-  if (user.mainUser) {
-    if (user.mainUser.id === user.id) {
-      // user is main user
-      user.mainUser = 'selfref'
-    } else if (user.allIDs.includes(user.mainUser.id)) {
-      // user is not main user, but main user is in allIDs
-      user.mainUser = JSON.stringify(user.allIDs)
+  if (user.linkedUser) {
+    if (user.linkedUser.id === user.id) {
+      user.linkedUser = 'selfref'
+    } else if (user.allIDs.includes(user.linkedUser.id)) {
+      user.linkedUser = JSON.stringify(user.allIDs)
     } else {
-      // fetch main user and combine data
-      const mainUser = await getStrapiUser(user.mainUser.id, user.allIDs)
-      if (mainUser) {
-        user.My.products = [...(user.My.products || []), ...(mainUser.My.products || [])]
-        user.My.films = [...(user.My.films || []), ...(mainUser.My.films || [])]
-        user.My.screenings = [...(user.My.screenings || []), ...(mainUser.My.screenings || [])]
-        user.badges = [...(user.badges || []), ...(mainUser.badges || [])]
-        user.allIDs = [...(user.allIDs || []), ...(mainUser.allIDs || [])]
+      // fetch linked user and combine data
+      const linkedUser = await getStrapiUser(user.linkedUser.id, user.allIDs)
+      if (linkedUser) {
+        user.My.products = [...(user.My.products || []), ...(linkedUser.My.products || [])]
+        user.My.films = [...(user.My.films || []), ...(linkedUser.My.films || [])]
+        user.My.screenings = [...(user.My.screenings || []), ...(linkedUser.My.screenings || [])]
+        user.badges = [...(user.badges || []), ...(linkedUser.badges || [])]
+        user.allIDs = [...(user.allIDs || []), ...(linkedUser.allIDs || [])]
       } else {
-        console.log('api::getStrapiUser - main user not found for user', user.id)
+        console.log('api::getStrapiUser - linked user not found for user', user.id)
       }
     }
   }
