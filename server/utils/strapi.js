@@ -61,7 +61,7 @@ export async function getEventivalBadges(email) {
   }
 }
 
-export async function getStrapiUser (id, allIDs = []) {
+export async function getStrapiUser (id, linkedIDs = []) {
   if (!id) return null
   const token = await getStrapiToken()
   console.log(`getStrapiUser, id: ${id}, token: ${token}`)
@@ -69,8 +69,8 @@ export async function getStrapiUser (id, allIDs = []) {
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  user.allIDs = allIDs || []
-  user.allIDs.push(user.id)
+  user.linkedIDs = linkedIDs || []
+  user.linkedIDs.push(id)
 
   if (user.user_profile === null) {
     // create profile
@@ -94,17 +94,17 @@ export async function getStrapiUser (id, allIDs = []) {
   if (user.linkedUser) {
     if (user.linkedUser.id === user.id) {
       user.linkedUser = 'selfref'
-    } else if (user.allIDs.includes(user.linkedUser.id)) {
-      user.linkedUser = JSON.stringify(user.allIDs)
+    } else if (user.linkedIDs.includes(user.linkedUser.id)) {
+      user.linkedUser = JSON.stringify(user.linkedIDs)
     } else {
       // fetch linked user and combine data
-      const linkedUser = await getStrapiUser(user.linkedUser.id, user.allIDs)
+      const linkedUser = await getStrapiUser(user.linkedUser.id, user.linkedIDs)
       if (linkedUser) {
         user.My.products = [...(user.My.products || []), ...(linkedUser.My.products || [])]
         user.My.films = [...(user.My.films || []), ...(linkedUser.My.films || [])]
         user.My.screenings = [...(user.My.screenings || []), ...(linkedUser.My.screenings || [])]
         user.badges = [...(user.badges || []), ...(linkedUser.badges || [])]
-        user.allIDs = [...(user.allIDs || []), ...(linkedUser.allIDs || [])]
+        user.linkedIDs = linkedUser.linkedIDs || []
       } else {
         console.log('api::getStrapiUser - linked user not found for user', user.id)
       }
