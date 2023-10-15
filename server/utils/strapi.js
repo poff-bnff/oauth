@@ -105,10 +105,12 @@ export async function getStrapiUser (id, linkedIDs = []) {
   }
   if (user.my_screenings && user.my_screenings.length > 0) {
     console.log('api::getStrapiUser - merging my_screenings for user', id)
+    console.log('api::getStrapiUser - My.screenings', user.My.screenings.map(s => s.id))
     for (const my_screening of user.my_screenings) {
-      console.log('api::getStrapiUser - merging my_screening for user', id, my_screening)
+      console.log('api::getStrapiUser - merging my_screening for user', id, my_screening.screenings.map(s => s.id))
       user.My.screenings = [...(user.My.screenings || []), ...(my_screening.screenings || [])]
     }
+    console.log('api::getStrapiUser - My.screenings after merge', user.My.screenings.map(s => s.id))
     // user.my_screenings = []
     profileUpdated = true
   }
