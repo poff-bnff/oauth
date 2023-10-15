@@ -83,25 +83,27 @@ export async function getStrapiUser (id, linkedIDs = []) {
     user.user_profile = await createStrapiUserProfile(user)
   }
 
-  let profileUpdated = false
+  let userUpdated = false
   // create My
   if (user.My === null) {
     console.log('api::getStrapiUser - creating My for user', id)
     user.My = {}
-    profileUpdated = true
+    userUpdated = true
   }
   // merge .my_... and .My....
   if (user.my_products) {
     console.log('api::getStrapiUser - merging my_products for user', id)
-    user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-    // delete user.my_products
-    profileUpdated = true
+    for (const my_product of user.my_products) {
+      user.My.products = [...(user.My.products || []), ...(my_product.products || [])]
+    }
+    userUpdated = true
   }
-  if (user.my_films) {
+  if (user.my_films && user.my_films.length > 0) {
     console.log('api::getStrapiUser - merging my_films for user', id)
-    user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
-    // delete user.my_films
-    profileUpdated = true
+    for (const my_film of user.my_films) {
+      user.My.films = [...(user.My.films || []), ...(my_film.films || [])]
+    }
+    userUpdated = true
   }
   if (user.my_screenings && user.my_screenings.length > 0) {
     console.log('api::getStrapiUser - merging my_screenings for user', id)
@@ -112,10 +114,10 @@ export async function getStrapiUser (id, linkedIDs = []) {
     }
     console.log('api::getStrapiUser - My.screenings after merge', user.My.screenings.map(s => s.id))
     // user.my_screenings = []
-    profileUpdated = true
+    userUpdated = true
   }
-  if (profileUpdated) {
-    user.user_profile = await setStrapiUserProfile(user.user_profile.id, user.user_profile)
+  if (userUpdated) {
+    user= await setStrapiUser(user)
   }
 
   // fetch badges from eventival
