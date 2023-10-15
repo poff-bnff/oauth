@@ -117,7 +117,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
     userUpdated = true
   }
   if (userUpdated) {
-    user= await setStrapiUser(user)
+    user = await setStrapiMy(user)
   }
 
   // fetch badges from eventival
@@ -243,6 +243,7 @@ export async function setStrapiMyFilm (user, cassetteId) {
 
   my.films = myFilms
 
+  // TODO: Use setStrapiMy
   // Update user's favorites list
   const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
@@ -253,6 +254,27 @@ export async function setStrapiMyFilm (user, cassetteId) {
     body: {
       id: user.id,
       My: my
+    }
+  })
+
+  return result.My
+}
+
+export async function setStrapiMy(user) {
+  if (!user) return null
+  user.My = user.My || {}
+
+  const token = await getStrapiToken()
+
+  const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      id: user.id,
+      My: user.My
     }
   })
 
@@ -300,6 +322,7 @@ export async function setStrapiMyScreening (user, screeningId) {
 
   my.screenings = myScreenings
 
+  // TODO: Use setStrapiMy
   // Update user's screenings list
   const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
