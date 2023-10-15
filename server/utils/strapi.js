@@ -113,7 +113,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
       user.My.screenings = [...(user.My.screenings || []), ...(my_screening.screenings || [])]
     }
     console.log('api::getStrapiUser - My.screenings after merge', user.My.screenings.map(s => s.id))
-    // user.my_screenings = []
+    user.my_screenings = []
     userMyUpdated = true
   }
   if (userMyUpdated) {
@@ -274,7 +274,10 @@ export async function setStrapiMy(user) {
     },
     body: {
       id: user.id,
-      My: user.My
+      My: user.My,
+      my_products: user.my_products || [],
+      my_films: user.my_films || [],
+      my_screenings: user.my_screenings || []
     }
   })
 
