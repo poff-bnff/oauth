@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
+import { isArray } from 'util'
 
 const config = useRuntimeConfig()
 
@@ -46,6 +47,10 @@ export async function getEventivalBadges(email) {
   const eUser = await $fetch(`https://bo.eventival.com/poff/${edition}/api/people?account_email=${email}`, options)
 
   if (eUser) {
+    if (!Array.isArray(eUser)) {
+      console.log('getEventivalBadges eUser is not array', eUser)
+      return []
+    }
     const badges = eUser[0]['badges'] || []
     return badges
       .filter(badge => !badge['cancelled'])
@@ -89,19 +94,19 @@ export async function getStrapiUser (id, linkedIDs = []) {
   if (user.my_products) {
     console.log('api::getStrapiUser - merging my_products for user', id)
     user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-    delete user.my_products
+    // delete user.my_products
     profileUpdated = true
   }
   if (user.my_films) {
     console.log('api::getStrapiUser - merging my_films for user', id)
     user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
-    delete user.my_films
+    // delete user.my_films
     profileUpdated = true
   }
-  if (user.my_screenings) {
+  if (user.my_screenings && user.my_screenings.screenings && user.my_screenings.screenings.length > 0) {
     console.log('api::getStrapiUser - merging my_screenings for user', id)
-    user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
-    delete user.my_screenings
+    user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings.screenings || [])]
+    // delete user.my_screenings
     profileUpdated = true
   }
   if (profileUpdated) {
