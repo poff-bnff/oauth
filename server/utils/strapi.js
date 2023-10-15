@@ -106,6 +106,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
   if (user.my_screenings && user.my_screenings.length > 0) {
     console.log('api::getStrapiUser - merging my_screenings for user', id)
     for (const my_screening of user.my_screenings) {
+      console.log('api::getStrapiUser - merging my_screening for user', id, my_screening)
       user.My.screenings = [...(user.My.screenings || []), ...(my_screening.screenings || [])]
     }
     // user.my_screenings = []
