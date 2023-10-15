@@ -103,10 +103,12 @@ export async function getStrapiUser (id, linkedIDs = []) {
     // delete user.my_films
     profileUpdated = true
   }
-  if (user.my_screenings && user.my_screenings.screenings && user.my_screenings.screenings.length > 0) {
+  if (user.my_screenings && user.my_screenings.length > 0) {
     console.log('api::getStrapiUser - merging my_screenings for user', id)
-    user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings.screenings || [])]
-    // delete user.my_screenings
+    for (const my_screening of user.my_screenings) {
+      user.My.screenings = [...(user.My.screenings || []), ...(my_screening.screenings || [])]
+    }
+    // user.my_screenings = []
     profileUpdated = true
   }
   if (profileUpdated) {
