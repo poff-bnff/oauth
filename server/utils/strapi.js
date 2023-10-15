@@ -93,12 +93,13 @@ export async function getStrapiUser (id, linkedIDs = []) {
 
   if (user.linkedUser) {
     if (user.linkedUser.id === user.id) {
-      user.linkedUser = 'selfref'
+      user.linkedUser = 'selfref: ' + JSON.stringify(user.linkedIDs)
     } else if (user.linkedIDs.includes(user.linkedUser.id)) {
-      user.linkedUser = JSON.stringify(user.linkedIDs)
+      user.linkedUser = 'circular ref' + JSON.stringify(user.linkedIDs)
     } else {
       // fetch linked user and combine data
       const linkedUser = await getStrapiUser(user.linkedUser.id, user.linkedIDs)
+      user.linkedUser = 'resolved' + JSON.stringify(user.linkedIDs)
       if (linkedUser) {
         user.My.products = [...(user.My.products || []), ...(linkedUser.My.products || [])]
         user.My.films = [...(user.My.films || []), ...(linkedUser.My.films || [])]
