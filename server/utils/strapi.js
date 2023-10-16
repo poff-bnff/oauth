@@ -98,7 +98,8 @@ export async function getStrapiUser (id, linkedIDs = []) {
     // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - merging my_products for user', id)
     user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-    user.my_products = []
+    // TODO: cant remove my_products from user, because it is used in mirror etc.
+    // user.my_products = []
     userMyUpdated = true
   }
   if (user.my_films && user.my_films.length > 0) {
