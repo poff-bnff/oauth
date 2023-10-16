@@ -46,22 +46,26 @@ export async function getEventivalBadges (email) {
 
   const eUser = await $fetch(`https://bo.eventival.com/poff/${edition}/api/people?account_email=${email}`, options)
 
-  if (eUser) {
-    if (!Array.isArray(eUser)) {
-      console.log('getEventivalBadges eUser is not array', eUser)
-      return []
-    }
-    const badges = eUser[0].badges || []
-    return badges
-      .filter(badge => !badge.cancelled)
-      .map(badge => ({
-        type: badge.type,
-        barcode: badge.barcode,
-        validity_dates: badge.validity_dates
-      }))
-  } else {
+  if (!eUser) {
+    console.log('getEventivalBadges eUser is null', email, eUser)
     return []
   }
+  if (!Array.isArray(eUser)) {
+    console.log('getEventivalBadges eUser is not array', email, eUser)
+    return []
+  }
+  if (eUser.length === 0) {
+    console.log('getEventivalBadges eUser is empty array', email, eUser)
+    return []
+  }
+  const badges = eUser[0].badges || []
+  return badges
+    .filter(badge => !badge.cancelled)
+    .map(badge => ({
+      type: badge.type,
+      barcode: badge.barcode,
+      validity_dates: badge.validity_dates
+    }))
 }
 
 export async function getStrapiUser (id, linkedIDs = []) {
