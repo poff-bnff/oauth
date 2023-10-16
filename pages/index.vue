@@ -43,6 +43,21 @@ function getEventivalUrl () {
 
   return `${eventivalUrl}/auth/realms/Eventival/protocol/openid-connect/auth?${query}`
 }
+
+onMounted(async () => {
+  const provider = route.query.provider || ''
+
+  switch (provider) {
+    case '':
+      break
+    case 'eventival':
+      await navigateTo(getEventivalUrl(), { external: true })
+      break
+    default:
+      await navigateTo(getOauthUrl(provider), { external: true })
+      break
+  }
+})
 </script>
 
 <template>

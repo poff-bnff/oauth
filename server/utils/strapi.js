@@ -1,6 +1,6 @@
 import crypto from 'crypto'
-import jwt from 'jsonwebtoken'
 import { isArray } from 'util'
+import jwt from 'jsonwebtoken'
 
 const config = useRuntimeConfig()
 
@@ -32,7 +32,7 @@ export async function authenticateStrapiUser (email) {
   }
 }
 
-export async function getEventivalBadges(email) {
+export async function getEventivalBadges (email) {
   if (!email) return []
 
   const edition = config.public.eventivalEdition
@@ -51,16 +51,14 @@ export async function getEventivalBadges(email) {
       console.log('getEventivalBadges eUser is not array', eUser)
       return []
     }
-    const badges = eUser[0]['badges'] || []
+    const badges = eUser[0].badges || []
     return badges
-      .filter(badge => !badge['cancelled'])
-      .map(badge => {
-          return {
-              type: badge['type'],
-              barcode: badge['barcode'],
-              validity_dates: badge['validity_dates']
-          }
-      })
+      .filter(badge => !badge.cancelled)
+      .map(badge => ({
+        type: badge.type,
+        barcode: badge.barcode,
+        validity_dates: badge.validity_dates
+      }))
   } else {
     return []
   }
@@ -259,7 +257,7 @@ export async function setStrapiMyFilm (user, cassetteId) {
   return result.My
 }
 
-export async function setStrapiMy(user) {
+export async function setStrapiMy (user) {
   if (!user) return null
   user.My = user.My || {}
 
