@@ -71,7 +71,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
   if (!id) return null
   const token = await getStrapiToken()
   // eslint-disable-next-line no-console
-  console.log(`getStrapiUser, id: ${id}, token: ${token}`)
+  console.log(`getStrapiUser, id: ${id}`)
 
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -81,6 +81,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
 
   if (user.user_profile === null) {
     // create profile
+    // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - creating profile for user', id)
     user.user_profile = await createStrapiUserProfile(user)
   }
@@ -143,6 +144,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
         user.badges = [...(user.badges || []), ...(linkedUser.badges || [])]
         user.linkedIDs = linkedUser.linkedIDs || []
       } else {
+        // eslint-disable-next-line no-console
         console.log('api::getStrapiUser - linked user not found for user', user.id)
       }
     }
@@ -178,6 +180,7 @@ export async function createStrapiUserProfile (user) {
     user: user.id,
     email: user.email
   }
+  // eslint-disable-next-line no-console
   console.log('createStrapiUserProfile', userProfile)
 
   return await $fetch(`${config.strapiUrl}/user-profiles`, {
@@ -212,7 +215,7 @@ export async function uploadStrapiImage (file) {
   const token = await getStrapiToken()
   const formData = new FormData()
 
-  const { name, filename, type, data: databuff, profileId } = file
+  const { name, filename, data: databuff, profileId } = file
   const blob = new Blob([databuff])
 
   formData.append('files', blob, filename)
@@ -298,7 +301,7 @@ export async function setFavorites (user, favorites) {
 
   favorites.userId = user.id
 
-  console.log('setFavorites', favorites)
+  // console.log('setFavorites', favorites)
 
   // Update user's favorites list
   const result = await $fetch(`${config.strapiUrl}/users/favorites/`, {
@@ -405,7 +408,7 @@ export async function getStrapiFilms (limit, page) {
   // set default limit and page values
   limit = limit || 5
   page = page || 1
-  console.log('getStrapiFilms', limit, page)
+  // console.log('getStrapiFilms', limit, page)
 
   const options = {
     headers: { Authorization: `Bearer ${token}` },
@@ -422,7 +425,7 @@ export async function getStrapiCassettes (limit, page) {
   // set default limit and page values
   limit = limit || 5
   page = page || 1
-  console.log('getStrapiCassettes', limit, page)
+  // console.log('getStrapiCassettes', limit, page)
 
   const options = {
     headers: { Authorization: `Bearer ${token}` },
@@ -436,7 +439,7 @@ export async function getStrapiCassettes (limit, page) {
 
 export async function getStrapiCinemas () {
   const token = await getStrapiToken()
-  console.log('getStrapiCinemas', token)
+  // console.log('getStrapiCinemas', token)
   return await $fetch(`${config.strapiUrl}/cinemas`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
@@ -447,12 +450,14 @@ export async function getStrapiFilm (id) {
 }
 
 export async function getPaymentMethods (id) {
+  // eslint-disable-next-line no-console
   console.log('getPaymentMethods')
   const token = await getStrapiToken()
   return await $fetch(`${config.strapiUrl}/users-permissions/users/paymentmethods/${id}`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
 export async function buyProduct (body) {
+  // eslint-disable-next-line no-console
   console.log('strapi:buyProduct', body)
   const token = await getStrapiToken()
 
@@ -469,7 +474,7 @@ export async function buyProduct (body) {
 }
 
 export async function roleCheck (body) {
-  console.log('roleCheck', body)
+  // console.log('roleCheck', body)
   const token = await getStrapiToken()
 
   const result = await $fetch(`${config.strapiUrl}/users-permissions/users/rolecheck`, {
