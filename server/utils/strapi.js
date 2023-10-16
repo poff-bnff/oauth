@@ -1,5 +1,4 @@
 import crypto from 'crypto'
-import { isArray } from 'util'
 import jwt from 'jsonwebtoken'
 
 const config = useRuntimeConfig()
@@ -47,15 +46,15 @@ export async function getEventivalBadges (email) {
   const eUser = await $fetch(`https://bo.eventival.com/poff/${edition}/api/people?account_email=${email}`, options)
 
   if (!eUser) {
-    console.log('getEventivalBadges eUser is null', email, eUser)
+    // console.log('getEventivalBadges eUser is null', email, eUser)
     return []
   }
   if (!Array.isArray(eUser)) {
-    console.log('getEventivalBadges eUser is not array', email, eUser)
+    // console.log('getEventivalBadges eUser is not array', email, eUser)
     return []
   }
   if (eUser.length === 0) {
-    console.log('getEventivalBadges eUser is empty array', email, eUser)
+    // console.log('getEventivalBadges eUser is empty array', email, eUser)
     return []
   }
   const badges = eUser[0].badges || []
@@ -71,6 +70,7 @@ export async function getEventivalBadges (email) {
 export async function getStrapiUser (id, linkedIDs = []) {
   if (!id) return null
   const token = await getStrapiToken()
+  // eslint-disable-next-line no-console
   console.log(`getStrapiUser, id: ${id}, token: ${token}`)
 
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
@@ -88,29 +88,33 @@ export async function getStrapiUser (id, linkedIDs = []) {
   let userMyUpdated = false
   // create My
   if (user.My === null) {
+    // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - creating My for user', id)
     user.My = {}
     userMyUpdated = true
   }
   // merge .my_... and .My....
   if (user.my_products && user.my_products.length > 0) {
+    // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - merging my_products for user', id)
     user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
     user.my_products = []
     userMyUpdated = true
   }
   if (user.my_films && user.my_films.length > 0) {
+    // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - merging my_films for user', id)
-    for (const my_film of user.my_films) {
-      user.My.films = [...(user.My.films || []), ...(my_film.films || [])]
+    for (const myFilm of user.my_films) {
+      user.My.films = [...(user.My.films || []), ...(myFilm.films || [])]
     }
     user.my_films = []
     userMyUpdated = true
   }
   if (user.my_screenings && user.my_screenings.length > 0) {
+    // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - merging my_screenings for user', id)
-    for (const my_screening of user.my_screenings) {
-      user.My.screenings = [...(user.My.screenings || []), ...(my_screening.screenings || [])]
+    for (const myScreening of user.my_screenings) {
+      user.My.screenings = [...(user.My.screenings || []), ...(myScreening.screenings || [])]
     }
     user.my_screenings = []
     userMyUpdated = true
