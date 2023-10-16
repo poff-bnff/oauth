@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
 
   body.userId = userId
 
-  console.log('Rolecheck put', body);
+  console.log('Rolecheck put', body)
 
   const productToBuy = await roleCheck(body)
   if (!productToBuy) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
