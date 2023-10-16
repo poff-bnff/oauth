@@ -96,9 +96,9 @@ export async function getStrapiUser (id, linkedIDs = []) {
   }
   // merge .my_... and .My....
   if (user.my_products && user.my_products.length > 0) {
-    console.log('api::getStrapiUser - merging my_products for user', id, { my_products: user.my_products, My_products: user.My.products }) // eslint-disable-line no-console
+    console.log('api::getStrapiUser - merging my_products for user', id, { my_products: user.my_products.map(p => p.id), My_products: user.My.products.map(p => p.id) }) // eslint-disable-line no-console
     user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-    console.log('api::getStrapiUser - merged my_products for user', id, { my_products: user.my_products, My_products: user.My.products }) // eslint-disable-line no-console
+    console.log('api::getStrapiUser - merged my_products for user', id, { my_products: user.my_products.map(p => p.id), My_products: user.My.products.map(p => p.id) }) // eslint-disable-line no-console
     // TODO: cant remove my_products from user, because it is used in mirror etc.
     // user.my_products = []
     userMyUpdated = true
@@ -270,7 +270,6 @@ export async function setStrapiMyFilm (user, cassetteId) {
 }
 
 export async function setStrapiMy (user) {
-  console.log('setStrapiMy', user.id, user.My) // eslint-disable-line no-console
   if (!user) return null
   user.My = user.My || {}
 
