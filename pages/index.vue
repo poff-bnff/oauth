@@ -47,7 +47,7 @@ function getEventivalUrl () {
 onMounted(async () => {
   const provider = route.query.provider || ''
 
-  switch (provider || '') {
+  switch (provider) {
     case '':
       break
     case 'eventival':
