@@ -91,7 +91,11 @@ export async function getStrapiUser (id, linkedIDs = []) {
   if (user.My === null) {
     // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - creating My for user', id)
-    user.My = {}
+    user.My = {
+      products: [],
+      films: [],
+      screenings: []
+    }
     userMyUpdated = true
   }
   // merge .my_... and .My....
