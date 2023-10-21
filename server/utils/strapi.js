@@ -193,7 +193,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
   // remove properties with null values from profile
   Object.keys(user.user_profile).forEach(key => user.user_profile[key] === null && delete user.user_profile[key])
   Object.keys(user).forEach(key => user[key] === null && delete user[key])
-
+  console.log(`api::getStrapiUser - returning user ${user.id}`)
   return user
 }
 
