@@ -171,7 +171,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
     return mainUser
   }
 
-  mergeFromAliasUsers(user)
+  await mergeFromAliasUsers(user)
 
   if (user.user_profile === null) {
     // create profile
