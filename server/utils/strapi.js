@@ -174,17 +174,17 @@ export async function getStrapiUser (id, linkedIDs = []) {
   // collect emails over all users
   console.log(`api::getStrapiUser - collecting emails for user ${user} email ${user.email}`)
   user.emails = [user.email]
-  // if (user.aliasUsers) {
-  //   for (const aliasUser of user.aliasUsers) {
-  //     user.emails.push(aliasUser.email)
-  //   }
-  // }
-  // fetch badges from eventival
-  user.badges = []
-  for (email of user.emails) {
-    const badges = await getEventivalBadges(email)
-    user.badges = [...user.badges, ...badges]
+  for (const aliasUser of user.aliasUsers) {
+    if (!aliasUser.email) continue
+    user.emails.push(aliasUser.email)
   }
+  console.log(`api::getStrapiUser - collected emails for user ${user.id} emails ${user.emails}`)
+  // fetch badges from eventival
+  // user.badges = []
+  // for (email of user.emails) {
+  //   const badges = await getEventivalBadges(email)
+  //   user.badges = [...user.badges, ...badges]
+  // }
 
   // remove properties with null values from profile
   Object.keys(user.user_profile).forEach(key => user.user_profile[key] === null && delete user.user_profile[key])
