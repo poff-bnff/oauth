@@ -136,12 +136,14 @@ export async function getStrapiUser (id, linkedIDs = []) {
         aliasUser.my_screenings = []
         console.log(`api::getStrapiUser - updating alias user ${aliasUser.id}`)
         await setStrapiUser(aliasUser)
+        console.log(`api::getStrapiUser - updated alias user ${aliasUser.id}`)
       }
     }
     if (mainUserUpdated) {
       user.My.products = user.my_products || []
       console.log(`api::getStrapiUser - updating main user ${user.id}`)
       await setStrapiUser(user)
+      console.log(`api::getStrapiUser - updated main user ${user.id}`)
     }
   }
 
@@ -164,7 +166,9 @@ export async function getStrapiUser (id, linkedIDs = []) {
   if (user.mainUser) {
     // eslint-disable-next-line no-console
     console.log(`api::getStrapiUser - user ${id} has mainUser ${user.mainUser.id}`)
-    return await getStrapiUser(user.mainUser.id)
+    const mainUser = await getStrapiUser(user.mainUser.id)
+    console.log(`api::getStrapiUser - mainUser ${user.mainUser.id} with email ${mainUser.email} loaded.`)
+    return mainUser
   }
 
   mergeFromAliasUsers(user)
