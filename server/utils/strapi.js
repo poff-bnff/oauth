@@ -167,7 +167,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
     // eslint-disable-next-line no-console
     console.log(`api::getStrapiUser - user ${id} has mainUser ${user.mainUser.id}`)
     const mainUser = await getStrapiUser(user.mainUser.id)
-    console.log(`api::getStrapiUser - mainUser ${user.mainUser.id} with email ${mainUser.email} loaded.`)
+    console.log(`api::getStrapiUser - mainUser ${user.mainUser.id} with email ${mainUser.email} loaded.`, mainUser.id, mainUser.username, mainUser.My)
     return mainUser
   }
 
