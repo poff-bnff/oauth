@@ -152,7 +152,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
     headers: { Authorization: `Bearer ${token}` }
   })
 
-  if (user.mainUser && user.aliasUsers) {
+  if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `User ${id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
     console.error(msg)
     throw new Error(msg)
