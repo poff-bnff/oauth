@@ -148,16 +148,16 @@ export async function getStrapiUser (id, linkedIDs = []) {
         aliasUser.my_products = []
         aliasUser.my_films = []
         aliasUser.my_screenings = []
-        console.log(`api::getStrapiUser - updating alias user ${aliasUser.id}`)
-        await setStrapiUser(aliasUser)
-        console.log(`api::getStrapiUser - updated alias user ${aliasUser.id}`)
+        // console.log(`api::getStrapiUser - updating alias user ${aliasUser.id}`)
+        // await setStrapiUser(aliasUser)
+        // console.log(`api::getStrapiUser - updated alias user ${aliasUser.id}`)
       }
     }
     if (mainUserUpdated) {
       user.My.products = user.my_products || []
-      console.log(`api::getStrapiUser - updating main user ${user.id}`)
-      await setStrapiUser(user)
-      console.log(`api::getStrapiUser - updated main user ${user.id}`)
+      // console.log(`api::getStrapiUser - updating main user ${user.id}`)
+      // await setStrapiUser(user)
+      // console.log(`api::getStrapiUser - updated main user ${user.id}`)
     }
   }
 
