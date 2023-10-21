@@ -152,8 +152,8 @@ export async function getStrapiUser (id, linkedIDs = []) {
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  user.aliasUsers = user.aliasUsers || []
 
+  user.aliasUsers = user.aliasUsers || []
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `User ${id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
     console.error(msg)
@@ -197,7 +197,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
 export async function setStrapiUser (user) {
   if (!user) return null
   const token = await getStrapiToken()
-
+  console.log(`setStrapiUser, id: ${user.id}`)
   return await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
     headers: {
