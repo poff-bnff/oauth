@@ -69,6 +69,12 @@ export async function getEventivalBadges (email) {
 
 export async function getStrapiUser (id, linkedIDs = []) {
   // does not return - modifies user in place
+  const mergeMainUser = async (user) => {
+    user.My = user.My || {}
+    user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+    user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
+    user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
+  }
   const mergeFromAliasUsers = async (user) => {
     // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - mergeFromAliasUsers', user.id)
@@ -121,7 +127,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
         aliasUser.my_products = []
         aliasUserUpdated = mainUserUpdated = true
       }
-      console.log('api::getStrapiUser - merging aliasUser into My.films', user.My.films)
+      // console.log('api::getStrapiUser - merging aliasUser into My.films', user.My.films)
       if (aliasUser.my_films && aliasUser.my_films.length > 0) {
         user.My.films = [...(user.My.films || []), ...(aliasUser.my_films || [])]
         // aliasUser.my_films = []
@@ -169,7 +175,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-
+  mergeMainUser(user)
   user.aliasUsers = user.aliasUsers || []
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `User ${id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
