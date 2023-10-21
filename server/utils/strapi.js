@@ -68,6 +68,80 @@ export async function getEventivalBadges (email) {
 }
 
 export async function getStrapiUser (id, linkedIDs = []) {
+
+  // does not return - modifies user in place
+  mergeFromAliasUsers = async (user) => {
+    if (!user.aliasUsers) return
+    if (user.aliasUsers.length === 0) return
+    let mainUserUpdated = false
+
+      // create My
+    if (user.My === null) {
+      // eslint-disable-next-line no-console
+      console.log('api::getStrapiUser - creating My for user', id)
+      user.My = {
+        products: [],
+        films: [],
+        screenings: []
+      }
+      mainUserUpdated = true
+    }
+
+    // Merge values within main user
+    if (user.my_films && user.my_films.length > 0) {
+      user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
+      user.my_films = []
+      mainUserUpdated = true
+    }
+    if (user.my_screenings && user.my_screenings.length > 0) {
+      user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
+      user.my_screenings = []
+      mainUserUpdated = true
+    }
+
+    // Merge values from alias users
+    for (const aliasUser of user.aliasUsers) {
+      let aliasUserUpdated = false
+      if (aliasUser.my_products && aliasUser.my_products.length > 0) {
+        user.my_products = [...(user.my_products || []), ...(aliasUser.my_products || [])]
+        aliasUser.my_products = []
+        aliasUserUpdated = mainUserUpdated = true
+      }
+      if (aliasUser.my_films && aliasUser.my_films.length > 0) {
+        user.My.films = [...(user.My.films || []), ...(aliasUser.my_films || [])]
+        // aliasUser.my_films = []
+        aliasUserUpdated = mainUserUpdated = true
+      }
+      if (aliasUser.My.films && aliasUser.My.films.length > 0) {
+        user.My.films = [...(user.My.films || []), ...(aliasUser.My.films || [])]
+        // aliasUser.My.films = []
+        aliasUserUpdated = mainUserUpdated = true
+      }
+      if (aliasUser.my_screenings && aliasUser.my_screenings.length > 0) {
+        user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.my_screenings || [])]
+        // aliasUser.my_screenings = []
+        aliasUserUpdated = mainUserUpdated = true
+      }
+      if (aliasUser.My.screenings && aliasUser.My.screenings.length > 0) {
+        user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.My.screenings || [])]
+        // aliasUser.My.screenings = []
+        aliasUserUpdated = mainUserUpdated = true
+      }
+      if (aliasUserUpdated) {
+        // Unset the .My and .my_... properties from aliasUser here for cleaner code above
+        aliasUser.My = {}
+        aliasUser.my_products = []
+        aliasUser.my_films = []
+        aliasUser.my_screenings = []
+        await setStrapiUser(aliasUser)
+      }
+    }
+    if (mainUserUpdated) {
+      user.My.products = user.my_products || []
+      await setStrapiUser(user)
+    }
+  }
+
   if (!id) return null
   const token = await getStrapiToken()
   // eslint-disable-next-line no-console
@@ -76,8 +150,18 @@ export async function getStrapiUser (id, linkedIDs = []) {
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  user.linkedIDs = linkedIDs || []
-  user.linkedIDs.push(id)
+
+  if (user.mainUser && user.aliasUsers) {
+    const msg = `User ${id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
+    console.error(msg)
+    throw new Error(msg)
+  }
+
+  if (user.mainUser) {
+    return getStrapiUser(user.mainUser.id)
+  }
+
+  mergeFromAliasUsers(user)
 
   if (user.user_profile === null) {
     // create profile
@@ -86,79 +170,23 @@ export async function getStrapiUser (id, linkedIDs = []) {
     user.user_profile = await createStrapiUserProfile(user)
   }
 
-  let userMyUpdated = false
-  // create My
-  if (user.My === null) {
-    // eslint-disable-next-line no-console
-    console.log('api::getStrapiUser - creating My for user', id)
-    user.My = {
-      products: [],
-      films: [],
-      screenings: []
+  // collect emails over all users
+  user.emails = [user.email]
+  if (user.aliasUsers) {
+    for (const aliasUser of user.aliasUsers) {
+      user.emails.push(aliasUser.email)
     }
-    userMyUpdated = true
   }
-  // merge .my_... and .My....
-  if (user.my_products && user.my_products.length > 0) {
-    console.log('api::getStrapiUser - merging my_products for user', id, { my_products: user.my_products.map(p => p.id), My_products: user.My.products.map(p => p.id) }) // eslint-disable-line no-console
-    user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-    console.log('api::getStrapiUser - merged my_products for user', id, { my_products: user.my_products.map(p => p.id), My_products: user.My.products.map(p => p.id) }) // eslint-disable-line no-console
-    // TODO: cant remove my_products from user, because it is used in mirror etc.
-    // user.my_products = []
-    // userMyUpdated = true
-  }
-  if (user.my_films && user.my_films.length > 0) {
-    // eslint-disable-next-line no-console
-    console.log('api::getStrapiUser - merging my_films for user', id)
-    for (const myFilm of user.my_films) {
-      user.My.films = [...(user.My.films || []), ...(myFilm.films || [])]
-    }
-    user.my_films = []
-    userMyUpdated = true
-  }
-  if (user.my_screenings && user.my_screenings.length > 0) {
-    // eslint-disable-next-line no-console
-    console.log('api::getStrapiUser - merging my_screenings for user', id)
-    for (const myScreening of user.my_screenings) {
-      user.My.screenings = [...(user.My.screenings || []), ...(myScreening.screenings || [])]
-    }
-    user.my_screenings = []
-    userMyUpdated = true
-  }
-  if (userMyUpdated) {
-    user.My = await setStrapiMy(user)
-  }
-
   // fetch badges from eventival
-  user.badges = await getEventivalBadges(user.email)
-
-  if (user.linkedUser) {
-    if (user.linkedUser.id === user.id) {
-      delete user.linkedUser
-    } else if (user.linkedIDs.includes(user.linkedUser.id)) {
-      delete user.linkedUser
-    } else {
-      // fetch linked user and combine data
-      const linkedUser = await getStrapiUser(user.linkedUser.id, user.linkedIDs)
-      delete user.linkedUser
-      if (linkedUser) {
-        user.My.products = [...(user.My.products || []), ...(linkedUser.My.products || [])]
-        user.My.films = [...(user.My.films || []), ...(linkedUser.My.films || [])]
-        user.My.screenings = [...(user.My.screenings || []), ...(linkedUser.My.screenings || [])]
-        user.badges = [...(user.badges || []), ...(linkedUser.badges || [])]
-        user.linkedIDs = linkedUser.linkedIDs || []
-      } else {
-        // eslint-disable-next-line no-console
-        console.log('api::getStrapiUser - linked user not found for user', user.id)
-      }
-    }
+  user.badges = []
+  for (email of user.emails) {
+    const badges = await getEventivalBadges(email)
+    user.badges = [...user.badges, ...badges]
   }
+
   // remove properties with null values from profile
   Object.keys(user.user_profile).forEach(key => user.user_profile[key] === null && delete user.user_profile[key])
   Object.keys(user).forEach(key => user[key] === null && delete user[key])
-  // also remove properties with empty arrays
-  // Object.keys(user.user_profile).forEach(key => Array.isArray(user.user_profile[key]) && user.user_profile[key].length === 0 && delete user.user_profile[key])
-  // Object.keys(user).forEach(key => Array.isArray(user[key]) && user[key].length === 0 && delete user[key])
 
   return user
 }
