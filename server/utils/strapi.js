@@ -134,11 +134,13 @@ export async function getStrapiUser (id, linkedIDs = []) {
         aliasUser.my_products = []
         aliasUser.my_films = []
         aliasUser.my_screenings = []
+        console.log(`api::getStrapiUser - updating alias user ${aliasUser.id}`)
         await setStrapiUser(aliasUser)
       }
     }
     if (mainUserUpdated) {
       user.My.products = user.my_products || []
+      console.log(`api::getStrapiUser - updating main user ${user.id}`)
       await setStrapiUser(user)
     }
   }
@@ -172,7 +174,6 @@ export async function getStrapiUser (id, linkedIDs = []) {
   }
 
   // collect emails over all users
-  console.log(`api::getStrapiUser - collecting emails for user ${user} email ${user.email}`)
   user.emails = [user.email]
   for (const aliasUser of user.aliasUsers) {
     if (!aliasUser.email) continue
