@@ -164,7 +164,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
   if (user.mainUser) {
     // eslint-disable-next-line no-console
     console.log(`api::getStrapiUser - user ${id} has mainUser ${user.mainUser.id}`)
-    return getStrapiUser(user.mainUser.id)
+    return await getStrapiUser(user.mainUser.id)
   }
 
   mergeFromAliasUsers(user)
