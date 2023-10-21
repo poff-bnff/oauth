@@ -197,7 +197,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
 export async function setStrapiUser (user) {
   if (!user) return null
   const token = await getStrapiToken()
-  console.log(`setStrapiUser, id: ${user.id}`)
+  console.log(`setStrapiUser, id: ${user.id}`, user)
   return await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
     headers: {
