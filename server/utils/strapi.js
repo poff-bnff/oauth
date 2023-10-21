@@ -71,6 +71,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
 
   // does not return - modifies user in place
   const mergeFromAliasUsers = async (user) => {
+    user.aliasUsers = user.aliasUsers || []
     if (!user.aliasUsers) return
     if (user.aliasUsers.length === 0) return
     let mainUserUpdated = false
@@ -172,7 +173,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
 
   // collect emails over all users
   console.log(`api::getStrapiUser - collecting emails for user ${user} email ${user.email}`)
-  // user.emails = [user.email]
+  user.emails = [user.email]
   // if (user.aliasUsers) {
   //   for (const aliasUser of user.aliasUsers) {
   //     user.emails.push(aliasUser.email)
