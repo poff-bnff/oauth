@@ -70,9 +70,19 @@ export async function getEventivalBadges (email) {
 export async function getStrapiUser (id, linkedIDs = []) {
   // does not return - modifies user in place
   const mergeFromAliasUsers = async (user) => {
+    // eslint-disable-next-line no-console
+    console.log('api::getStrapiUser - mergeFromAliasUsers', user.id)
     user.aliasUsers = user.aliasUsers || []
-    if (!user.aliasUsers) return
-    if (user.aliasUsers.length === 0) return
+    if (!user.aliasUsers) {
+      // eslint-disable-next-line no-console
+      console.log('api::getStrapiUser - no alias users for user', id)
+      return
+    }
+    if (user.aliasUsers.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log('api::getStrapiUser - zero alias users for user', id)
+      return
+    }
     let mainUserUpdated = false
 
       // create My
