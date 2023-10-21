@@ -172,12 +172,12 @@ export async function getStrapiUser (id, linkedIDs = []) {
 
   // collect emails over all users
   console.log(`api::getStrapiUser - collecting emails for user ${user} email ${user.email}`)
-  user.emails = [user.email]
-  if (user.aliasUsers) {
-    for (const aliasUser of user.aliasUsers) {
-      user.emails.push(aliasUser.email)
-    }
-  }
+  // user.emails = [user.email]
+  // if (user.aliasUsers) {
+  //   for (const aliasUser of user.aliasUsers) {
+  //     user.emails.push(aliasUser.email)
+  //   }
+  // }
   // fetch badges from eventival
   user.badges = []
   for (email of user.emails) {
