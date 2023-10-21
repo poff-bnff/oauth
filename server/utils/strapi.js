@@ -70,7 +70,7 @@ export async function getEventivalBadges (email) {
 export async function getStrapiUser (id, linkedIDs = []) {
 
   // does not return - modifies user in place
-  mergeFromAliasUsers = async (user) => {
+  const mergeFromAliasUsers = async (user) => {
     if (!user.aliasUsers) return
     if (user.aliasUsers.length === 0) return
     let mainUserUpdated = false
