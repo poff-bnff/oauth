@@ -86,7 +86,7 @@ export async function getStrapiUser (id, linkedIDs = []) {
       }
       mainUserUpdated = true
     }
-
+    console.log('api::getStrapiUser - merging alias users into My', user.My)
 
     // Merge values within main user
     if (user.my_films && user.my_films.length > 0) {
