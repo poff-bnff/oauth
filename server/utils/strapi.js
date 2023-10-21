@@ -99,11 +99,13 @@ export async function getStrapiUser (id, linkedIDs = []) {
     console.log('api::getStrapiUser - merging alias users into My', user.My)
 
     // Merge values within main user
+    console.log('api::getStrapiUser - merging into My.films', user.My.films)
     if (user.my_films && user.my_films.length > 0) {
       user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
       user.my_films = []
       mainUserUpdated = true
     }
+    console.log('api::getStrapiUser - merging into My.screenings', user.My.screenings)
     if (user.my_screenings && user.my_screenings.length > 0) {
       user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
       user.my_screenings = []
@@ -113,11 +115,13 @@ export async function getStrapiUser (id, linkedIDs = []) {
     // Merge values from alias users
     for (const aliasUser of user.aliasUsers) {
       let aliasUserUpdated = false
+      aliasUser.My = aliasUser.My || {products: [], films: [], screenings: []}
       if (aliasUser.my_products && aliasUser.my_products.length > 0) {
         user.my_products = [...(user.my_products || []), ...(aliasUser.my_products || [])]
         aliasUser.my_products = []
         aliasUserUpdated = mainUserUpdated = true
       }
+      console.log('api::getStrapiUser - merging aliasUser into My.films', user.My.films)
       if (aliasUser.my_films && aliasUser.my_films.length > 0) {
         user.My.films = [...(user.My.films || []), ...(aliasUser.my_films || [])]
         // aliasUser.my_films = []
