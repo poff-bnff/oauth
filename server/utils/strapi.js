@@ -68,7 +68,7 @@ export async function getEventivalBadges (email) {
 }
 
 export async function getStrapiUser (id, linkedIDs = []) {
-
+  user.aliasUsers = user.aliasUsers || []
   // does not return - modifies user in place
   const mergeFromAliasUsers = async (user) => {
     user.aliasUsers = user.aliasUsers || []
@@ -197,7 +197,7 @@ export async function setStrapiUser (user) {
   if (!user) return null
   const token = await getStrapiToken()
 
-  return await $fetch(`${config.strapiUrl}/users/updateme`, {
+  return await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
