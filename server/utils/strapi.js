@@ -198,9 +198,9 @@ export async function setStrapiUser (user) {
   if (!user) return null
   const token = await getStrapiToken()
   const id = `${user.id}`
-  user.id = id
+  // user.id = id
   console.log(`setStrapiUser, id: ${id}`)
-  return await $fetch(`${config.strapiUrl}/users-permissions/users/${id}`, {
+  return await $fetch(`${config.strapiUrl}/users/${id}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
