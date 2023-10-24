@@ -29,10 +29,11 @@ export default defineEventHandler(async (event) => {
 
     const strapiUser = await authenticateStrapiUser(user.email)
     const id = getUserIdFromEvent(event)
-    if (id) {
-      const user = await getStrapiUser(id)
-      console.log(`api::oauth GET - user ${user.id} (${user.email}) already logged in. Prepare for merge with ${strapiUser.id} (${strapiUser.email})`)
-    }
+    console.log(`api::oauth GET - user ${strapiUser.id} (${strapiUser.email}). Old user id ${id}`)
+    // if (id) {
+    //   const user = await getStrapiUser(id)
+    //   console.log(`api::oauth GET - user ${user.id} (${user.email}) already logged in. Prepare for merge with ${strapiUser.id} (${strapiUser.email})`)
+    // }
 
     const jwtData = { ...strapiUser }
     delete jwtData.id
