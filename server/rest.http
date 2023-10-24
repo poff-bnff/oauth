@@ -25,6 +25,11 @@ Content-Type: application/json
 
 2366
 
+### Merge My over all my users
+put {{hunt_url}}/api/my/merge HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
 ### GET strapi cinemas
 get https://admin.poff.ee/cinemas HTTP/1.1
 Authorization: token {{jwt}}
