@@ -113,6 +113,9 @@ export async function getStrapiUser (id) {
   Object.keys(user.user_profile).forEach(key => user.user_profile[key] === null && delete user.user_profile[key])
   Object.keys(user).forEach(key => user[key] === null && delete user[key])
   console.log(`api::getStrapiUser - returning user ${user.id}`)
+
+  await mergeUser(user)
+
   return user
 }
 
@@ -448,120 +451,100 @@ export async function roleCheck (body) {
   return result
 }
 
-// export async function getStrapiUsers (user) {
-//   // does not return - modifies user in place
-//   if (!user) {
-//     throw new Error('No user provided.')
-//   }
-//   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
-//     const msg = `strapi::getStrapiUsers - User ${user.id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
-//     console.error(msg)
-//     throw createError({ statusCode: 409, statusMessage: msg })
-//   }
-//   if (user.mainUser) {
-//     return getStrapiUsers(user.mainUser)
-//   }
+const mergeUser = async (user) => {
+  user.My = user.My || {}
+  user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+  user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
+  user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
+}
+const mergeFromAliasUsers = async (user) => {
+  // eslint-disable-next-line no-console
+  console.log('api::getStrapiUser - mergeFromAliasUsers', user.id)
+  user.aliasUsers = user.aliasUsers || []
+  if (!user.aliasUsers) {
+    // eslint-disable-next-line no-console
+    console.log('api::getStrapiUser - no alias users for user', id)
+    return
+  }
+  if (user.aliasUsers.length === 0) {
+    // eslint-disable-next-line no-console
+    console.log('api::getStrapiUser - zero alias users for user', id)
+    return
+  }
+  let mainUserUpdated = false
 
-//   return {
-//     mainUser: user,
-//     aliasUsers: user.aliasUsers || []
-//   }
-// }
+    // create My
+  if (user.My === null) {
+    // eslint-disable-next-line no-console
+    console.log('api::getStrapiUser - creating My for user', id)
+    user.My = {
+      products: [],
+      films: [],
+      screenings: []
+    }
+    mainUserUpdated = true
+  }
+  console.log('api::getStrapiUser - merging alias users into My', user.My)
 
-// const mergeMainUser = async (user) => {
-//   user.My = user.My || {}
-//   user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-//   user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
-//   user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
-// }
-// const mergeFromAliasUsers = async (user) => {
-//   // eslint-disable-next-line no-console
-//   console.log('api::getStrapiUser - mergeFromAliasUsers', user.id)
-//   user.aliasUsers = user.aliasUsers || []
-//   if (!user.aliasUsers) {
-//     // eslint-disable-next-line no-console
-//     console.log('api::getStrapiUser - no alias users for user', id)
-//     return
-//   }
-//   if (user.aliasUsers.length === 0) {
-//     // eslint-disable-next-line no-console
-//     console.log('api::getStrapiUser - zero alias users for user', id)
-//     return
-//   }
-//   let mainUserUpdated = false
+  // Merge values within main user
+  console.log('api::getStrapiUser - merging into My.films', user.My.films)
+  if (user.my_films && user.my_films.length > 0) {
+    user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
+    user.my_films = []
+    mainUserUpdated = true
+  }
+  console.log('api::getStrapiUser - merging into My.screenings', user.My.screenings)
+  if (user.my_screenings && user.my_screenings.length > 0) {
+    user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
+    user.my_screenings = []
+    mainUserUpdated = true
+  }
 
-//     // create My
-//   if (user.My === null) {
-//     // eslint-disable-next-line no-console
-//     console.log('api::getStrapiUser - creating My for user', id)
-//     user.My = {
-//       products: [],
-//       films: [],
-//       screenings: []
-//     }
-//     mainUserUpdated = true
-//   }
-//   console.log('api::getStrapiUser - merging alias users into My', user.My)
-
-//   // Merge values within main user
-//   console.log('api::getStrapiUser - merging into My.films', user.My.films)
-//   if (user.my_films && user.my_films.length > 0) {
-//     user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
-//     user.my_films = []
-//     mainUserUpdated = true
-//   }
-//   console.log('api::getStrapiUser - merging into My.screenings', user.My.screenings)
-//   if (user.my_screenings && user.my_screenings.length > 0) {
-//     user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
-//     user.my_screenings = []
-//     mainUserUpdated = true
-//   }
-
-//   // Merge values from alias users
-//   for (const aliasUser of user.aliasUsers) {
-//     let aliasUserUpdated = false
-//     aliasUser.My = aliasUser.My || {products: [], films: [], screenings: []}
-//     if (aliasUser.my_products && aliasUser.my_products.length > 0) {
-//       user.my_products = [...(user.my_products || []), ...(aliasUser.my_products || [])]
-//       aliasUser.my_products = []
-//       aliasUserUpdated = mainUserUpdated = true
-//     }
-//     // console.log('api::getStrapiUser - merging aliasUser into My.films', user.My.films)
-//     if (aliasUser.my_films && aliasUser.my_films.length > 0) {
-//       user.My.films = [...(user.My.films || []), ...(aliasUser.my_films || [])]
-//       // aliasUser.my_films = []
-//       aliasUserUpdated = mainUserUpdated = true
-//     }
-//     if (aliasUser.My.films && aliasUser.My.films.length > 0) {
-//       user.My.films = [...(user.My.films || []), ...(aliasUser.My.films || [])]
-//       // aliasUser.My.films = []
-//       aliasUserUpdated = mainUserUpdated = true
-//     }
-//     if (aliasUser.my_screenings && aliasUser.my_screenings.length > 0) {
-//       user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.my_screenings || [])]
-//       // aliasUser.my_screenings = []
-//       aliasUserUpdated = mainUserUpdated = true
-//     }
-//     if (aliasUser.My.screenings && aliasUser.My.screenings.length > 0) {
-//       user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.My.screenings || [])]
-//       // aliasUser.My.screenings = []
-//       aliasUserUpdated = mainUserUpdated = true
-//     }
-//     if (aliasUserUpdated) {
-//       // Unset the .My and .my_... properties from aliasUser here for cleaner code above
-//       aliasUser.My = {}
-//       aliasUser.my_products = []
-//       aliasUser.my_films = []
-//       aliasUser.my_screenings = []
-//       // console.log(`api::getStrapiUser - updating alias user ${aliasUser.id}`)
-//       // await setStrapiUser(aliasUser)
-//       // console.log(`api::getStrapiUser - updated alias user ${aliasUser.id}`)
-//     }
-//   }
-//   if (mainUserUpdated) {
-//     user.My.products = user.my_products || []
-//     // console.log(`api::getStrapiUser - updating main user ${user.id}`)
-//     // await setStrapiUser(user)
-//     // console.log(`api::getStrapiUser - updated main user ${user.id}`)
-//   }
-// }
+  // Merge values from alias users
+  for (const aliasUser of user.aliasUsers) {
+    let aliasUserUpdated = false
+    aliasUser.My = aliasUser.My || {products: [], films: [], screenings: []}
+    if (aliasUser.my_products && aliasUser.my_products.length > 0) {
+      user.my_products = [...(user.my_products || []), ...(aliasUser.my_products || [])]
+      aliasUser.my_products = []
+      aliasUserUpdated = mainUserUpdated = true
+    }
+    // console.log('api::getStrapiUser - merging aliasUser into My.films', user.My.films)
+    if (aliasUser.my_films && aliasUser.my_films.length > 0) {
+      user.My.films = [...(user.My.films || []), ...(aliasUser.my_films || [])]
+      // aliasUser.my_films = []
+      aliasUserUpdated = mainUserUpdated = true
+    }
+    if (aliasUser.My.films && aliasUser.My.films.length > 0) {
+      user.My.films = [...(user.My.films || []), ...(aliasUser.My.films || [])]
+      // aliasUser.My.films = []
+      aliasUserUpdated = mainUserUpdated = true
+    }
+    if (aliasUser.my_screenings && aliasUser.my_screenings.length > 0) {
+      user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.my_screenings || [])]
+      // aliasUser.my_screenings = []
+      aliasUserUpdated = mainUserUpdated = true
+    }
+    if (aliasUser.My.screenings && aliasUser.My.screenings.length > 0) {
+      user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.My.screenings || [])]
+      // aliasUser.My.screenings = []
+      aliasUserUpdated = mainUserUpdated = true
+    }
+    if (aliasUserUpdated) {
+      // Unset the .My and .my_... properties from aliasUser here for cleaner code above
+      aliasUser.My = {}
+      aliasUser.my_products = []
+      aliasUser.my_films = []
+      aliasUser.my_screenings = []
+      // console.log(`api::getStrapiUser - updating alias user ${aliasUser.id}`)
+      // await setStrapiUser(aliasUser)
+      // console.log(`api::getStrapiUser - updated alias user ${aliasUser.id}`)
+    }
+  }
+  if (mainUserUpdated) {
+    user.My.products = user.my_products || []
+    // console.log(`api::getStrapiUser - updating main user ${user.id}`)
+    // await setStrapiUser(user)
+    // console.log(`api::getStrapiUser - updated main user ${user.id}`)
+  }
+}
