@@ -28,6 +28,11 @@ export default defineEventHandler(async (event) => {
     if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No OAuth.ee e-mail' })
 
     const strapiUser = await authenticateStrapiUser(user.email)
+    const id = getUserIdFromEvent(event)
+    if (id) {
+      const user = await getStrapiUser(id)
+      console.log(`api::oauth GET - user ${user.id} (${user.email}) already logged in. Prepare for merge with ${strapiUser.id} (${strapiUser.email})`)
+    }
 
     const jwtData = { ...strapiUser }
     delete jwtData.id

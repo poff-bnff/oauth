@@ -114,7 +114,7 @@ export async function getStrapiUser (id) {
   Object.keys(user).forEach(key => user[key] === null && delete user[key])
   console.log(`api::getStrapiUser - returning user ${user.id}`)
 
-  await mergeUser(user)
+  await mergeUserMy(user)
 
   return user
 }
@@ -451,15 +451,15 @@ export async function roleCheck (body) {
   return result
 }
 
-const mergeUser = async (user) => {
+const mergeUserMy = async (user) => {
   user.My = user.My || {}
   user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
   user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
   user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
 }
-const mergeFromAliasUsers = async (user) => {
+export async function collectMyFromAliasUsers (user) {
   // eslint-disable-next-line no-console
-  console.log('api::getStrapiUser - mergeFromAliasUsers', user.id)
+  console.log('api::strapi - collectMyFromAliasUsers', user.id)
   user.aliasUsers = user.aliasUsers || []
   if (!user.aliasUsers) {
     // eslint-disable-next-line no-console
