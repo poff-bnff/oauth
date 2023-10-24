@@ -69,7 +69,7 @@ export async function fetchEventivalBadges (email) {
 
 export async function loadEventivalBadges(user) {
   const mainUserEmail = user.email
-  const aliasUserEmails = users.aliasUsers.map(user => user.email)
+  const aliasUserEmails = user.aliasUsers.map(user => user.email)
   const emails = new set([mainUserEmail, ...aliasUserEmails])
   user.badges = {}
   for (const email of emails) {
