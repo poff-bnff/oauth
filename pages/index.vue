@@ -1,7 +1,7 @@
 <script setup>
 import crypto from 'crypto'
 
-const { url, eventivalClientId, eventivalUrl, oauthClientId, oauthUrl } = useRuntimeConfig()
+const { url, eventivalClientId, eventivalUrl, oauthClientId, oauthUrl } = useRuntimeConfig().public
 const { locale, t } = useI18n()
 const route = useRoute()
 const router = useRouter()
