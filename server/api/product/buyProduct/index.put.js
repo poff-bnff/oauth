@@ -1,8 +1,9 @@
 export default defineEventHandler(async (event) => {
   const userId = getUserIdFromEvent(event)
   // const user = await getStrapiUser(id)
-
+  console.log('api::product/buy PUT - user id', userId)
   const body = await readBody(event)
+  console.log('api::product/buy PUT - body', body)
 
   body.userId = userId
 
