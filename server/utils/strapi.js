@@ -451,100 +451,23 @@ export async function roleCheck (body) {
   return result
 }
 
-const mergeUserMy = (user) => {
-  user.My = user.My || {}
-  user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-  user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
-  user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
-}
-export function collectMyFromAliasUsers (user) {
-  // eslint-disable-next-line no-console
-  console.log('api::strapi - collectMyFromAliasUsers', user.id)
-  user.aliasUsers = user.aliasUsers || []
-  if (!user.aliasUsers) {
-    // eslint-disable-next-line no-console
-    console.log('api::getStrapiUser - no alias users for user', id)
-    return
-  }
-  if (user.aliasUsers.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log('api::getStrapiUser - zero alias users for user', id)
-    return
-  }
-  let mainUserUpdated = false
+export async function linkStrapiUser (mainUserId, aliasUserId) {
+  if (!mainUserId) return null
+  if (!aliasUserId) return null
 
-  // create My
-  if (user.My === null) {
-    // eslint-disable-next-line no-console
-    console.log('api::getStrapiUser - creating My for user', id)
-    user.My = {
-      products: [],
-      films: [],
-      screenings: []
-    }
-    mainUserUpdated = true
-  }
-  console.log('api::getStrapiUser - merging alias users into My', user.My) // eslint-disable-line no-console
+  const token = await getStrapiToken()
 
-  // Merge values within main user
-  console.log('api::getStrapiUser - merging into My.films', user.My.films) // eslint-disable-line no-console
-  if (user.my_films && user.my_films.length > 0) {
-    user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
-    user.my_films = []
-    mainUserUpdated = true
-  }
-  console.log('api::getStrapiUser - merging into My.screenings', user.My.screenings) // eslint-disable-line no-console
-  if (user.my_screenings && user.my_screenings.length > 0) {
-    user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
-    user.my_screenings = []
-    mainUserUpdated = true
-  }
+  const result = await $fetch(`${config.strapiUrl}/users/link`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      mainUserId,
+      aliasUserId
+    }
+  })
 
-  // Merge values from alias users
-  for (const aliasUser of user.aliasUsers) {
-    let aliasUserUpdated = false
-    aliasUser.My = aliasUser.My || { products: [], films: [], screenings: [] }
-    if (aliasUser.my_products && aliasUser.my_products.length > 0) {
-      user.my_products = [...(user.my_products || []), ...(aliasUser.my_products || [])]
-      aliasUser.my_products = []
-      aliasUserUpdated = mainUserUpdated = true
-    }
-    // console.log('api::getStrapiUser - merging aliasUser into My.films', user.My.films)
-    if (aliasUser.my_films && aliasUser.my_films.length > 0) {
-      user.My.films = [...(user.My.films || []), ...(aliasUser.my_films || [])]
-      // aliasUser.my_films = []
-      aliasUserUpdated = mainUserUpdated = true
-    }
-    if (aliasUser.My.films && aliasUser.My.films.length > 0) {
-      user.My.films = [...(user.My.films || []), ...(aliasUser.My.films || [])]
-      // aliasUser.My.films = []
-      aliasUserUpdated = mainUserUpdated = true
-    }
-    if (aliasUser.my_screenings && aliasUser.my_screenings.length > 0) {
-      user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.my_screenings || [])]
-      // aliasUser.my_screenings = []
-      aliasUserUpdated = mainUserUpdated = true
-    }
-    if (aliasUser.My.screenings && aliasUser.My.screenings.length > 0) {
-      user.My.screenings = [...(user.My.screenings || []), ...(aliasUser.My.screenings || [])]
-      // aliasUser.My.screenings = []
-      aliasUserUpdated = mainUserUpdated = true
-    }
-    if (aliasUserUpdated) {
-      // Unset the .My and .my_... properties from aliasUser here for cleaner code above
-      aliasUser.My = {}
-      aliasUser.my_products = []
-      aliasUser.my_films = []
-      aliasUser.my_screenings = []
-      // console.log(`api::getStrapiUser - updating alias user ${aliasUser.id}`)
-      // await setStrapiUser(aliasUser)
-      // console.log(`api::getStrapiUser - updated alias user ${aliasUser.id}`)
-    }
-  }
-  if (mainUserUpdated) {
-    user.My.products = user.my_products || []
-    // console.log(`api::getStrapiUser - updating main user ${user.id}`)
-    // await setStrapiUser(user)
-    // console.log(`api::getStrapiUser - updated main user ${user.id}`)
-  }
+  return result
 }
