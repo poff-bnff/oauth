@@ -94,7 +94,7 @@ export async function getStrapiUser (id) {
 
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `strapi::getStrapiUser - User ${user.id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
-    console.error(msg)
+    console.error(msg) // eslint-disable-line no-console
     throw createError({ statusCode: 409, statusMessage: msg })
   }
 
@@ -124,7 +124,7 @@ export async function setStrapiUser (user) {
   const token = await getStrapiToken()
   const id = `${user.id}`
   // user.id = id
-  console.log(`setStrapiUser, id: ${id}`)
+  // console.log(`setStrapiUser, id: ${id}`)
   return await $fetch(`${config.strapiUrl}/users/${id}`, {
     method: 'PUT',
     headers: {
@@ -457,17 +457,24 @@ export async function linkStrapiUser (mainUserId, aliasUserId) {
 
   const token = await getStrapiToken()
 
-  const result = await $fetch(`${config.strapiUrl}/users/link`, {
+  const result = await $fetch(`${config.strapiUrl}/user/link`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: {
-      mainUserId,
-      aliasUserId
+      mainUser: mainUserId,
+      aliasUser: aliasUserId
     }
   })
 
   return result
+}
+
+const mergeUserMy = (user) => {
+  user.My = user.My || {}
+  user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
+  user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
+  user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
 }

@@ -30,9 +30,9 @@ export default defineEventHandler(async (event) => {
     const strapiUser = await authenticateStrapiUser(user.email)
     try {
       const id = getUserIdFromEvent(event)
-      console.log(`api::oauth GET - user ${strapiUser.id} (${strapiUser.email}). Old user id ${id}`)
+      console.log(`api::oauth GET - user ${strapiUser.id} (${strapiUser.email}). Old user id ${id}`) // eslint-disable-line no-console
     } catch (error) {
-      console.log(`api::oauth GET - no old user in session.`)
+      console.log('api::oauth GET - no old user in session.') // eslint-disable-line no-console
     }
     // if (id) {
     //   const user = await getStrapiUser(id)

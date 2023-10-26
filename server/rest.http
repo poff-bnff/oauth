@@ -1,34 +1,30 @@
 # @hunt_url = https://hunt.poff.ee
 @hunt_url = http://localhost:3000
-@jwt =
-
+@jwt = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im1paGtlbC5wdXRyaW5zaEBnbWFpbC5jb20iLCJjb25maXJtZWQiOnRydWUsInByb2ZpbGUiOnRydWUsImZpcnN0TmFtZSI6Ik1paGtlbCIsImxhc3ROYW1lIjoiUHV0cmluxaEiLCJpYXQiOjE2OTgyNDg2OTIsIm5iZiI6MTY5ODI0ODY5MiwiZXhwIjoxNjk5NDU4MjkyLCJzdWIiOiIxNDgxMyJ9.qPogbNyQN0y7Hm1CkUzm9JVcTCZFh-0aPi2a5JUPIBk
 ### GET user profile
 get {{hunt_url}}/api/me HTTP/1.1
 Authorization: token {{jwt}}
-
 ### Get my favorite films
 get {{hunt_url}}/api/my/film HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
-
 ### Switch my favorite film
 put {{hunt_url}}/api/my/film HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
-
 1599
-
 ### Switch my screening
 put {{hunt_url}}/api/my/screening HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
-
 2366
-
 ### Merge My over all my users
-put {{hunt_url}}/api/my/merge HTTP/1.1
+# gmail 14813
+# poff 17339
+put {{hunt_url}}/api/me/link HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
+17339
 
 ### GET strapi cinemas
 get https://admin.poff.ee/cinemas HTTP/1.1
