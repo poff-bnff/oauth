@@ -67,7 +67,7 @@ export async function fetchEventivalBadges (email) {
     }))
 }
 
-export async function loadEventivalBadges(user) {
+export async function loadEventivalBadges (user) {
   const mainUserEmail = user.email
   const aliasUserEmails = user.aliasUsers.map(user => user.email)
   const emails = [mainUserEmail, ...aliasUserEmails]
@@ -114,7 +114,7 @@ export async function getStrapiUser (id) {
   Object.keys(user).forEach(key => user[key] === null && delete user[key])
   console.log(`api::getStrapiUser - returning user ${user.id}`)
 
-  await mergeUserMy(user)
+  mergeUserMy(user)
 
   return user
 }
@@ -451,13 +451,13 @@ export async function roleCheck (body) {
   return result
 }
 
-const mergeUserMy = async (user) => {
+const mergeUserMy = (user) => {
   user.My = user.My || {}
   user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
   user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
   user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
 }
-export async function collectMyFromAliasUsers (user) {
+export function collectMyFromAliasUsers (user) {
   // eslint-disable-next-line no-console
   console.log('api::strapi - collectMyFromAliasUsers', user.id)
   user.aliasUsers = user.aliasUsers || []
@@ -473,7 +473,7 @@ export async function collectMyFromAliasUsers (user) {
   }
   let mainUserUpdated = false
 
-    // create My
+  // create My
   if (user.My === null) {
     // eslint-disable-next-line no-console
     console.log('api::getStrapiUser - creating My for user', id)
@@ -484,16 +484,16 @@ export async function collectMyFromAliasUsers (user) {
     }
     mainUserUpdated = true
   }
-  console.log('api::getStrapiUser - merging alias users into My', user.My)
+  console.log('api::getStrapiUser - merging alias users into My', user.My) // eslint-disable-line no-console
 
   // Merge values within main user
-  console.log('api::getStrapiUser - merging into My.films', user.My.films)
+  console.log('api::getStrapiUser - merging into My.films', user.My.films) // eslint-disable-line no-console
   if (user.my_films && user.my_films.length > 0) {
     user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
     user.my_films = []
     mainUserUpdated = true
   }
-  console.log('api::getStrapiUser - merging into My.screenings', user.My.screenings)
+  console.log('api::getStrapiUser - merging into My.screenings', user.My.screenings) // eslint-disable-line no-console
   if (user.my_screenings && user.my_screenings.length > 0) {
     user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
     user.my_screenings = []
@@ -503,7 +503,7 @@ export async function collectMyFromAliasUsers (user) {
   // Merge values from alias users
   for (const aliasUser of user.aliasUsers) {
     let aliasUserUpdated = false
-    aliasUser.My = aliasUser.My || {products: [], films: [], screenings: []}
+    aliasUser.My = aliasUser.My || { products: [], films: [], screenings: [] }
     if (aliasUser.my_products && aliasUser.my_products.length > 0) {
       user.my_products = [...(user.my_products || []), ...(aliasUser.my_products || [])]
       aliasUser.my_products = []
