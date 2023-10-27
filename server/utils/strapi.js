@@ -82,8 +82,7 @@ export async function getStrapiUser (id) {
     throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
   }
   const token = await getStrapiToken()
-  // eslint-disable-next-line no-console
-  console.log(`getStrapiUser, id: ${id}`)
+  console.log(`getStrapiUser, id: ${id}`) // eslint-disable-line no-console
 
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -91,6 +90,8 @@ export async function getStrapiUser (id) {
   if (!user) {
     throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
   }
+
+  console.log(`... with mainUser ${user.mainUser ? user.mainUser.id : null} and aliasUsers ${user.aliasUsers ? user.aliasUsers.map(u => u.id) : null}`) // eslint-disable-line no-console
 
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `strapi::getStrapiUser - User ${user.id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
@@ -112,8 +113,8 @@ export async function getStrapiUser (id) {
   // remove properties with null values from profile
   Object.keys(user.user_profile).forEach(key => user.user_profile[key] === null && delete user.user_profile[key])
   Object.keys(user).forEach(key => user[key] === null && delete user[key])
-  console.log(`api::getStrapiUser - returning user ${user.id}`)
 
+  // TODO: will become obsolete, when we finish with move to My
   mergeUserMy(user)
 
   return user
