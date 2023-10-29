@@ -232,6 +232,42 @@ export async function setStrapiMyFilm (user, cassetteId) {
   return result.My
 }
 
+export async function setStrapiMyScreening (user, screeningId) {
+  if (!screeningId) return null
+  if (!user) return null
+
+  const token = await getStrapiToken()
+  const My = user.My || { screenings: [] }
+  const myScreenings = (My.screenings || []).map(screening => ({ id: screening.id }))
+
+  // If the screening was already in the user's screenings, remove it. Otherwise, add it.
+  const index = myScreenings.findIndex(screening => screening.id === screeningId)
+  console.log('setStrapiMyFilm', screeningId, index)
+  if (index > -1) {
+    myScreenings.splice(index, 1)
+  } else {
+    myScreenings.push({ id: screeningId })
+  }
+
+  My.screenings = myScreenings
+
+  // TODO: Use setStrapiMy
+  // Update user's screenings list
+  const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      id: user.id,
+      My
+    }
+  })
+
+  return result.My
+}
+
 export async function setStrapiMy (user) {
   if (!user) return null
   user.My = user.My || {}
@@ -274,41 +310,6 @@ export async function setFavorites (user, favorites) {
       'Content-Type': 'application/json'
     },
     body: favorites
-  })
-
-  return result.My
-}
-
-export async function setStrapiMyScreening (user, screeningId) {
-  if (!screeningId) return null
-  if (!user) return null
-
-  const token = await getStrapiToken()
-  const My = user.My || { screenings: [] }
-  const myScreenings = (My.screenings || []).map(screening => ({ id: screening.id }))
-
-  // If the screening was already in the user's screenings, remove it. Otherwise, add it.
-  const index = myScreenings.findIndex(screening => screening.id === screeningId)
-  if (index > -1) {
-    myScreenings.splice(index, 1)
-  } else {
-    myScreenings.push({ id: screeningId })
-  }
-
-  My.screenings = myScreenings
-
-  // TODO: Use setStrapiMy
-  // Update user's screenings list
-  const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: {
-      id: user.id,
-      My
-    }
   })
 
   return result.My
