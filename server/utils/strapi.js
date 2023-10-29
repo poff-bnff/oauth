@@ -284,8 +284,8 @@ export async function setStrapiMyScreening (user, screeningId) {
   if (!user) return null
 
   const token = await getStrapiToken()
-  const my = user.My || { screenings: [] }
-  const myScreenings = (my.screenings || []).map(screening => ({ id: screening.id }))
+  const My = user.My || { screenings: [] }
+  const myScreenings = (My.screenings || []).map(screening => ({ id: screening.id }))
 
   // If the screening was already in the user's screenings, remove it. Otherwise, add it.
   const index = myScreenings.findIndex(screening => screening.id === screeningId)
@@ -295,7 +295,7 @@ export async function setStrapiMyScreening (user, screeningId) {
     myScreenings.push({ id: screeningId })
   }
 
-  my.screenings = myScreenings
+  My.screenings = myScreenings
 
   // TODO: Use setStrapiMy
   // Update user's screenings list
@@ -307,7 +307,7 @@ export async function setStrapiMyScreening (user, screeningId) {
     },
     body: {
       id: user.id,
-      My: my
+      My
     }
   })
 
