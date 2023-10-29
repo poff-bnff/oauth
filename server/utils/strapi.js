@@ -206,7 +206,7 @@ export async function setStrapiMyFilm (user, cassetteId) {
 
   // If the cassette was already in the user's favorites, remove it. Otherwise, add it.
   const index = myFilms.findIndex(film => film.id === cassetteId)
-  console.log('setStrapiMyFilm', cassetteId, index)
+  console.log('setStrapiMyFilm', { myFilms, cassetteId, index })
   if (index > -1) {
     myFilms.splice(index, 1)
   } else {
