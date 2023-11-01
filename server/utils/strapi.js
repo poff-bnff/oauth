@@ -242,7 +242,7 @@ export async function setStrapiMyScreening (user, screeningId) {
 
   // If the screening was already in the user's screenings, remove it. Otherwise, add it.
   const index = myScreenings.findIndex(screening => screening.id === screeningId)
-  console.log('setStrapiMyFilm', { myScreenings, screeningId, index })
+  console.log('setStrapiMyFilm', { count: myScreenings.length, action: index === -1 ? 'add' : 'remove', screeningId })
   if (index > -1) {
     myScreenings.splice(index, 1)
   } else {
