@@ -474,9 +474,20 @@ export async function linkStrapiUser (mainUserId, aliasUserId) {
   return result
 }
 
+const makeUnique = (arr, prop) => {
+  const obj = {}
+  return Object.keys(arr.reduce((prev, next) => {
+    if (!obj[next[prop]]) obj[next[prop]] = next
+    return obj
+  }, obj)).map(i => obj[i])
+}
+
 const mergeUserMy = (user) => {
   user.My = user.My || {}
-  user.My.products = [...(user.My.products || []), ...(user.my_products || [])]
-  user.My.films = [...(user.My.films || []), ...(user.my_films || [])]
-  user.My.screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
+  const products = [...(user.My.products || []), ...(user.my_products || [])]
+  user.My.products = makeUnique(products, 'id')
+  const films = [...(user.My.films || []), ...(user.my_films || [])]
+  user.My.films = makeUnique(films, 'id')
+  const screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
+  user.My.screenings = makeUnique(screenings, 'id')
 }
