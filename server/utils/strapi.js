@@ -201,8 +201,8 @@ export async function setStrapiMyFilm (user, cassetteId) {
   if (!user) return null
 
   const token = await getStrapiToken()
-  const my = user.My || { films: [] }
-  const myFilms = (my.films || []).map(film => ({ id: film.id }))
+  const My = user.My || { films: [] }
+  const myFilms = (My.films || []).map(film => ({ id: film.id }))
 
   // If the cassette was already in the user's favorites, remove it. Otherwise, add it.
   const index = myFilms.findIndex(film => film.id === cassetteId)
@@ -213,7 +213,7 @@ export async function setStrapiMyFilm (user, cassetteId) {
     myFilms.push({ id: cassetteId })
   }
 
-  my.films = myFilms
+  My.films = myFilms
 
   // TODO: Use setStrapiMy
   // Update user's favorites list
@@ -225,7 +225,7 @@ export async function setStrapiMyFilm (user, cassetteId) {
     },
     body: {
       id: user.id,
-      My: my
+      My
     }
   })
 
@@ -253,6 +253,40 @@ export async function setStrapiMyScreening (user, screeningId) {
 
   // TODO: Use setStrapiMy
   // Update user's screenings list
+  const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      id: user.id,
+      My
+    }
+  })
+
+  return result.My
+}
+
+export async function setStrapiMyCourseEvent (user, courseEventId) {
+  if (!courseEventId) return null
+  if (!user) return null
+
+  const token = await getStrapiToken()
+  const My = user.My || { courseEvents: [] }
+  const myCourseEvents = (My.courseEvents || []).map(ce => ({ id: ce.id }))
+
+  // If the course event was already in the user's course events, remove it. Otherwise, add it.
+  const index = myCourseEvents.findIndex(ce => ce.id === courseEventId)
+  console.info('setStrapiMyCourseEvent', { user: user.id, count: myCourseEvents.length, action: index === -1 ? 'add' : 'remove', courseEvent: courseEventId }) // eslint-disable-line no-console
+  if (index > -1) {
+    myCourseEvents.splice(index, 1)
+  } else {
+    myCourseEvents.push({ id: courseEventId })
+  }
+
+  My.courseEvents = myCourseEvents
+
   const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
     headers: {
