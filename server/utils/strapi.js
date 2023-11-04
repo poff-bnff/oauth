@@ -273,8 +273,8 @@ export async function setStrapiMyCourseEvent (user, courseEventId) {
   if (!user) return null
 
   const token = await getStrapiToken()
-  const My = user.My || { courseEvents: [] }
-  const myCourseEvents = (My.courseEvents || []).map(ce => ({ id: ce.id }))
+  const My = user.My || { course_events: [] }
+  const myCourseEvents = (My.course_events || []).map(ce => ({ id: ce.id }))
 
   // If the course event was already in the user's course events, remove it. Otherwise, add it.
   const index = myCourseEvents.findIndex(ce => ce.id === courseEventId)
@@ -285,7 +285,7 @@ export async function setStrapiMyCourseEvent (user, courseEventId) {
     myCourseEvents.push({ id: courseEventId })
   }
 
-  My.courseEvents = myCourseEvents
+  My.course_events = myCourseEvents
 
   const result = await $fetch(`${config.strapiUrl}/users/${user.id}`, {
     method: 'PUT',
