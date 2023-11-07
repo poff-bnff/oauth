@@ -4,6 +4,7 @@ export default defineEventHandler(async (event) => {
   console.log('api::validate::eventUrl.get', id) // eslint-disable-line no-console
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
   await loadEventivalBadges(user)
+  console.log('api::validate::eventUrl.get badges loaded', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
 
   const whitelist = [
     '2023 GUEST',
@@ -26,7 +27,6 @@ export default defineEventHandler(async (event) => {
     .filter(badgeName => whitelist.includes(badgeName))
   if (badges.length === 0) {
     return {
-      status: 'error',
       message: 'You are not allowed to access this page. with existing badges:',
       existingBadges: user.badges.map(badge => badge.type.name)
     }
