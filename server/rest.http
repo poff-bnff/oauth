@@ -1,6 +1,6 @@
 # @hunt_url = https://hunt.poff.ee
 @hunt_url = http://localhost:3000
-@jwt = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im1paGtlbC5wdXRyaW5zaEBnbWFpbC5jb20iLCJjb25maXJtZWQiOnRydWUsInByb2ZpbGUiOnRydWUsImZpcnN0TmFtZSI6Ik1paGtlbCIsImxhc3ROYW1lIjoiUHV0cmluxaEiLCJpYXQiOjE2OTgyNDg2OTIsIm5iZiI6MTY5ODI0ODY5MiwiZXhwIjoxNjk5NDU4MjkyLCJzdWIiOiIxNDgxMyJ9.qPogbNyQN0y7Hm1CkUzm9JVcTCZFh-0aPi2a5JUPIBk
+@jwt = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im1paGtlbC5wdXRyaW5zaEBnbWFpbC5jb20iLCJjb25maXJtZWQiOnRydWUsInByb2ZpbGUiOnRydWUsImZpcnN0TmFtZSI6Ik1paGtlbCIsImxhc3ROYW1lIjoiUHV0cmluxaEiLCJpYXQiOjE2OTkzODA0MjIsIm5iZiI6MTY5OTM4MDQyMiwiZXhwIjoxNzAwNTkwMDIyLCJzdWIiOiIxNDgxMyJ9.EaCL05M1cgdiNqyiLlBWaQ-JfNsg1HyrGosCyiQt2V8
 
 ### GET user profile
 get {{hunt_url}}/api/me HTTP/1.1
@@ -10,6 +10,13 @@ Authorization: token {{jwt}}
 get {{hunt_url}}/api/my/film HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
+
+### Switch my favorite course event
+put {{hunt_url}}/api/my/courseevent HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
+1181
 
 ### Switch my favorite film
 put {{hunt_url}}/api/my/film HTTP/1.1
@@ -23,7 +30,14 @@ put {{hunt_url}}/api/my/screening HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 
-2366
+3766
+
+### Validate my badges and return video url from course event
+put {{hunt_url}}/api/validate/eventUrl HTTP/1.1
+Authorization: token {{jwt}}
+Content-Type: application/json
+
+944
 
 ### Merge My over all my users
 # gmail 14813
