@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
       existingBadges: user.badges.map(badge => badge.type.name)
     }
   }
-
+  console.log('api::validate::eventUrl.get badges', badges) // eslint-disable-line no-console
   const courseEventId = parseInt(await readBody(event))
   console.log('api::validate::eventUrl.get courseEventId', courseEventId) // eslint-disable-line no-console
   const courseEventUrl = await readCourseEventVideolevelsUrl(courseEventId)
