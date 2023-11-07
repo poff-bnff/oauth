@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
     .filter(badgeName => whitelist.includes(badgeName))
   if (badges.length === 0) {
     return {
-      status: 403,
+      status: 'error',
       message: 'You are not allowed to access this page. with existing badges:',
       existingBadges: user.badges.map(badge => badge.type.name)
     }
