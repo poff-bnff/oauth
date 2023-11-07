@@ -1,10 +1,12 @@
 export default defineEventHandler(async (event) => {
   const id = getUserIdFromEvent(event)
   const user = await getStrapiUser(id)
-  console.log('api::validate::eventUrl.get', id) // eslint-disable-line no-console
+  const query = getQuery(event)
+
+  console.log('api::validate::eventUrl.get', { id, query }) // eslint-disable-line no-console
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+
   await loadEventivalBadges(user)
-  console.log('api::validate::eventUrl.get badges loaded', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
 
   const whitelist = [
     '2023 GUEST',
@@ -25,6 +27,7 @@ export default defineEventHandler(async (event) => {
   const badges = user.badges
     .map(badge => badge.type.name)
     .filter(badgeName => whitelist.includes(badgeName))
+  console.log('api::validate::eventUrl.get badges loaded', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
 
   if (badges.length === 0) {
     console.log('api::validate::eventUrl.get no badges', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
