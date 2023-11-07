@@ -1,16 +1,17 @@
 export default defineEventHandler(async (event) => {
   const id = getUserIdFromEvent(event)
-  const query = getQuery(event)
-  const courseEventId = parseInt(Object.keys(query)[0])
-  const courseEventId2 = parseInt(await readBody(event))
+  // const query = getQuery(event)
+  // const courseEventId = parseInt(Object.keys(query)[0])
+  const courseEventId = parseInt(await readBody(event))
 
   console.log('api::validate::eventUrl.get', { id, query, courseEventId, courseEventId2 }) // eslint-disable-line no-console
+
   const user = await getStrapiUser(id)
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
   await loadEventivalBadges(user)
 
-  const whitelist = [
+  const WHITELIST = [
     '2023 GUEST',
     '2023 Industry PRO ONLINE',
     '2023 Industry PRO',
@@ -28,7 +29,7 @@ export default defineEventHandler(async (event) => {
   ]
   const badges = user.badges
     .map(badge => badge.type.name)
-    .filter(badgeName => whitelist.includes(badgeName))
+    .filter(badgeName => WHITELIST.includes(badgeName))
   console.log('api::validate::eventUrl.get badges loaded', user.badges.map(badge => badge.type.name), badges) // eslint-disable-line no-console
 
   if (badges.length === 0) {
