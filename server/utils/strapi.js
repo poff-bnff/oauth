@@ -75,8 +75,9 @@ export async function loadEventivalBadges (user) {
   for (const email of emails) {
     console.log('loadEventivalBadges', email)
     const evBadges = await fetchEventivalBadges(email)
-    console.log('got', evBadges)
+    console.log('got', evBadges.map(b => b.type.name)))
     user.badges = [...user.badges, ...evBadges]
+    console.log('user.badges', user.badges.map(b => b.type.name)))
   }
 }
 
