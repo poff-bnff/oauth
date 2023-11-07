@@ -71,10 +71,19 @@ export async function loadEventivalBadges (user) {
   const mainUserEmail = user.email
   const aliasUserEmails = user.aliasUsers.map(user => user.email)
   const emails = [mainUserEmail, ...aliasUserEmails]
-  user.badges = {}
+  user.badges = []
   for (const email of emails) {
-    user.badges[email] = await fetchEventivalBadges(email)
+    console.log('loadEventivalBadges', email)
+    const evBadges = await fetchEventivalBadges(email)
+    console.log('got', evBadges)
+    user.badges = [...user.badges, ...evBadges]
   }
+}
+
+export async function readCourseEventVideolevelsUrl (courseEventId) {
+  const token = await getStrapiToken()
+  const courseEvent = await $fetch(`${config.strapiUrl}/course-events/${courseEventId}`, { headers: { Authorization: `Bearer ${token}` } })
+  return courseEvent.video_url
 }
 
 export async function getStrapiUser (id) {
