@@ -1,13 +1,15 @@
 export default defineEventHandler(async (event) => {
   console.log('api::validate::eventUrl.get', event) // eslint-disable-line no-console
-  // const query = getQuery(event)
-  // const courseEventId = parseInt(Object.keys(query)[0])
-  const courseEventId = parseInt(await readBody(event))
+  const q = getQuery(event)
+  console.log('api::validate::eventUrl.get query', q) // eslint-disable-line no-console
+  const courseEventId = parseInt(Object.keys(q)[0])
+  console.log('api::validate::eventUrl.get courseEventId', courseEventId) // eslint-disable-line no-console
+  const courseEventId2 = parseInt(await readBody(event))
+  console.log('api::validatqentUrl.get', { id, query, courseEventId, courseEventId2 }) // eslint-disable-line no-console
   return courseEventId
-  console.log('api::validate::eventUrl.get', { id, query, courseEventId, courseEventId2 }) // eslint-disable-line no-console
 
   const id = getUserIdFromEvent(event)
-  const user = await getStrapiUser(id)
+  const user = await getStrapiUser(id)query: q
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
   await loadEventivalBadges(user)
