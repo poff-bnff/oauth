@@ -1,11 +1,11 @@
 export default defineEventHandler(async (event) => {
-  const id = getUserIdFromEvent(event)
   // const query = getQuery(event)
   // const courseEventId = parseInt(Object.keys(query)[0])
   const courseEventId = parseInt(await readBody(event))
-
+  return courseEventId
   console.log('api::validate::eventUrl.get', { id, query, courseEventId, courseEventId2 }) // eslint-disable-line no-console
 
+  const id = getUserIdFromEvent(event)
   const user = await getStrapiUser(id)
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
