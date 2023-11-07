@@ -37,5 +37,9 @@ export default defineEventHandler(async (event) => {
   }
   const courseEventUrl = await readCourseEventVideolevelsUrl(courseEventId)
   console.log(`api::validate::eventUrl.get user ${user.id} was granted access to courseEvent ${courseEventId}: ${courseEventUrl}`) // eslint-disable-line no-console
-  return courseEventUrl
+  return {
+    message: 'You are allowed to access this page.',
+    status: 200,
+    videoUrl: courseEventUrl
+  }
 })
