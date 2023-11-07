@@ -25,7 +25,9 @@ export default defineEventHandler(async (event) => {
   const badges = user.badges
     .map(badge => badge.type.name)
     .filter(badgeName => whitelist.includes(badgeName))
+
   if (badges.length === 0) {
+    console.log('api::validate::eventUrl.get no badges', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
     return {
       message: 'You are not allowed to access this page. with existing badges:',
       existingBadges: user.badges.map(badge => badge.type.name)
@@ -33,7 +35,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const courseEventId = parseInt(await readBody(event))
-
+  console.log('api::validate::eventUrl.get courseEventId', courseEventId) // eslint-disable-line no-console
   const courseEventUrl = await readCourseEventVideolevelsUrl(courseEventId)
   console.log('api::validate::eventUrl.get courseEventUrl', courseEventUrl) // eslint-disable-line no-console
   return courseEventUrl
