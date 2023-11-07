@@ -22,13 +22,13 @@ export default defineEventHandler(async (event) => {
     '2023 VOLUNTEER'
   ]
   const badges = user.badges
-    .map(badge => badge.name)
+    .map(badge => badge.type.name)
     .filter(badgeName => whitelist.includes(badgeName))
   if (badges.length === 0) {
     return {
       status: 403,
       message: 'You are not allowed to access this page. with existing badges:',
-      existingBadges: user.badges
+      existingBadges: user.badges.map(badge => badge.type.name)
     }
   }
 
