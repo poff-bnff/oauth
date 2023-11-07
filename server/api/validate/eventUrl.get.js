@@ -1,4 +1,5 @@
 export default defineEventHandler(async (event) => {
+  console.log('api::validate::eventUrl.get', event) // eslint-disable-line no-console
   // const query = getQuery(event)
   // const courseEventId = parseInt(Object.keys(query)[0])
   const courseEventId = parseInt(await readBody(event))
