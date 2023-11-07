@@ -1,10 +1,7 @@
 export default defineEventHandler(async (event) => {
-  console.log('api::validate::eventUrl.get', event) // eslint-disable-line no-console
   const q = getQuery(event)
-  console.log('api::validate::eventUrl.get query', q) // eslint-disable-line no-console
   const courseEventId = parseInt(Object.keys(q)[0])
   console.log('api::validate::eventUrl.get courseEventId', courseEventId) // eslint-disable-line no-console
-  return courseEventId
 
   const id = getUserIdFromEvent(event)
   const user = await getStrapiUser(id)
