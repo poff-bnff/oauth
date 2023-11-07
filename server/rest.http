@@ -33,11 +33,9 @@ Content-Type: application/json
 3766
 
 ### Validate my badges and return video url from course event
-get {{hunt_url}}/api/validate/eventUrl HTTP/1.1
+get {{hunt_url}}/api/validate/eventUrl?1131 HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
-
-1311
 
 ### Merge My over all my users
 # gmail 14813

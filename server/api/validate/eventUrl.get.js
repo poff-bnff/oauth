@@ -1,7 +1,6 @@
 export default defineEventHandler(async (event) => {
   const q = getQuery(event)
   const courseEventId = parseInt(Object.keys(q)[0])
-  console.log('api::validate::eventUrl.get courseEventId', courseEventId) // eslint-disable-line no-console
 
   const id = getUserIdFromEvent(event)
   const user = await getStrapiUser(id)
@@ -28,17 +27,15 @@ export default defineEventHandler(async (event) => {
   const badges = user.badges
     .map(badge => badge.type.name)
     .filter(badgeName => WHITELIST.includes(badgeName))
-  console.log('api::validate::eventUrl.get badges loaded', user.badges.map(badge => badge.type.name), badges) // eslint-disable-line no-console
 
   if (badges.length === 0) {
-    console.log('api::validate::eventUrl.get no badges', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
+    console.log(`api::validate::eventUrl.get user ${user.id} was denied access to courseEventId ${courseEventId}`) // eslint-disable-line no-console
     return {
       message: 'You are not allowed to access this page. with existing badges:',
       existingBadges: user.badges.map(badge => badge.type.name)
     }
   }
-  console.log('api::validate::eventUrl.get badges', badges) // eslint-disable-line no-console
   const courseEventUrl = await readCourseEventVideolevelsUrl(courseEventId)
-  console.log('api::validate::eventUrl.get courseEventUrl', courseEventUrl) // eslint-disable-line no-console
+  console.log(`api::validate::eventUrl.get user ${user.id} was granted access to courseEvent ${courseEventId}: ${courseEventUrl}`) // eslint-disable-line no-console
   return courseEventUrl
 })
