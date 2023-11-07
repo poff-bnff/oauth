@@ -73,11 +73,11 @@ export async function loadEventivalBadges (user) {
   const emails = [mainUserEmail, ...aliasUserEmails]
   user.badges = []
   for (const email of emails) {
-    console.log('loadEventivalBadges', email)
+    console.log('loadEventivalBadges', email) // eslint-disable-line no-console
     const evBadges = await fetchEventivalBadges(email)
-    console.log('got', evBadges.map(b => b.type.name)))
+    console.log('got', evBadges.map(b => b.type.name)) // eslint-disable-line no-console
     user.badges = [...user.badges, ...evBadges]
-    console.log('user.badges', user.badges.map(b => b.type.name)))
+    console.log('user.badges', user.badges.map(b => b.type.name)) // eslint-disable-line no-console
   }
 }
 
