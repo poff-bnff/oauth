@@ -5,7 +5,7 @@ export default defineEventHandler(async (event) => {
   const courseEventId = parseInt(Object.keys(q)[0])
   console.log('api::validate::eventUrl.get courseEventId', courseEventId) // eslint-disable-line no-console
   const courseEventId2 = parseInt(await readBody(event))
-  console.log('api::validatqentUrl.get', { id, query, courseEventId, courseEventId2 }) // eslint-disable-line no-console
+  console.log('api::validatqentUrl.get', { query, courseEventId, courseEventId2 }) // eslint-disable-line no-console
   return courseEventId
 
   const id = getUserIdFromEvent(event)
