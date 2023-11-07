@@ -79,7 +79,9 @@ export async function loadEventivalBadges (user) {
 }
 
 export async function readCourseEventVideolevelsUrl (courseEventId) {
+  console.log('readCourseEventVideolevelsUrl', courseEventId) // eslint-disable-line no-console
   const token = await getStrapiToken()
+  console.log('readCourseEventVideolevelsUrl', token) // eslint-disable-line no-console
   const strapiApiUrl = `${config.strapiUrl}/course-events/${courseEventId}`
   console.log('readCourseEventVideolevelsUrl', strapiApiUrl) // eslint-disable-line no-console
   const courseEvent = await $fetch(

@@ -2,8 +2,10 @@ export default defineEventHandler(async (event) => {
   const id = getUserIdFromEvent(event)
   const user = await getStrapiUser(id)
   const query = getQuery(event)
+  const courseEventId = parseInt(Object.keys(query)[0])
+  const courseEventId2 = parseInt(await readBody(event))
 
-  console.log('api::validate::eventUrl.get', { id, query }) // eslint-disable-line no-console
+  console.log('api::validate::eventUrl.get', { id, query, courseEventId, courseEventId2 }) // eslint-disable-line no-console
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
   await loadEventivalBadges(user)
@@ -27,7 +29,7 @@ export default defineEventHandler(async (event) => {
   const badges = user.badges
     .map(badge => badge.type.name)
     .filter(badgeName => whitelist.includes(badgeName))
-  console.log('api::validate::eventUrl.get badges loaded', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
+  console.log('api::validate::eventUrl.get badges loaded', user.badges.map(badge => badge.type.name), badges) // eslint-disable-line no-console
 
   if (badges.length === 0) {
     console.log('api::validate::eventUrl.get no badges', user.badges.map(badge => badge.type.name)) // eslint-disable-line no-console
@@ -37,8 +39,6 @@ export default defineEventHandler(async (event) => {
     }
   }
   console.log('api::validate::eventUrl.get badges', badges) // eslint-disable-line no-console
-  const courseEventId = parseInt(await readBody(event))
-  console.log('api::validate::eventUrl.get courseEventId', courseEventId) // eslint-disable-line no-console
   const courseEventUrl = await readCourseEventVideolevelsUrl(courseEventId)
   console.log('api::validate::eventUrl.get courseEventUrl', courseEventUrl) // eslint-disable-line no-console
   return courseEventUrl
