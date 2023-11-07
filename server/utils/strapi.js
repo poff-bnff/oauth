@@ -73,17 +73,18 @@ export async function loadEventivalBadges (user) {
   const emails = [mainUserEmail, ...aliasUserEmails]
   user.badges = []
   for (const email of emails) {
-    console.log('loadEventivalBadges', email) // eslint-disable-line no-console
     const evBadges = await fetchEventivalBadges(email)
-    console.log('got', evBadges.map(b => b.type.name)) // eslint-disable-line no-console
     user.badges = [...user.badges, ...evBadges]
-    console.log('user.badges', user.badges.map(b => b.type.name)) // eslint-disable-line no-console
   }
 }
 
 export async function readCourseEventVideolevelsUrl (courseEventId) {
   const token = await getStrapiToken()
-  const courseEvent = await $fetch(`${config.strapiUrl}/course-events/${courseEventId}`, { headers: { Authorization: `Bearer ${token}` } })
+  const strapiApiUrl = `${config.strapiUrl}/course-events/${courseEventId}`
+  console.log('readCourseEventVideolevelsUrl', strapiApiUrl) // eslint-disable-line no-console
+  const courseEvent = await $fetch(
+    strapiApiUrl,
+    { headers: { Authorization: `Bearer ${token}` } })
   return courseEvent.video_url
 }
 

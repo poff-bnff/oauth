@@ -35,5 +35,6 @@ export default defineEventHandler(async (event) => {
   const courseEventId = parseInt(await readBody(event))
 
   const courseEventUrl = await readCourseEventVideolevelsUrl(courseEventId)
+  console.log('api::validate::eventUrl.get courseEventUrl', courseEventUrl) // eslint-disable-line no-console
   return courseEventUrl
 })
