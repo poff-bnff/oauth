@@ -35,11 +35,15 @@ export default defineEventHandler(async (event) => {
       existingBadges: user.badges.map(badge => badge.type.name)
     }
   }
-  const courseEventUrl = await readCourseEventVideolevelsUrl(courseEventId)
-  console.log(`api::validate::eventUrl.get user ${user.id} was granted access to courseEvent ${courseEventId}: ${courseEventUrl}`) // eslint-disable-line no-console
+  const videoUrl = await readCourseEventVideolevelsUrl(courseEventId)
+  console.log(`api::validate::eventUrl.get user ${user.id} was granted access to courseEvent ${courseEventId}: ${videoUrl}`) // eslint-disable-line no-console
+  const videoProvider = videoUrl.split('/')[2]
+  const videoId = videoUrl.split('/bc/')[1].split('/')[0]
   return {
     message: 'You are allowed to access this page.',
     status: 200,
-    videoUrl: courseEventUrl
+    videoUrl,
+    videoProvider,
+    videoId
   }
 })
