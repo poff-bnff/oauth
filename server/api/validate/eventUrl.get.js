@@ -37,13 +37,23 @@ export default defineEventHandler(async (event) => {
   }
   const videoUrl = await readCourseEventVideolevelsUrl(courseEventId)
   console.log(`api::validate::eventUrl.get user ${user.id} was granted access to courseEvent ${courseEventId}: ${videoUrl}`) // eslint-disable-line no-console
-  const videoProvider = videoUrl.split('/')[2]
-  const videoId = videoUrl.split('/bc/')[1].split('/')[0]
-  return {
-    message: 'You are allowed to access this page.',
-    status: 200,
-    videoUrl,
-    videoProvider,
-    videoId
+  try {
+    const videoProvider = videoUrl.split('/')[2]
+    const videoId = videoUrl.split('/bc/')[1].split('/')[0]
+    return {
+      message: 'You are allowed to access this video.',
+      status: 200,
+      videoUrl,
+      videoProvider,
+      videoId
+    }
+  } catch (error) {
+    return {
+      message: 'You are allowed to access the video but alas, there is no videoUrl.',
+      status: 200,
+      videoUrl: null,
+      videoProvider: null,
+      videoId: null
+    }
   }
 })
