@@ -535,3 +535,84 @@ const mergeUserMy = (user) => {
   const screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
   user.My.screenings = makeUnique(screenings, 'id')
 }
+
+export async function createStrapiPerson (user) {
+  if (!user) return null
+  const token = await getStrapiToken()
+
+  // if missing profile, create it first
+  if (!user.user_profile) {
+    // eslint-disable-next-line no-console
+    console.log('api::createStrapiPerson - creating profile for user', user.id)
+    user.user_profile = await createStrapiUserProfile(user)
+  }
+  const profile = user.user_profile
+  const createPerson = {
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    firstNameLastName: `${profile.firstName} ${profile.lastName}`,
+    eMail: profile.email,
+    phoneNr: profile.phoneNr,
+    profile_img: profile.picture,
+    country: profile.country
+  }
+  // eslint-disable-next-line no-console
+  console.log('createStrapiPerson create', createPerson.firstNameLastName)
+
+  const person = await $fetch(`${config.strapiUrl}/people`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: createPerson
+  })
+
+  console.log('createStrapiPerson created', createPerson.firstNameLastName)
+
+  await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      id: user.id,
+      person: person.id
+    }
+  })
+
+  console.log('createStrapiPerson user updated')
+
+  return person
+}
+
+export async function getStrapiPerson (id) {
+  if (!id) return null
+  const token = await getStrapiToken()
+
+  const person = await $fetch(`${config.strapiUrl}/people/${id}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+
+  return person
+}
+
+export async function setStrapiPerson (personData) {
+  if (!personData) return null
+  const token = await getStrapiToken()
+
+  console.log('setStrapiPerson', personData)
+  const url = `${config.strapiUrl}/people/${personData.id}`
+  console.log('setStrapiPerson url', url)
+  const person = await $fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: personData
+  })
+  console.log('setStrapiPerson returning', person)
+  return person
+}
