@@ -26,13 +26,17 @@ export default defineEventHandler(async (event) => {
   }
   // if body.data is present, it's a stringified JSON object and needs to be parsed
   if (body.data) {
-    const data = JSON.parse(body.data.toString())
-      // filter out null values
-      .filter(({ name, data }) => data !== null)
-    Object.keys(data).forEach((key) => {
-      body[key] = data[key]
+    const bodyData = JSON.parse(body.data.toString())
+    // filter out null values abd add to body
+    Object.keys(bodyData).filter(key => bodyData[key] !== null).forEach((key) => {
+      body.push({
+        name: key,
+        data: bodyData[key].toString()
+      })
     })
+    delete body.data
   }
+  console.log('api::person PUT - body', body.map(({ name, filename, type }) => ({ name, filename, type }))) // eslint-disable-line no-console
   for (let ix = 0; ix < body.length; ix++) {
     const { name, data, filename, type } = body[ix]
     if (name === 'files.picture') {
