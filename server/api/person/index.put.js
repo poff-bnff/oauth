@@ -4,7 +4,7 @@ export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
   const id = getUserIdFromEvent(event)
   console.log('api::person PUT - user id', id) // eslint-disable-line no-console
-  console.log('api::person PUT - body', body.map(({ name, filename, type }) => ({ name, filename, type }))) // eslint-disable-line no-console
+  console.log('api::person PUT - body', body) // eslint-disable-line no-console
   const user = await getStrapiUser(id)
   if (!user) {
     throw createError({
