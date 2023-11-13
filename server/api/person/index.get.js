@@ -8,5 +8,5 @@ export default defineEventHandler(async (event) => {
     user.person = await createStrapiPerson(user)
   }
 
-  return user.person
+  return await getStrapiPerson(user.person.id)
 })
