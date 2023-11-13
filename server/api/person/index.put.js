@@ -24,6 +24,13 @@ export default defineEventHandler(async (event) => {
     id: user.person.id,
     images: []
   }
+  // if body.data is present, it's a stringified JSON object and needs to be parsed
+  if (body.data) {
+    const data = JSON.parse(body.data.toString())
+    Object.keys(data).forEach((key) => {
+      body[key] = data[key]
+    })
+  }
   for (let ix = 0; ix < body.length; ix++) {
     const { name, data, filename, type } = body[ix]
     if (name === 'files.picture') {
