@@ -24,9 +24,11 @@ export default defineEventHandler(async (event) => {
     id: user.person.id,
     images: []
   }
-  // if body.data is present, it's a stringified JSON object and needs to be parsed
+  // if body[0].data is present, it's a stringified JSON object and needs to be parsed
   if (body.data) {
-    const bodyData = JSON.parse(body.data.toString())
+    const bodyData = JSON.parse(body[0].data.toString())
+    body[0].data = {}
+    console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
     // filter out null values abd add to body
     Object.keys(bodyData).filter(key => bodyData[key] !== null).forEach((key) => {
       body.push({
@@ -34,7 +36,6 @@ export default defineEventHandler(async (event) => {
         data: bodyData[key].toString()
       })
     })
-    delete body.data
   }
   console.log('api::person PUT - body', body.map(({ name, filename, type }) => ({ name, filename, type }))) // eslint-disable-line no-console
   for (let ix = 0; ix < body.length; ix++) {
