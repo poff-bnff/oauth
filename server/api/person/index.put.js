@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     images: []
   }
   // if body[0].data is present, it's a stringified JSON object and needs to be parsed
-  if (body.data) {
+  if (body[0].data) {
     const bodyData = JSON.parse(body[0].data.toString())
     body[0].data = {}
     console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
