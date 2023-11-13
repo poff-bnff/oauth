@@ -29,13 +29,17 @@ export default defineEventHandler(async (event) => {
     const bodyData = JSON.parse(body[0].data.toString())
     delete body[0].data
     console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
-    // filter out null values abd add to body
-    Object.keys(bodyData).filter(key => bodyData[key] !== null).forEach((key) => {
-      body.push({
-        name: key,
-        data: bodyData[key].toString()
+    // filter out empty values
+    Object.keys(bodyData)
+      .filter(key => bodyData[key] !== null)
+      .filter(key => bodyData[key] !== undefined)
+      .filter(key => bodyData[key] !== '')
+      .forEach((key) => {
+        body.push({
+          name: key,
+          data: bodyData[key].toString()
+        })
       })
-    })
   }
   console.log('api::person PUT - body', body.map(({ name, filename, type }) => ({ name, filename, type }))) // eslint-disable-line no-console
   for (let ix = 0; ix < body.length; ix++) {
