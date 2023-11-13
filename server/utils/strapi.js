@@ -181,18 +181,18 @@ export async function setStrapiUserProfile (profileId, body) {
   })
 }
 
-export async function uploadStrapiImage (file) {
+export async function uploadStrapiImage (file, ref, refId) {
   if (!file) return null
 
   const token = await getStrapiToken()
   const formData = new FormData()
 
-  const { name, filename, data: databuff, profileId } = file
+  const { name, filename, data: databuff } = file
   const blob = new Blob([databuff])
 
   formData.append('files', blob, filename)
-  formData.append('ref', 'user-profile')
-  formData.append('refId', profileId)
+  formData.append('ref', ref)
+  formData.append('refId', refId)
   formData.append('field', name)
   try {
     const pics = await $fetch(`${config.strapiUrl}/upload`, {

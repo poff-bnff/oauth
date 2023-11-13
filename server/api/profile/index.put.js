@@ -42,7 +42,7 @@ export default defineEventHandler(async (event) => {
   if (pictureFile) {
     pictureFile.filename = pictureFileName + '.' + pictureFile.type.split('/')[1]
     pictureFile.profile_id = user.user_profile.id
-    const picture = await uploadStrapiImage(pictureFile)
+    const picture = await uploadStrapiImage(pictureFile, 'user-profile', user.user_profile.id)
     if (picture.id) {
       profileData.picture = picture.id
       returnValue.pictureId = picture.id
