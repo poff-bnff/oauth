@@ -132,7 +132,7 @@ export async function getStrapiUser (id) {
 export async function setStrapiUser (user) {
   if (!user) return null
   const token = await getStrapiToken()
-  const id = `${user.id}`
+  const id = user.id
   // user.id = id
   // console.log(`setStrapiUser, id: ${id}`)
   return await $fetch(`${config.strapiUrl}/users/${id}`, {
@@ -195,11 +195,13 @@ export async function uploadStrapiImage (file, ref, refId) {
   formData.append('refId', refId)
   formData.append('field', name)
   try {
+    console.log('uploadStrapiImage', { ref, refId, name, filename }) // eslint-disable-line no-console
     const pics = await $fetch(`${config.strapiUrl}/upload`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: formData
     })
+    console.log('uploadStrapiImage ready', pics.length) // eslint-disable-line no-console
     return pics[0]
   } catch (error) {
     throw new Error(error)
@@ -591,10 +593,10 @@ export async function getStrapiPerson (id) {
   if (!id) return null
   const token = await getStrapiToken()
 
-  const person = await $fetch(`${config.strapiUrl}/people/${id}`, {
+  const url = `${config.strapiUrl}/people/${id}`
+  const person = await $fetch(url, {
     headers: { Authorization: `Bearer ${token}` }
   })
-
   return person
 }
 
@@ -602,17 +604,18 @@ export async function setStrapiPerson (personData) {
   if (!personData) return null
   const token = await getStrapiToken()
 
-  console.log('setStrapiPerson', personData)
+  console.log('setStrapiPerson', Object.keys(personData), personData)
   const url = `${config.strapiUrl}/people/${personData.id}`
   console.log('setStrapiPerson url', url)
+  const body = { ...personData }
   const person = await $fetch(url, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
-    body: personData
+    body
   })
-  console.log('setStrapiPerson returning', person)
+  console.log('setStrapiPerson returning', person.firstNameLastName)
   return person
 }
