@@ -27,6 +27,8 @@ export default defineEventHandler(async (event) => {
   // if body.data is present, it's a stringified JSON object and needs to be parsed
   if (body.data) {
     const data = JSON.parse(body.data.toString())
+      // filter out null values
+      .filter(({ name, data }) => data !== null)
     Object.keys(data).forEach((key) => {
       body[key] = data[key]
     })
@@ -73,6 +75,7 @@ export default defineEventHandler(async (event) => {
     returnValue.body = 'Thanks for the all the fish, and the sofa.'
     returnValue.person = person
   } catch (error) {
+    console.log('api::person PUT - error', error) // eslint-disable-line no-console
     throw createError({ statusCode: 500, statusMessage: 'Error setting person' })
   }
 
