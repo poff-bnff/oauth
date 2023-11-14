@@ -4,12 +4,28 @@ export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
   const id = getUserIdFromEvent(event)
   console.log('api::person PUT - user id', id) // eslint-disable-line no-console
-  console.log('api::person PUT - body', body[0]) // eslint-disable-line no-console
+  console.log('api::person PUT - body', body) // eslint-disable-line no-console
 
-  console.log('api::person PUT - name', body[0].name)
-  const data = JSON.parse(body[0].data.toString())
+  // find the element with name 'data' and parse it
+  const bodyData = JSON.parse(
+    body.filter(element => (element.name === 'data'))[0].data.toString()
+  )
+  console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
+  // remove the element with name 'data'
+  body.splice(body.findIndex(element => (element.name === 'data')), 1)
+  console.log('api::person PUT - body', body) // eslint-disable-line no-console
 
-  console.log('api::person PUT - data', data)
+  // add the bodydata elements to the body
+  Object.keys(bodyData)
+    .filter(key => bodyData[key] !== null)
+    .filter(key => bodyData[key] !== undefined)
+    .forEach((key) => {
+      body.push({
+        name: key,
+        data: bodyData[key].toString()
+      })
+    })
+  console.log('api::person PUT - body', body) // eslint-disable-line no-console
 
   const user = await getStrapiUser(id)
   if (!user) {
@@ -24,30 +40,13 @@ export default defineEventHandler(async (event) => {
       statusMessage: 'person::PUT Person not Found'
     })
   }
-  return
 
   // Add all properties sans pictures to personData
   const personData = {
     id: user.person.id,
     images: []
   }
-  // if body[0].data is present, it's a stringified JSON object and needs to be parsed
-  if (body[0].data) {
-    const bodyData = JSON.parse(body[0].data.toString())
-    delete body[0].data
-    console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
-    // filter out empty values
-    Object.keys(bodyData)
-      .filter(key => bodyData[key] !== null)
-      .filter(key => bodyData[key] !== undefined)
-      .filter(key => bodyData[key] !== '')
-      .forEach((key) => {
-        body.push({
-          name: key,
-          data: bodyData[key].toString()
-        })
-      })
-  }
+
   console.log('api::person PUT - body', body.map(({ name, filename, type }) => ({ name, filename, type }))) // eslint-disable-line no-console
   for (let ix = 0; ix < body.length; ix++) {
     const { name, data, filename, type } = body[ix]
