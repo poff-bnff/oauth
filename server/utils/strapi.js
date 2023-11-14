@@ -100,7 +100,7 @@ export async function getStrapiUser (id) {
     throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
   }
 
-  console.log(`getStrapiUser id: ${id} with mainUser: ${user.mainUser ? user.mainUser.id : '-'} and aliasUsers: ${user.aliasUsers.length ? user.aliasUsers.map(u => u.id) : '-'}`) // eslint-disable-line no-console
+  // console.log(`getStrapiUser id: ${id} with mainUser: ${user.mainUser ? user.mainUser.id : '-'} and aliasUsers: ${user.aliasUsers.length ? user.aliasUsers.map(u => u.id) : '-'}`) // eslint-disable-line no-console
 
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `strapi::getStrapiUser - User ${user.id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
