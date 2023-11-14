@@ -195,13 +195,13 @@ export async function uploadStrapiImage (file, ref, refId) {
   formData.append('refId', refId)
   formData.append('field', name)
   try {
-    console.log('uploadStrapiImage', { ref, refId, name, filename }) // eslint-disable-line no-console
+    console.log('uploadStrapiImage') // eslint-disable-line no-console
     const pics = await $fetch(`${config.strapiUrl}/upload`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: formData
     })
-    console.log('uploadStrapiImage ready', pics.length) // eslint-disable-line no-console
+    // console.log('uploadStrapiImage ready', pics.length) // eslint-disable-line no-console
     return pics[0]
   } catch (error) {
     throw new Error(error)
@@ -604,7 +604,7 @@ export async function setStrapiPerson (personData) {
   if (!personData) return null
   const token = await getStrapiToken()
 
-  console.log('setStrapiPerson', Object.keys(personData), personData)
+  console.log('setStrapiPerson', personData.firstNameLastName)
   const url = `${config.strapiUrl}/people/${personData.id}`
   console.log('setStrapiPerson url', url)
   const body = { ...personData }

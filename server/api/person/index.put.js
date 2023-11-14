@@ -4,25 +4,25 @@ export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
   const id = getUserIdFromEvent(event)
   console.log('api::person PUT - user id', id) // eslint-disable-line no-console
-  console.log('api::person PUT - body', body) // eslint-disable-line no-console
+  // console.log('api::person PUT - body', body) // eslint-disable-line no-console
 
   // find the element with name 'data' and parse it
   const bodyData = JSON.parse(
     body.filter(element => (element.name === 'data'))[0].data.toString()
   )
-  console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
+  // console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
   // remove the element with name 'data'
   body.splice(body.findIndex(element => (element.name === 'data')), 1)
-  console.log('api::person PUT - body', body) // eslint-disable-line no-console
+  // console.log('api::person PUT - body', body) // eslint-disable-line no-console
 
-  // add the bodydata elements to the body
+  // add the parsed bodydata elements to the body
   Object.keys(bodyData)
     .filter(key => bodyData[key] !== null)
     .filter(key => bodyData[key] !== undefined)
     .forEach((key) => {
       body.push({
         name: key,
-        data: bodyData[key].toString()
+        data: bodyData[key]
       })
     })
   console.log('api::person PUT - body', body) // eslint-disable-line no-console
@@ -47,7 +47,6 @@ export default defineEventHandler(async (event) => {
     images: []
   }
 
-  console.log('api::person PUT - body', body.map(({ name, filename, type }) => ({ name, filename, type }))) // eslint-disable-line no-console
   for (let ix = 0; ix < body.length; ix++) {
     const { name, data, filename, type } = body[ix]
     if (name === 'files.picture') {
@@ -62,10 +61,20 @@ export default defineEventHandler(async (event) => {
       if (savedImage.id) {
         personData.images.push(savedImage.id)
       }
+    // if data is object with id property, convert to number
+    // if data is an array, convert to array of numbers
+    // else leave as it is
+    } else if (typeof data === 'object') {
+      if (data.id) {
+        personData[name] = Number(data.id)
+      }
+    } else if (Array.isArray(data)) {
+      personData[name] = data.map(({ id }) => Number(id))
     } else {
-      personData[name] = data.toString()
+      personData[name] = data
     }
   }
+
   personData.id = Number(personData.id)
   if (user.person.id !== personData.id) {
     console.log('api::person PUT - user.person.id', {
