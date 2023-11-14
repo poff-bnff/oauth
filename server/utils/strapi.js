@@ -100,7 +100,7 @@ export async function getStrapiUser (id) {
     throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
   }
 
-  console.log(`getStrapiUser id: ${id} with mainUser: ${user.mainUser ? user.mainUser.id : '-'} and aliasUsers: ${user.aliasUsers ? user.aliasUsers.map(u => u.id) : '-'}`) // eslint-disable-line no-console
+  console.log(`getStrapiUser id: ${id} with mainUser: ${user.mainUser ? user.mainUser.id : '-'} and aliasUsers: ${user.aliasUsers.length ? user.aliasUsers.map(u => u.id) : '-'}`) // eslint-disable-line no-console
 
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `strapi::getStrapiUser - User ${user.id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
@@ -604,18 +604,43 @@ export async function setStrapiPerson (personData) {
   if (!personData) return null
   const token = await getStrapiToken()
 
-  console.log('setStrapiPerson', personData.firstNameLastName)
+  console.log('setStrapiPerson', personData.id)
   const url = `${config.strapiUrl}/people/${personData.id}`
   console.log('setStrapiPerson url', url)
-  const body = { ...personData }
   const person = await $fetch(url, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
-    body
+    body: personData
   })
   console.log('setStrapiPerson returning', person.firstNameLastName)
   return person
+}
+
+export async function postStrapiCollection (collectionName, collectionData) {
+  if (!collectionName) {
+    console.info('postStrapiCollection collectionName is null') // eslint-disable-line no-console
+    return null
+  }
+  console.info('postStrapiCollection collectionName', collectionName) // eslint-disable-line no-console
+  if (!collectionData) {
+    console.info('postStrapiCollection collectionData is null') // eslint-disable-line no-console
+    return null
+  }
+  const token = await getStrapiToken()
+
+  const url = `${config.strapiUrl}/${collectionName}`
+  console.info('postStrapiCollection POST to url', url) // eslint-disable-line no-console
+  const result = await $fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: collectionData
+  })
+  console.info('postStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
+  return result
 }

@@ -12,11 +12,11 @@ export default defineEventHandler(async (event) => {
   )
   // console.log('api::person PUT - bodyData', bodyData) // eslint-disable-line no-console
   // remove the element with name 'data'
-  body.splice(body.findIndex(element => (element.name === 'data')), 1)
+  await body.splice(body.findIndex(element => (element.name === 'data')), 1)
   // console.log('api::person PUT - body', body) // eslint-disable-line no-console
 
   // add the parsed bodydata elements to the body
-  Object.keys(bodyData)
+  await Object.keys(bodyData)
     .filter(key => bodyData[key] !== null)
     .filter(key => bodyData[key] !== undefined)
     .forEach((key) => {
@@ -42,6 +42,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Add all properties sans pictures to personData
+  // console.log('api::person PUT - user.person', user.person) // eslint-disable-line no-console
   const personData = {
     id: user.person.id,
     images: []
@@ -64,12 +65,23 @@ export default defineEventHandler(async (event) => {
     // if data is object with id property, convert to number
     // if data is an array, convert to array of numbers
     // else leave as it is
-    } else if (typeof data === 'object') {
-      if (data.id) {
-        personData[name] = Number(data.id)
-      }
     } else if (Array.isArray(data)) {
-      personData[name] = data.map(({ id }) => Number(id))
+      console.log(`api::person PUT - is array - ${data}`) // eslint-disable-line no-console
+      personData[name] = []
+      for (let ix = 0; ix < data.length; ix++) {
+        const item = data[ix]
+        if (typeof item === 'object') {
+          const newCollectionId = await setCollection(name, item)
+          console.log('api::person PUT - is array newCollection', newCollectionId) // eslint-disable-line no-console
+          personData[name].push(newCollectionId)
+        } else {
+          personData[name].push(Number(item))
+        }
+      }
+      console.log(`api::person PUT - is array - ${personData[name]}`) // eslint-disable-line no-console
+    } else if (typeof data === 'object') {
+      console.log('api::person PUT - is object', data) // eslint-disable-line no-console
+      personData[name] = await setCollection(name, data)
     } else {
       personData[name] = data
     }
@@ -95,6 +107,7 @@ export default defineEventHandler(async (event) => {
     statusCode: 200
   }
   try {
+    console.log('api::person PUT - sending personData', personData) // eslint-disable-line no-console
     const person = await setStrapiPerson(personData)
     returnValue.body = 'Thanks for the all the fish, and the sofa.'
     returnValue.person = person
@@ -105,3 +118,19 @@ export default defineEventHandler(async (event) => {
 
   return returnValue
 })
+
+const collectionNames = {
+  addr_coll: 'addresses'
+}
+
+// returns id of new collection
+const setCollection = async (name, data) => {
+  if (data.id) {
+    console.log(`api::person PUT: setCollection with id - ${name} - ${data}`) // eslint-disable-line no-console
+    return Number(data.id)
+  } else {
+    console.log(`api::person PUT: setCollection without id - ${name} - ${data}`) // eslint-disable-line no-console
+    const newCollection = await postStrapiCollection(collectionNames[name], data)
+    return Number(newCollection.id)
+  }
+}
