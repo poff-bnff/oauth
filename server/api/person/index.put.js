@@ -4,7 +4,13 @@ export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
   const id = getUserIdFromEvent(event)
   console.log('api::person PUT - user id', id) // eslint-disable-line no-console
-  console.log('api::person PUT - body', body) // eslint-disable-line no-console
+  console.log('api::person PUT - body', body[0]) // eslint-disable-line no-console
+
+  console.log('api::person PUT - name', body[0].name)
+  const data = JSON.parse(body[0].data.toString())
+
+  console.log('api::person PUT - data', data)
+
   const user = await getStrapiUser(id)
   if (!user) {
     throw createError({
@@ -18,6 +24,7 @@ export default defineEventHandler(async (event) => {
       statusMessage: 'person::PUT Person not Found'
     })
   }
+  return
 
   // Add all properties sans pictures to personData
   const personData = {
