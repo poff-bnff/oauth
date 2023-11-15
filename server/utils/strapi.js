@@ -644,3 +644,33 @@ export async function postStrapiCollection (collectionName, collectionData) {
   console.info('postStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
   return result
 }
+
+export async function putStrapiCollection (collectionName, collectionData) {
+  if (!collectionName) {
+    console.info('putStrapiCollection collectionName is null') // eslint-disable-line no-console
+    return null
+  }
+  console.info('putStrapiCollection collectionName', collectionName) // eslint-disable-line no-console
+  if (!collectionData) {
+    console.info('putStrapiCollection collectionData is null') // eslint-disable-line no-console
+    return null
+  }
+  if (!collectionData.id) {
+    console.info('putStrapiCollection missing id in collectionData') // eslint-disable-line no-console
+    return null
+  }
+  const token = await getStrapiToken()
+
+  const url = `${config.strapiUrl}/${collectionName}/${collectionData.id}`
+  console.info('putStrapiCollection PUT to url', url) // eslint-disable-line no-console
+  const result = await $fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: collectionData
+  })
+  console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
+  return result
+}
