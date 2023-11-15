@@ -120,16 +120,17 @@ export default defineEventHandler(async (event) => {
 })
 
 const collectionNames = {
-  addr_coll: 'addresses'
+  addr_coll: 'addresses',
+  filmographies: 'filmographies'
 }
 
 // returns id of new collection
 const setCollection = async (name, data) => {
   if (data.id) {
-    console.log(`api::person PUT: setCollection with id - ${name} - ${data}`) // eslint-disable-line no-console
+    console.log(`api::person PUT: setCollection with id - ${name}`, data) // eslint-disable-line no-console
     return Number(data.id)
   } else {
-    console.log(`api::person PUT: setCollection without id - ${name} - ${data}`) // eslint-disable-line no-console
+    console.log(`api::person PUT: setCollection without id - ${name}`, data) // eslint-disable-line no-console
     const newCollection = await postStrapiCollection(collectionNames[name], data)
     return Number(newCollection.id)
   }
