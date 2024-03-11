@@ -5,8 +5,8 @@ const { url, eventivalClientId, eventivalUrl, oauthClientId, oauthUrl } = useRun
 const { locale, t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const redirectCookie = useCookie('redirect_uri', { maxAge: 300 })
-const stateCookie = useCookie('state', { maxAge: 300 })
+const redirectCookie = useCookie('redirect_uri')
+const stateCookie = useCookie('state')
 
 redirectCookie.value = route.query.redirect_uri
 
