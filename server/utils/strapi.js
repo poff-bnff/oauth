@@ -31,6 +31,20 @@ export async function authenticateStrapiUser (email) {
   }
 }
 
+export async function emailInUse (email) {
+  if (!email) return false
+
+  const token = await getStrapiToken()
+
+  const [profile] = await $fetch(`${config.strapiUrl}/user-profiles?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
+
+  if (profile) {
+    return true
+  }
+
+  return false
+}
+
 export async function fetchEventivalBadges (email) {
   if (!email) return []
 
@@ -99,8 +113,6 @@ export async function getStrapiUser (id) {
   if (!user) {
     throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
   }
-
-  // console.log(`getStrapiUser id: ${id} with mainUser: ${user.mainUser ? user.mainUser.id : '-'} and aliasUsers: ${user.aliasUsers.length ? user.aliasUsers.map(u => u.id) : '-'}`) // eslint-disable-line no-console
 
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `strapi::getStrapiUser - User ${user.id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
@@ -365,6 +377,18 @@ export function getUserIdFromEvent (event) {
   const headers = getRequestHeaders(event)
 
   const token = headers?.authorization?.split(' ')[1]
+
+  if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+
+  try {
+    const { sub } = jwt.verify(token, config.jwtSecret)
+    return parseInt(sub)
+  } catch (error) {
+    throw createError({ statusCode: 401, statusMessage: 'Invalid token' })
+  }
+}
+
+export function getUserIdFromToken (token) {
 
   if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
