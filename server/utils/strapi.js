@@ -8,6 +8,11 @@ const STRAPI_TOKEN = {
   expires: null
 }
 
+const STRAPI_ADMIN_TOKEN = {
+  token: null,
+  expires: null
+}
+
 export async function authenticateStrapiUser (email) {
   if (!email) return null
 
@@ -29,6 +34,20 @@ export async function authenticateStrapiUser (email) {
 
     return getUserObject(newUser)
   }
+}
+
+export async function emailInUse (email) {
+  if (!email) return false
+
+  const token = await getStrapiToken()
+
+  const [profile] = await $fetch(`${config.strapiUrl}/user-profiles?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
+
+  if (profile) {
+    return true
+  }
+
+  return false
 }
 
 export async function fetchEventivalBadges (email) {
@@ -100,8 +119,6 @@ export async function getStrapiUser (id) {
     throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
   }
 
-  // console.log(`getStrapiUser id: ${id} with mainUser: ${user.mainUser ? user.mainUser.id : '-'} and aliasUsers: ${user.aliasUsers.length ? user.aliasUsers.map(u => u.id) : '-'}`) // eslint-disable-line no-console
-
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
     const msg = `strapi::getStrapiUser - User ${user.id} has both mainUser ${user.mainUser.id} and aliasUsers ${user.aliasUsers.map(u => u.id)}`
     console.error(msg) // eslint-disable-line no-console
@@ -142,6 +159,18 @@ export async function setStrapiUser (user) {
       'Content-Type': 'application/json'
     },
     body: user
+  })
+}
+
+export async function deleteStrapiUserProfile (id) {
+  if (!id) return null
+  const token = await getStrapiAdminToken()
+  return await $fetch(`${config.strapiUrl}/user-profiles/${id}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
   })
 }
 
@@ -376,6 +405,18 @@ export function getUserIdFromEvent (event) {
   }
 }
 
+export function getUserIdFromToken (token) {
+
+  if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+
+  try {
+    const { sub } = jwt.verify(token, config.jwtSecret)
+    return parseInt(sub)
+  } catch (error) {
+    throw createError({ statusCode: 401, statusMessage: 'Invalid token' })
+  }
+}
+
 async function getStrapiToken () {
   // If a cached token exists, and it's not expired, return it
   if (STRAPI_TOKEN.token && STRAPI_TOKEN.expires > Date.now()) {
@@ -383,6 +424,32 @@ async function getStrapiToken () {
   } else {
     return await refreshStrapiToken()
   }
+}
+
+async function getStrapiAdminToken () {
+  // If a cached token exists, and it's not expired, return it
+  if (STRAPI_ADMIN_TOKEN.token && STRAPI_ADMIN_TOKEN.expires > Date.now()) {
+    return STRAPI_ADMIN_TOKEN.token
+  } else {
+    return await refreshStrapiAdminToken()
+  }
+}
+
+async function refreshStrapiAdminToken () {
+  const result = await $fetch(`${config.strapiUrl}/admin/login`, {
+    method: 'POST',
+    body: {
+      email: config.strapiAdminUser,
+      password: config.strapiAdminPassword
+    }
+  })
+
+  const token = result.data.token
+
+  STRAPI_ADMIN_TOKEN.token = token
+  // Read expiration from token and subtract 5 minutes
+  STRAPI_ADMIN_TOKEN.expires = (jwt.decode(token).exp - 5 * 60) * 1e3
+  return token
 }
 
 async function refreshStrapiToken () {
