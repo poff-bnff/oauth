@@ -8,6 +8,11 @@ const STRAPI_TOKEN = {
   expires: null
 }
 
+const STRAPI_ADMIN_TOKEN = {
+  token: null,
+  expires: null
+}
+
 export async function authenticateStrapiUser (email) {
   if (!email) return null
 
@@ -154,6 +159,18 @@ export async function setStrapiUser (user) {
       'Content-Type': 'application/json'
     },
     body: user
+  })
+}
+
+export async function deleteStrapiUserProfile (id) {
+  if (!id) return null
+  const token = await getStrapiAdminToken()
+  return await $fetch(`${config.strapiUrl}/user-profiles/${id}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
   })
 }
 
@@ -407,6 +424,32 @@ async function getStrapiToken () {
   } else {
     return await refreshStrapiToken()
   }
+}
+
+async function getStrapiAdminToken () {
+  // If a cached token exists, and it's not expired, return it
+  if (STRAPI_ADMIN_TOKEN.token && STRAPI_ADMIN_TOKEN.expires > Date.now()) {
+    return STRAPI_ADMIN_TOKEN.token
+  } else {
+    return await refreshStrapiAdminToken()
+  }
+}
+
+async function refreshStrapiAdminToken () {
+  const result = await $fetch(`${config.strapiUrl}/admin/login`, {
+    method: 'POST',
+    body: {
+      email: config.strapiAdminUser,
+      password: config.strapiAdminPassword
+    }
+  })
+
+  const token = result.data.token
+
+  STRAPI_ADMIN_TOKEN.token = token
+  // Read expiration from token and subtract 5 minutes
+  STRAPI_ADMIN_TOKEN.expires = (jwt.decode(token).exp - 5 * 60) * 1e3
+  return token
 }
 
 async function refreshStrapiToken () {
