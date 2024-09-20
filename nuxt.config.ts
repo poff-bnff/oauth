@@ -36,6 +36,8 @@ export default defineNuxtConfig({
     strapiUrl: '',
     strapiUser: '',
     strapiPassword: '',
+    strapiAdminUser: '',
+    strapiAdminPassword: '',
     oauthClientSecret: '',
     eventivalClientSecret: '',
     eventivalApiToken: '',

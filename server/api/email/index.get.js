@@ -1,5 +1,10 @@
 import crypto from 'crypto'
 
+function hasCompleteProfile(user){
+  let profile = user.user_profile
+  return profile.email && profile.firstName && profile.lastName && profile.birthdate && profile.phoneNr && profile.gender && profile.picture
+}
+
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const query = getQuery(event)
@@ -35,7 +40,6 @@ export default defineEventHandler(async (event) => {
   else if(query.code && query.state && query.state == stateCookie){
     try{
       setCookie(event, 'redirect_uri', null)
-      setCookie(event, 'state', null)
       setCookie(event, 'user_token', null)
       const body = {
         client_id: config.public.oauthClientId,
@@ -54,15 +58,43 @@ export default defineEventHandler(async (event) => {
       const user = await getStrapiUser(id)
 
       if(user.user_profile.email && authUser.email == user.user_profile.email){
+        setCookie(event, 'state', null)
         return sendRedirect(event, redirectCookie + '&notifier=emailChangeSame', 302)
       }
 
       if(await emailInUse(authUser.email)){
+        setCookie(event, 'state', null)
         return sendRedirect(event, redirectCookie + '&notifier=emailChangeTaken', 302)
       }
 
       const profileBody = {"email":authUser.email}
       await setStrapiUserProfile (user.user_profile.id, profileBody)
+
+      const strapiUser = await authenticateStrapiUser(authUser.email)
+      const newContact = await getStrapiUser(strapiUser.id)
+
+      if(user.id != newContact.id){
+        let hasProfileOld = hasCompleteProfile(user)
+        let hasProfileNew = hasCompleteProfile(newContact)
+
+        let profileId = user.user_profile.id
+
+        if(hasProfileNew && !hasProfileOld){
+          profileId = newContact.user_profile.id
+        }
+
+        let params = new URLSearchParams({
+          redirect_uri: redirectCookie,
+          new_user: newContact.id,
+          old_user: user.id,
+          profile: profileId,
+          state: stateCookie,
+          from_query: 'email_change',
+        }).toString()
+        return sendRedirect(event, config.public.url + '/api/alias/combine?' + params, 302)
+      }
+
+      setCookie(event, 'state', null)
 
       return sendRedirect(event, redirectCookie + '&notifier=emailChangeSuccess', 302)
 

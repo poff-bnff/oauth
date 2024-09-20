@@ -7,6 +7,11 @@ const route = useRoute()
 const router = useRouter()
 const redirectCookie = useCookie('redirect_uri')
 const stateCookie = useCookie('state')
+const userToken = useCookie('user_token')
+
+if(route.query.user_token && route.query.query_type && route.query.query_type == 'add_account'){
+  userToken.value = route.query.user_token
+}
 
 redirectCookie.value = route.query.redirect_uri
 
@@ -21,9 +26,15 @@ watch(() => locale.value, (value) => {
 })
 
 function getOauthUrl (provider) {
+  var redirect_uri = `${url}/api/auth/oauth`
+
+  if(route.query.user_token && route.query.query_type && route.query.query_type == 'add_account'){
+    redirect_uri = `${url}/api/alias/auth`
+  }
+
   const query = new URLSearchParams({
     client_id: oauthClientId,
-    redirect_uri: `${url}/api/auth/oauth`,
+    redirect_uri: redirect_uri,
     response_type: 'code',
     scope: 'openid',
     state: stateCookie.value
@@ -33,9 +44,15 @@ function getOauthUrl (provider) {
 }
 
 function getEventivalUrl () {
+  var redirect_uri = `${url}/api/auth/eventival`
+
+  if(route.query.user_token && route.query.query_type && route.query.query_type == 'add_account'){
+    redirect_uri = `${url}/api/alias/auth`
+  }
+
   const query = new URLSearchParams({
     client_id: eventivalClientId,
-    redirect_uri: `${url}/api/auth/eventival`,
+    redirect_uri: redirect_uri,
     response_type: 'code',
     scope: 'openid',
     state: stateCookie.value
