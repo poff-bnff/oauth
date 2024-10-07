@@ -1,5 +1,7 @@
+import { URLSearchParams } from 'url'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
+
 
 const config = useRuntimeConfig()
 
@@ -210,7 +212,7 @@ export async function setStrapiUserProfile (profileId, body) {
   })
 }
 
-export async function uploadStrapiImage (file, ref, refId) {
+export async function uploadStrapiImage (file, ref, refId, fileInfo) {
   if (!file) return null
 
   const token = await getStrapiToken()
@@ -223,6 +225,10 @@ export async function uploadStrapiImage (file, ref, refId) {
   formData.append('ref', ref)
   formData.append('refId', refId)
   formData.append('field', name)
+  if (typeof fileInfo !== 'undefined') {
+    formData.append('fileInfo', fileInfo)
+  }
+
   try {
     console.log('uploadStrapiImage') // eslint-disable-line no-console
     const pics = await $fetch(`${config.strapiUrl}/upload`, {
@@ -231,6 +237,44 @@ export async function uploadStrapiImage (file, ref, refId) {
       body: formData
     })
     // console.log('uploadStrapiImage ready', pics.length) // eslint-disable-line no-console
+    return pics[0]
+  } catch (error) {
+    throw new Error(error)
+  }
+}
+
+export async function refreshStrapiImageFileInfo(id, fileInfo) {
+  console.log('ID', id)
+  console.log('fileinfo', fileInfo)
+  const token = await getStrapiToken()
+
+  const formData = new FormData()
+  formData.append('fileInfo', fileInfo)
+
+  try {
+    console.log('uploadStrapiImage') // eslint-disable-line no-console
+    const pics = await $fetch(`${config.strapiUrl}/upload/?id=${id}&meow=2`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    })
+    // console.log('uploadStrapiImage ready', pics.length) // eslint-disable-line no-console
+    return pics[0]
+  } catch (error) {
+    throw new Error(error)
+  }
+}
+
+export async function deleteStrapiImage (fileId) {
+  const token = await getStrapiToken()
+  const formData = new FormData()
+
+  try {
+    console.log('deleteStrapiImage') // eslint-disable-line no-console
+    const pics = await $fetch(`${config.strapiUrl}/upload/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
     return pics[0]
   } catch (error) {
     throw new Error(error)
@@ -684,6 +728,145 @@ export async function setStrapiPerson (personData) {
   })
   console.log('setStrapiPerson returning', person.firstNameLastName)
   return person
+}
+
+export async function getStrapiFilmographies (ids) {
+  if (!ids) return null
+  const token = await getStrapiToken()
+
+  var params = new URLSearchParams();
+  for (const id of ids) {
+    params.append("id_in", id);
+  }
+
+  const url = `${config.strapiUrl}/filmographies?` + params.toString()
+  const filmographies = await $fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return filmographies
+}
+
+export async function getStrapiOrganisationsIds (names) {
+  if (!names) return null
+  const token = await getStrapiToken()
+
+  var params = new URLSearchParams();
+  for (const name of names) {
+    params.append("name_en_in", name.name);
+  }
+  const url = `${config.strapiUrl}/organisations?` + params.toString()
+  const organisations = await $fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  console.log(organisations)
+  console.log(typeof organisations)
+  console.log(typeof organisations[0])
+  const flatOrganisation = {}
+
+  for (const [key, organisation] of Object.entries(organisations)) {
+    flatOrganisation[organisation.name_en] = organisation.id
+  }
+
+  for (const row of names) {
+    if (typeof flatOrganisation[row.name] == 'undefined') {
+      const createdOrganisation = await createStrapiOrganisationWithData({
+        'namePrivate': row.name,
+        'name_et': row.name,
+        'name_en': row.name,
+        'name_ru': row.name
+      })
+      console.log('CREATED', createStrapiOrganisation)
+      console.log('CREATED ID', createStrapiOrganisation.id)
+      if (createdOrganisation.id) {
+        flatOrganisation[row.name] == createdOrganisation.id
+      }
+    }
+  }
+
+  return flatOrganisation
+}
+
+
+
+
+export async function getStrapiOrganisation (id) {
+  if (!id) return null
+  const token = await getStrapiToken()
+
+  const url = `${config.strapiUrl}/organisations/${id}`
+  const organisation = await $fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return organisation
+}
+
+export async function setStrapiOrganisation (organisationData) {
+  if (!organisationData) return null
+  const token = await getStrapiToken()
+
+  console.log('setStrapiOrganisation', organisationData.id)
+  const url = `${config.strapiUrl}/organisations/${organisationData.id}`
+  console.log('setStrapiOrganisation url', url)
+  const organisation = await $fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: organisationData
+  })
+  console.log('setStrapiOrganisation returning', organisationData.name_en)
+  return organisation
+}
+
+export async function createStrapiOrganisationWithData(data) {
+  console.log('createStrapiOrganisationWithData')
+  console.log(data)
+  const token = await getStrapiToken()
+
+  const organisation = await $fetch(`${config.strapiUrl}/organisations`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: data
+  })
+
+  console.log('createStrapiOrganisation created', organisation.id)
+  return organisation
+}
+
+export async function createStrapiOrganisation (user) {
+  if (!user) return null
+  const token = await getStrapiToken()
+
+  const organisation = await $fetch(`${config.strapiUrl}/organisations`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {}
+  })
+
+  console.log('createStrapiOrganisation created', organisation.id)
+
+  await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      id: user.id,
+      organisations: [organisation.id]
+    }
+  })
+
+  console.log('createStrapiOrganisation user updated')
+
+  return [organisation]
 }
 
 export async function postStrapiCollection (collectionName, collectionData) {
