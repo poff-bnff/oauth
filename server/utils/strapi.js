@@ -731,6 +731,14 @@ export async function setStrapiPerson (personData) {
 }
 
 export async function getStrapiFilmographies (ids) {
+  return getStrapiCollections(ids, 'filmographies')
+}
+
+export async function getStrapiClients(ids) {
+  return getStrapiCollections(ids,'clients')
+}
+
+export async function getStrapiCollections(ids, apiEndpoint) {
   if (!ids) return null
   const token = await getStrapiToken()
 
@@ -739,55 +747,40 @@ export async function getStrapiFilmographies (ids) {
     params.append("id_in", id);
   }
 
-  const url = `${config.strapiUrl}/filmographies?` + params.toString()
-  const filmographies = await $fetch(url, {
+  const url = `${config.strapiUrl}/${apiEndpoint}?` + params.toString()
+  const collections = await $fetch(url, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  return filmographies
+  return collections
 }
 
-export async function getStrapiOrganisationsIds (names) {
-  if (!names) return null
+
+
+export async function getStrapiOrganisationByField(field, name) {
+  if (!name) return null
   const token = await getStrapiToken()
 
   var params = new URLSearchParams();
-  for (const name of names) {
-    params.append("name_en_in", name.name);
-  }
+  params.append(`${field}_in`, name);
+
   const url = `${config.strapiUrl}/organisations?` + params.toString()
   const organisations = await $fetch(url, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  console.log(organisations)
-  console.log(typeof organisations)
-  console.log(typeof organisations[0])
-  const flatOrganisation = {}
 
-  for (const [key, organisation] of Object.entries(organisations)) {
-    flatOrganisation[organisation.name_en] = organisation.id
+  if (organisations.length) {
+     return organisations[0]
   }
 
-  for (const row of names) {
-    if (typeof flatOrganisation[row.name] == 'undefined') {
-      const createdOrganisation = await createStrapiOrganisationWithData({
-        'namePrivate': row.name,
-        'name_et': row.name,
-        'name_en': row.name,
-        'name_ru': row.name
-      })
-      console.log('CREATED', createStrapiOrganisation)
-      console.log('CREATED ID', createStrapiOrganisation.id)
-      if (createdOrganisation.id) {
-        flatOrganisation[row.name] == createdOrganisation.id
-      }
-    }
-  }
-
-  return flatOrganisation
+  const organisation = await createStrapiOrganisationWithData({
+    'namePrivate': name,
+    'name_et': name,
+    'name_en': name,
+    'name_ru': name
+  })
+  console.log('getStrapiOrganisationByField CREATED', organisation)
+  return organisation
 }
-
-
-
 
 export async function getStrapiOrganisation (id) {
   if (!id) return null
@@ -920,7 +913,7 @@ export async function putStrapiCollection (collectionName, collectionData) {
       'Content-Type': 'application/json'
     },
     body: collectionData
-  })
-  console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
+  }).catch((err) => console.log('ERROR:', err.data, collectionData));
+  //console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
   return result
 }

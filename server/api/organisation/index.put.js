@@ -50,10 +50,10 @@ export default defineEventHandler(async (event) => {
     id: originalOrganisationId
   }
 
-  const orgName = getOrgName(body)
-  const newFilename = orgName.toLowerCase().substring(0, 100)
-  const originalImages = originalOrganisation.images.map( e => parseInt(e.id))
+
+  const newFilename = getFileName(body)
   let images = findFieldValue(body, 'images', [])
+  const newCollectionIds = {};
 
   for (let ix = 0; ix < body.length; ix++) {
     const { name, data, filename, type } = body[ix]
@@ -80,6 +80,8 @@ export default defineEventHandler(async (event) => {
       if (audioreel.id) {
         organisationData.audioreel = audioreel.id
       }
+    } else if (name === 'files.stills') {
+      continue
     } else if (name === 'deleted_img_logoColour') {
       organisationData.logoColour = null
     } else if (name === 'deleted_img_profile_img') {
@@ -106,6 +108,7 @@ export default defineEventHandler(async (event) => {
       if (isNaN(strapiImageId)) {
         continue
       }
+      const originalImages = originalOrganisation.images.map( e => parseInt(e.id))
       if (originalImages.includes(strapiImageId)) {
         await refreshStrapiImageFileInfo(strapiImageId, JSON.stringify({ caption: data }))
       }
@@ -132,6 +135,23 @@ export default defineEventHandler(async (event) => {
     } else if (typeof data === 'object') {
       if (name == 'addr_coll') {
         organisationData[name] = await setCollection(name, data)
+      }else if (name == 'client') {
+        await saveClient(originalOrganisation, data)
+      } else if (name == 'filmography') {
+        let originalFilmographies = originalOrganisation.filmographies.map(e => parseInt(e.id))
+        if (data.id) {
+          if (!originalFilmographies.includes(parseInt(data.id))) {
+            continue
+          }
+        }
+        await updateFilmographyStillImages(data, body)
+
+        const id = await setCollection('filmography', data)
+        if (!data.id) {
+          newCollectionIds['filmography'] = id
+          originalFilmographies.push(id)
+          organisationData['filmographies'] = originalFilmographies
+        }
       }
     } else {
       organisationData[name] = data
@@ -156,7 +176,10 @@ export default defineEventHandler(async (event) => {
     await refreshImagesMetadata(originalOrganisation, organisationData, field)
   })
 
+
   organisationData.id = Number(organisationData.id);
+
+
   ['employees_n', 'h_rate_from', 'h_rate_to'].forEach(key => {
     organisationData[key] = organisationData[key] == "" ? null : (isNaN(organisationData[key]) ? null : parseInt(organisationData[key]))
   })
@@ -180,9 +203,11 @@ export default defineEventHandler(async (event) => {
   }
   try {
     console.log('api::organisation PUT - sending organisationData', organisationData) // eslint-disable-line no-console
-    const organisation = await setStrapiOrganisation(organisationData)
     await setStrapiUser({'id': id, 'ok_to_contact': organisationData['ok_to_contact']})
+    let organisation = await setStrapiOrganisation(organisationData)
+    organisation = await simplifyOrganisationCollection(organisation, user)
     returnValue.body = 'Thanks for the all the fish, and the sofa.'
+    returnValue.newCollectionIds = newCollectionIds
     returnValue.organisation = organisation
   } catch (error) {
     console.log('api::organisation PUT - error', error) // eslint-disable-line no-console
@@ -205,36 +230,44 @@ const refreshImagesMetadata = async (originalOrganisation, organisationData, fie
 
 const collectionNames = {
   addr_coll: 'addresses',
-  filmographies: 'filmographies'
+  filmographies: 'filmographies',
+  filmography: 'filmographies',
+  client: "clients"
 }
+
+const updateFilmographyStillImages = async (filmography, body) => {
+  const entry = body.find(data => data.name == 'files.stills')
+
+  if (entry === undefined) {
+    return
+  }
+  const { name, data, filename, type } = entry
+
+  console.log(`api::filmography still PUT - ${name} - ${filename} - ${type}`) // eslint-disable-line no-console
+  const newFilename = slugify(filmography.work_name).substring(0, 100)
+  entry.filename = `F_1_${newFilename}` + filename.substring(filename.lastIndexOf('.'))
+
+  const savedPic = await uploadStrapiImage(entry, null, null)
+  if (savedPic.id) {
+    filmography.stills = [savedPic.id]
+  }
+}
+
 
 // returns id of new collection
 const setCollection = async (name, data) => {
-
   if (data.id) {
     const modifiedCollection = await putStrapiCollection(collectionNames[name], data)
-    // console.log(`api::person PUT: setCollection with id - ${name}, ${data.id}`, modifiedCollection) // eslint-disable-line no-console
     return Number(modifiedCollection.id)
   } else {
-    // console.log(`api::person PUT: setCollection without id - ${name}`, data) // eslint-disable-line no-console
     const newCollection = await postStrapiCollection(collectionNames[name], data)
     return Number(newCollection.id)
   }
 }
 
-const getOrgName = (body) => {
-  for (let ix = 0; ix < body.length; ix++) {
-    const { name, data, filename, type } = body[ix]
-    if (name == 'name_en') {
-      return String(data)
-    }
-  }
-  return 'placeholder'
-}
-
 const findFieldValue = (body, field, placeholder) => {
   for (let ix = 0; ix < body.length; ix++) {
-    const { name, data, filename, type } = body[ix]
+    const { name, data} = body[ix]
     if (name == field) {
       if (typeof data === 'object') {
         return data
@@ -245,6 +278,11 @@ const findFieldValue = (body, field, placeholder) => {
   return
 }
 
+const getFileName = (body) => {
+  const data = body.find(data => data.name == "name_en")
+  const orgName = data ? data.data : "missing name"
+  return orgName.toLowerCase().substring(0, 100)
+}
 
 const slugify = (text) => {
   return text.toString().toLowerCase()
@@ -253,4 +291,30 @@ const slugify = (text) => {
       .replace(/\-\-+/g, '-')         // Replace multiple - with single -
       .replace(/^-+/, '')             // Trim - from start of text
       .replace(/-+$/, '');            // Trim - from end of text
+}
+
+const saveClient = async (originalOrganisation, data) => {
+  let originalClients = originalOrganisation.clients.map(e => parseInt(e.id))
+  if (data.id) {
+    if (!originalClients.includes(parseInt(data.id))) {
+      return
+    }
+  }
+
+  const clientOrganisation = await getStrapiOrganisationByField('namePrivate', data.name)
+  if (clientOrganisation.id) {
+    const clientData = {
+      "organisation": originalOrganisation.id,
+      "url": data.url ?? null,
+      "description": data.description ?? null,
+      "client_organisation": clientOrganisation.id
+    }
+    if (data.id) {
+      clientData["id"] = data.id
+    }
+    const clientId = await setCollection('client', clientData)
+    if (data.id != clientId) {
+      newCollectionIds['client'] = clientId
+    }
+  }
 }
