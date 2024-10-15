@@ -103,7 +103,7 @@ async function formatClients(originalClients) {
     return clients.map(client => {
         return {
             id: client.id,
-            name: client.client_organisation.namePrivate,
+            name: client.client_organisation.name_et,
             description: client.description,
             url: client.url
         }
