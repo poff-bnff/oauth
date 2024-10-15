@@ -304,7 +304,7 @@ const saveClient = async (originalOrganisation, data) => {
     }
   }
 
-  const clientOrganisation = await getStrapiOrganisationByField('namePrivate', data.name)
+  const clientOrganisation = await getStrapiOrganisationByField('name_en', data.name)
   if (clientOrganisation.id) {
     const clientData = {
       "organisation": originalOrganisation.id,
