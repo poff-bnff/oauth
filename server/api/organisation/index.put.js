@@ -136,7 +136,7 @@ export default defineEventHandler(async (event) => {
       if (name == 'addr_coll') {
         organisationData[name] = await setCollection(name, data)
       }else if (name == 'client') {
-        await saveClient(originalOrganisation, data)
+        newCollectionIds['client'] = await saveClient(originalOrganisation, data)
       } else if (name == 'filmography') {
         let originalFilmographies = originalOrganisation.filmographies.map(e => parseInt(e.id))
         if (data.id) {
@@ -238,18 +238,21 @@ const collectionNames = {
 const updateFilmographyStillImages = async (filmography, body) => {
   const entry = body.find(data => data.name == 'files.stills')
 
-  if (entry === undefined) {
-    return
+  if (entry !== undefined) {
+    console.log('ADD STILL')
+    const { name, data, filename, type } = entry
+
+    console.log(`api::filmography still PUT - ${name} - ${filename} - ${type}`) // eslint-disable-line no-console
+    const newFilename = slugify(filmography.work_name).substring(0, 100)
+    entry.filename = `F_1_${newFilename}` + filename.substring(filename.lastIndexOf('.'))
+
+    const savedPic = await uploadStrapiImage(entry, null, null)
+    if (savedPic.id) {
+      filmography.stills = [savedPic.id]
+    }
   }
-  const { name, data, filename, type } = entry
-
-  console.log(`api::filmography still PUT - ${name} - ${filename} - ${type}`) // eslint-disable-line no-console
-  const newFilename = slugify(filmography.work_name).substring(0, 100)
-  entry.filename = `F_1_${newFilename}` + filename.substring(filename.lastIndexOf('.'))
-
-  const savedPic = await uploadStrapiImage(entry, null, null)
-  if (savedPic.id) {
-    filmography.stills = [savedPic.id]
+  if (filmography.deleted_img_stills === true) {
+    filmography.stills = null
   }
 }
 
@@ -297,7 +300,7 @@ const saveClient = async (originalOrganisation, data) => {
   let originalClients = originalOrganisation.clients.map(e => parseInt(e.id))
   if (data.id) {
     if (!originalClients.includes(parseInt(data.id))) {
-      return
+      return null;
     }
   }
 
@@ -314,7 +317,8 @@ const saveClient = async (originalOrganisation, data) => {
     }
     const clientId = await setCollection('client', clientData)
     if (data.id != clientId) {
-      newCollectionIds['client'] = clientId
+      return clientId
     }
+    return null;
   }
 }

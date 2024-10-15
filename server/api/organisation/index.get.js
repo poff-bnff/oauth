@@ -9,6 +9,6 @@ export default defineEventHandler(async (event) => {
     user.organisations = await createStrapiOrganisation(user)
   }
   let organisation = await getStrapiOrganisation(user.organisations[0].id)
-  organisation = simplifyOrganisationCollection(organisation, user)
+  organisation = await simplifyOrganisationCollection(organisation, user)
   return organisation
 })
