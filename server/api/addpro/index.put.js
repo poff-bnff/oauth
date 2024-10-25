@@ -68,7 +68,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const newFilename = getFileName(body, formType)
+  const newFilename = getFileName(body, formType, originalObject)
   let images = findFieldValue(body, 'images', [])
   const newCollectionIds = {};
 
@@ -315,15 +315,15 @@ const findFieldValue = (body, field, placeholder) => {
   return
 }
 
-const getFileName = (body, type) => {
+const getFileName = (body, type, originalObject) => {
   let fileName = ""
   if (type == 'organisation') {
     const data = body.find(data => data.name == "name_en")
-    fileName = data ? data.data : "missing name"
+    fileName = data ? data.data : originalObject.name_en
   } else if (type == "person") {
     const firstName = body.find(data => data.name == "firstName")
     const lastName = body.find(data => data.name == "lastName")
-    fileName = slugify(`${firstName.data}-${lastName.data}`)
+    fileName = slugify(`${firstName ? firstName.data : originalObject.firstName}-${lastName ? lastName.data : originalObject.lastName}`)
   }
   return fileName.toLowerCase().substring(0, 100)
 }
