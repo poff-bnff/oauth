@@ -1,49 +1,54 @@
-export async function simplifyOrganisationCollection(organisation, user) {
+export async function simplifyPersonCollection(person, user) {
 
     return {
-        id: organisation.id,
-        name_en: organisation.name_en,
-        orderedRaF: formatOrderedRaF(organisation.orderedRaF),
-        employees_n: organisation.employees_n,
-        people: organisation.people.map(people => people.id),
-        h_rate_from: organisation.h_rate_from,
-        h_rate_to: organisation.h_rate_to,
-        languages: organisation.languages.map(language => language.id),
-        profile_img: formatMedia(organisation.profile_img),
-        logoColour: formatMedia(organisation.logoColour),
-        skills_en: organisation.skills_en,
-        description_en: organisation.description_en,
-        tag_looking_fors: organisation.tag_looking_fors.map(looking_for => looking_for.id),
+        id: person.id,
+        firstName: person.firstName,
+        lastName: person.lastName,
+        orderedRaF: formatOrderedRaF(person.orderedRaF),
+        h_rate_from: person.h_rate_from,
+        h_rate_to: person.h_rate_to,
+        gender: person.gender,
+        native_lang: person.native_lang,
+        other_lang: person.other_lang.map(language => language.id),
+        profile_img: formatMedia(person.profile_img),
+        skills_en: person.skills_en,
+        bio_en: person.bio_en,
+        tag_looking_fors: person.tag_looking_fors.map(looking_for => looking_for.id),
 
-        webpage_url: organisation.webpage_url,
-        acc_imdb: organisation.acc_imdb,
-        acc_efis: organisation.acc_efis,
-        acc_instagram: organisation.acc_instagram,
-        acc_fb: organisation.acc_fb,
-        acc_other: organisation.acc_other,
-        acc_youtube: organisation.acc_youtube,
-        acc_vimeo: organisation.acc_vimeo,
+        webpage_url: person.webpage_url,
+        acc_imdb: person.acc_imdb,
+        acc_efis: person.acc_efis,
+        acc_instagram: person.acc_instagram,
+        acc_fb: person.acc_fb,
+        acc_other: person.acc_other,
+        acc_youtube: person.acc_youtube,
+        acc_vimeo: person.acc_vimeo,
+        acc_etalenta: person.acc_etalenta,
+        acc_castupload: person.acc_castupload,
 
-        phoneNr: organisation.phoneNr,
-        eMail: organisation.eMail,
 
-        addr_coll: formatAddressFields(organisation.addr_coll),
-        filmographies: await formatFilmographies(organisation.filmographies),
+        acting_age_from: person.acting_age_from,
+        acting_age_to: person.acting_age_to,
+        weight_kg: person.weight_kg,
+        height_cm: person.height_cm,
+        eye_colour: person.eye_colour,
+        hair_colour: person.hair_colour,
+        hair_length: person.hair_length,
+        pitch_of_voice: person.pitch_of_voice,
+        stature: person.stature,
 
-        clients: await formatClients(organisation.clients),
-        showreel: organisation.showreel,
-        audioreel: formatMedia(organisation.audioreel),
-        images: formatImages(organisation.images),
-        ok_to_contact: okToContact(organisation, user)
+
+        phoneNr: person.phoneNr,
+        eMail: person.eMail,
+
+        addr_coll: formatAddressFields(person.addr_coll),
+        filmographies: await formatFilmographies(person.filmographies),
+
+        showreel: person.showreel,
+        audioreel: formatMedia(person.audioreel),
+        images: formatImages(person.images),
+        ok_to_contact: user.ok_to_contact
     }
-}
-
-function okToContact (organisation, sessionUser) {
-    const freshUser = organisation.users.find(user => sessionUser.id == user.id);
-    if (freshUser) {
-        return freshUser.ok_to_contact
-    }
-    return sessionUser.ok_to_contact
 }
 
 function formatAddressFields(addr_coll)
@@ -87,25 +92,6 @@ function formatOrderedRaF(orderedRaF) {
             id: ordered_role_at_film.id,
             order: ordered_role_at_film.order,
             role_at_film: {id: ordered_role_at_film.role_at_film.id}
-        }
-    });
-}
-
-async function formatClients(originalClients) {
-    if (!originalClients.length) {
-        return originalClients
-    }
-    const clientIds = originalClients.map(function (client) {
-        return client.id;
-    });
-
-    const clients = await getStrapiClients(clientIds)
-    return clients.map(client => {
-        return {
-            id: client.id,
-            name: client.client_organisation.name_et,
-            description: client.description,
-            url: client.url
         }
     });
 }
