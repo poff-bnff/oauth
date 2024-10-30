@@ -917,3 +917,29 @@ export async function putStrapiCollection (collectionName, collectionData) {
   //console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
   return result
 }
+
+
+export async function getUniqSlug (slug, contentTypeUID, field) {
+  try {
+    const token = await getStrapiToken()
+    const url = `${config.strapiUrl}/content-manager/uid/check-availability`
+    const result = await $fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: {
+        contentTypeUID: contentTypeUID,
+        field: field,
+        value: slug
+      }
+    })
+    if (!result.isAvailable && result.suggestion) {
+      return result.suggestion
+    }
+  } catch (error) {
+    console.log('getUniqSlug error:', error)
+  }
+  return slug
+}

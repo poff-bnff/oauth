@@ -1,14 +1,13 @@
-export async function simplifyPersonCollection(person, user) {
-
-    return {
+export async function simplifyPersonCollection(person, user = null, extended = true) {
+    const simplifiedObject = {
         id: person.id,
         firstName: person.firstName,
         lastName: person.lastName,
         orderedRaF: formatOrderedRaF(person.orderedRaF),
         h_rate_from: person.h_rate_from,
         h_rate_to: person.h_rate_to,
-        gender: person.gender,
-        native_lang: person.native_lang,
+        gender: getObjectId(person.gender),
+        native_lang: getObjectId(person.native_lang),
         other_lang: person.other_lang.map(language => language.id),
         profile_img: formatMedia(person.profile_img),
         skills_en: person.skills_en,
@@ -31,11 +30,11 @@ export async function simplifyPersonCollection(person, user) {
         acting_age_to: person.acting_age_to,
         weight_kg: person.weight_kg,
         height_cm: person.height_cm,
-        eye_colour: person.eye_colour,
-        hair_colour: person.hair_colour,
-        hair_length: person.hair_length,
-        pitch_of_voice: person.pitch_of_voice,
-        stature: person.stature,
+        eye_colour: getObjectId(person.eye_colour),
+        hair_colour: getObjectId(person.hair_colour),
+        hair_length: getObjectId(person.hair_length),
+        pitch_of_voice: getObjectId(person.pitch_of_voice),
+        stature: getObjectId(person.stature),
 
 
         phoneNr: person.phoneNr,
@@ -47,8 +46,25 @@ export async function simplifyPersonCollection(person, user) {
         showreel: person.showreel,
         audioreel: formatMedia(person.audioreel),
         images: formatImages(person.images),
-        ok_to_contact: user.ok_to_contact
+        slug_en: person.slug_en
     }
+
+    if (user !== null) {
+        simplifiedObject['ok_to_contact'] = user.ok_to_contact
+    }
+
+    if (extended) {
+        simplifiedObject['filmographies'] = await formatFilmographies(person.filmographies);
+    }
+    return simplifiedObject
+}
+
+function getObjectId(data) {
+    if(!data) {
+        return data
+    }
+
+    return data.id
 }
 
 function formatAddressFields(addr_coll)
