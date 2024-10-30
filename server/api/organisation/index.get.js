@@ -1,5 +1,3 @@
-import { createStrapiOrganisation, getStrapiFilmographies } from "~/server/utils/strapi"
-
 export default defineEventHandler(async (event) => {
   const userId = getUserIdFromEvent(event)
   const user = await getStrapiUser(userId)

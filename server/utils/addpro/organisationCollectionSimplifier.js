@@ -1,8 +1,11 @@
-export async function simplifyOrganisationCollection(organisation, user) {
+export async function simplifyOrganisationCollection(organisation, user = null, extended = true) {
 
-    return {
+    const simplifiedObject = {
         id: organisation.id,
         name_en: organisation.name_en,
+        name_et: organisation.name_et,
+        name_ru: organisation.name_ru,
+        slug_en: organisation.slug_en,
         orderedRaF: formatOrderedRaF(organisation.orderedRaF),
         employees_n: organisation.employees_n,
         people: organisation.people.map(people => people.id),
@@ -28,22 +31,22 @@ export async function simplifyOrganisationCollection(organisation, user) {
         eMail: organisation.eMail,
 
         addr_coll: formatAddressFields(organisation.addr_coll),
-        filmographies: await formatFilmographies(organisation.filmographies),
 
-        clients: await formatClients(organisation.clients),
+
         showreel: organisation.showreel,
         audioreel: formatMedia(organisation.audioreel),
         images: formatImages(organisation.images),
-        ok_to_contact: okToContact(organisation, user)
     }
-}
 
-function okToContact (organisation, sessionUser) {
-    const freshUser = organisation.users.find(user => sessionUser.id == user.id);
-    if (freshUser) {
-        return freshUser.ok_to_contact
+    if (user !== null) {
+        simplifiedObject['ok_to_contact'] = user.ok_to_contact
     }
-    return sessionUser.ok_to_contact
+
+    if (extended) {
+        simplifiedObject['filmographies'] = await formatFilmographies(organisation.filmographies);
+        simplifiedObject['clients'] = await formatClients(organisation.clients);
+    }
+    return simplifiedObject
 }
 
 function formatAddressFields(addr_coll)
@@ -103,7 +106,7 @@ async function formatClients(originalClients) {
     return clients.map(client => {
         return {
             id: client.id,
-            name: client.client_organisation.name_et,
+            name: client.client_organisation.name_en,
             description: client.description,
             url: client.url
         }
