@@ -36,6 +36,7 @@ export async function simplifyPersonCollection(person, user = null, extended = t
         pitch_of_voice: getObjectId(person.pitch_of_voice),
         stature: getObjectId(person.stature),
 
+        festival_editions: person.festival_editions.map(festival_edition => festival_edition.id),
 
         phoneNr: person.phoneNr,
         eMail: person.eMail,

@@ -660,6 +660,8 @@ export async function createStrapiPerson (user) {
     user.user_profile = await createStrapiUserProfile(user)
   }
   const profile = user.user_profile
+
+  const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
   const createPerson = {
     firstName: profile.firstName,
     lastName: profile.lastName,
@@ -667,7 +669,8 @@ export async function createStrapiPerson (user) {
     eMail: profile.email,
     phoneNr: profile.phoneNr,
     profile_img: profile.picture,
-    country: profile.country
+    country: profile.country,
+    festival_editions: [FESTIVAL_EDITION_CREATIVE_GATE_ID]
   }
   // eslint-disable-next-line no-console
   console.log('createStrapiPerson create', createPerson.firstNameLastName)
