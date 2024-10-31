@@ -1,3 +1,5 @@
+const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
+
 export async function getAddProOrganisationPostData(body, originalData, newCollectionIds) {
 
     const cleanedPostData = {
@@ -70,7 +72,6 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
     await addGallery(body, originalData, cleanedPostData, newFileName, 'organisation')
 
     await addPrivateFields(body, originalData, cleanedPostData)
-
 
     return cleanedPostData;
 }
@@ -148,11 +149,19 @@ export async function getAddProPersonPostData(body, originalData, newCollectionI
 
     await addPersonPrivateFields(body, originalData, cleanedPostData)
 
+    addFestivalEdition(originalData, cleanedPostData)
+
+    cleanedPostData.public = 1
 
     return cleanedPostData;
 }
 
-
+function addFestivalEdition(originalData, cleanedPostData) {
+    cleanedPostData.festival_editions = originalData.festival_editions;
+    if (!cleanedPostData.festival_editions.includes(FESTIVAL_EDITION_CREATIVE_GATE_ID)) {
+        cleanedPostData.festival_editions.push(FESTIVAL_EDITION_CREATIVE_GATE_ID)
+    }
+}
 
 async function saveClient (originalObject, data) {
     let originalClients = originalObject.clients.map(e => parseInt(e.id))
