@@ -5,6 +5,9 @@ import jwt from 'jsonwebtoken'
 
 const config = useRuntimeConfig()
 
+const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
+
+
 const STRAPI_TOKEN = {
   token: null,
   expires: null
@@ -661,7 +664,6 @@ export async function createStrapiPerson (user) {
   }
   const profile = user.user_profile
 
-  const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
   const createPerson = {
     firstName: profile.firstName,
     lastName: profile.lastName,
@@ -843,7 +845,9 @@ export async function createStrapiOrganisation (user) {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
-    body: {}
+    body: {
+      festival_editions: [FESTIVAL_EDITION_CREATIVE_GATE_ID]
+    }
   })
 
   console.log('createStrapiOrganisation created', organisation.id)

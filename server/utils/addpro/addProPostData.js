@@ -73,6 +73,10 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
 
     await addPrivateFields(body, originalData, cleanedPostData)
 
+    addFestivalEdition(originalData, cleanedPostData)
+
+    cleanedPostData.public = 1
+
     return cleanedPostData;
 }
 
