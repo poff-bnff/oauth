@@ -36,7 +36,9 @@ export async function simplifyOrganisationCollection(organisation, user = null, 
         showreel: organisation.showreel,
         audioreel: formatMedia(organisation.audioreel),
         images: formatImages(organisation.images),
+        festival_editions: organisation.festival_editions.map(festival_edition => festival_edition.id),
     }
+
 
     if (user !== null) {
         simplifiedObject['ok_to_contact'] = user.ok_to_contact
