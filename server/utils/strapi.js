@@ -1,7 +1,12 @@
+import { URLSearchParams } from 'url'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 
+
 const config = useRuntimeConfig()
+
+const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
+
 
 const STRAPI_TOKEN = {
   token: null,
@@ -210,7 +215,7 @@ export async function setStrapiUserProfile (profileId, body) {
   })
 }
 
-export async function uploadStrapiImage (file, ref, refId) {
+export async function uploadStrapiImage (file, ref, refId, fileInfo) {
   if (!file) return null
 
   const token = await getStrapiToken()
@@ -223,6 +228,10 @@ export async function uploadStrapiImage (file, ref, refId) {
   formData.append('ref', ref)
   formData.append('refId', refId)
   formData.append('field', name)
+  if (typeof fileInfo !== 'undefined') {
+    formData.append('fileInfo', fileInfo)
+  }
+
   try {
     console.log('uploadStrapiImage') // eslint-disable-line no-console
     const pics = await $fetch(`${config.strapiUrl}/upload`, {
@@ -231,6 +240,44 @@ export async function uploadStrapiImage (file, ref, refId) {
       body: formData
     })
     // console.log('uploadStrapiImage ready', pics.length) // eslint-disable-line no-console
+    return pics[0]
+  } catch (error) {
+    throw new Error(error)
+  }
+}
+
+export async function refreshStrapiImageFileInfo(id, fileInfo) {
+  console.log('ID', id)
+  console.log('fileinfo', fileInfo)
+  const token = await getStrapiToken()
+
+  const formData = new FormData()
+  formData.append('fileInfo', fileInfo)
+
+  try {
+    console.log('uploadStrapiImage') // eslint-disable-line no-console
+    const pics = await $fetch(`${config.strapiUrl}/upload/?id=${id}&meow=2`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    })
+    // console.log('uploadStrapiImage ready', pics.length) // eslint-disable-line no-console
+    return pics[0]
+  } catch (error) {
+    throw new Error(error)
+  }
+}
+
+export async function deleteStrapiImage (fileId) {
+  const token = await getStrapiToken()
+  const formData = new FormData()
+
+  try {
+    console.log('deleteStrapiImage') // eslint-disable-line no-console
+    const pics = await $fetch(`${config.strapiUrl}/upload/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
     return pics[0]
   } catch (error) {
     throw new Error(error)
@@ -616,6 +663,7 @@ export async function createStrapiPerson (user) {
     user.user_profile = await createStrapiUserProfile(user)
   }
   const profile = user.user_profile
+
   const createPerson = {
     firstName: profile.firstName,
     lastName: profile.lastName,
@@ -623,7 +671,8 @@ export async function createStrapiPerson (user) {
     eMail: profile.email,
     phoneNr: profile.phoneNr,
     profile_img: profile.picture,
-    country: profile.country
+    country: profile.country,
+    festival_editions: [FESTIVAL_EDITION_CREATIVE_GATE_ID]
   }
   // eslint-disable-next-line no-console
   console.log('createStrapiPerson create', createPerson.firstNameLastName)
@@ -686,6 +735,140 @@ export async function setStrapiPerson (personData) {
   return person
 }
 
+export async function getStrapiFilmographies (ids) {
+  return getStrapiCollections(ids, 'filmographies')
+}
+
+export async function getStrapiClients(ids) {
+  return getStrapiCollections(ids,'clients')
+}
+
+export async function getStrapiCollections(ids, apiEndpoint) {
+  if (!ids) return null
+  const token = await getStrapiToken()
+
+  var params = new URLSearchParams();
+  for (const id of ids) {
+    params.append("id_in", id);
+  }
+
+  const url = `${config.strapiUrl}/${apiEndpoint}?` + params.toString()
+  const collections = await $fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return collections
+}
+
+
+
+export async function getStrapiOrganisationByField(field, name) {
+  if (!name) return null
+  const token = await getStrapiToken()
+
+  var params = new URLSearchParams();
+  params.append(`${field}_in`, name);
+
+  const url = `${config.strapiUrl}/organisations?` + params.toString()
+  const organisations = await $fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+
+  if (organisations.length) {
+     return organisations[0]
+  }
+
+  const organisation = await createStrapiOrganisationWithData({
+    'namePrivate': name,
+    'name_et': name,
+    'name_en': name,
+    'name_ru': name
+  })
+  console.log('getStrapiOrganisationByField CREATED', organisation)
+  return organisation
+}
+
+export async function getStrapiOrganisation (id) {
+  if (!id) return null
+  const token = await getStrapiToken()
+
+  const url = `${config.strapiUrl}/organisations/${id}`
+  const organisation = await $fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return organisation
+}
+
+export async function setStrapiOrganisation (organisationData) {
+  if (!organisationData) return null
+  const token = await getStrapiToken()
+
+  console.log('setStrapiOrganisation', organisationData.id)
+  const url = `${config.strapiUrl}/organisations/${organisationData.id}`
+  console.log('setStrapiOrganisation url', url)
+  const organisation = await $fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: organisationData
+  })
+  console.log('setStrapiOrganisation returning', organisationData.name_en)
+  return organisation
+}
+
+export async function createStrapiOrganisationWithData(data) {
+  console.log('createStrapiOrganisationWithData')
+  console.log(data)
+  const token = await getStrapiToken()
+
+  const organisation = await $fetch(`${config.strapiUrl}/organisations`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: data
+  })
+
+  console.log('createStrapiOrganisation created', organisation.id)
+  return organisation
+}
+
+export async function createStrapiOrganisation (user) {
+  if (!user) return null
+  const token = await getStrapiToken()
+
+  const organisation = await $fetch(`${config.strapiUrl}/organisations`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      festival_editions: [FESTIVAL_EDITION_CREATIVE_GATE_ID]
+    }
+  })
+
+  console.log('createStrapiOrganisation created', organisation.id)
+
+  await $fetch(`${config.strapiUrl}/users/${user.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      id: user.id,
+      organisations: [organisation.id]
+    }
+  })
+
+  console.log('createStrapiOrganisation user updated')
+
+  return [organisation]
+}
+
 export async function postStrapiCollection (collectionName, collectionData) {
   if (!collectionName) {
     console.info('postStrapiCollection collectionName is null') // eslint-disable-line no-console
@@ -737,7 +920,33 @@ export async function putStrapiCollection (collectionName, collectionData) {
       'Content-Type': 'application/json'
     },
     body: collectionData
-  })
-  console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
+  }).catch((err) => console.log('ERROR:', err.data, collectionData));
+  //console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
   return result
+}
+
+
+export async function getUniqSlug (slug, contentTypeUID, field) {
+  try {
+    const token = await getStrapiToken()
+    const url = `${config.strapiUrl}/content-manager/uid/check-availability`
+    const result = await $fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: {
+        contentTypeUID: contentTypeUID,
+        field: field,
+        value: slug
+      }
+    })
+    if (!result.isAvailable && result.suggestion) {
+      return result.suggestion
+    }
+  } catch (error) {
+    console.log('getUniqSlug error:', error)
+  }
+  return slug
 }
