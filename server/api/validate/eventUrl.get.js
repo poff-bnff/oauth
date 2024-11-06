@@ -9,20 +9,19 @@ export default defineEventHandler(async (event) => {
   await loadEventivalBadges(user)
 
   const WHITELIST = [
-    '2023 GUEST',
-    '2023 Industry PRO ONLINE',
-    '2023 Industry PRO',
-    '2023 Industry Student / Talent ONLINE',
-    '2023 Industry Student / Talent',
-    '2023 INTERN',
-    '2023 JURY',
-    '2023 JUST FILM INDUSTRY DAYS',
-    '2023 MANAGEMENT',
-    '2023 PRESS ONLINE',
-    '2023 PRESS',
-    '2023 TEAM',
-    '2023 VOLUNTEER GREEN',
-    '2023 VOLUNTEER'
+    '2024 MANAGEMENT',
+    '2024 JURY',
+    '2024 VIP',
+    '2024 GUEST',
+    '2024 TEAM',
+    '2024 PRESS',
+    '2024 PRESS ONLINE',
+    '2024 VOLUNTEER GREEN',
+    '2024 VOLUNTEER',
+    '2024 Industry PRO',
+    '2024 Industry PRO ONLINE',
+    '2024 Industry Student / Talent',
+    '2024 INTERN'
   ]
   const badges = user.badges
     .map(badge => badge.type.name)
