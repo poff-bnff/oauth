@@ -146,7 +146,7 @@ export async function getStrapiUser (id) {
   Object.keys(user).forEach(key => user[key] === null && delete user[key])
 
   // TODO: will become obsolete, when we finish with move to My
-  mergeUserMy(user)
+  await mergeUserMy(user)
 
   return user
 }
@@ -642,14 +642,40 @@ const makeUnique = (arr, prop) => {
   }, obj)).map(i => obj[i])
 }
 
-const mergeUserMy = (user) => {
+export async function mergeUserMy (user) {
+  const aliasIds = [];
+  var aliasUsers = [];
+
+  user.aliasUsers.forEach(alias =>{
+    aliasIds.push(alias.id)
+  })
+
+  if(aliasIds.length){
+    aliasUsers = await getStrapiCollections(aliasIds, 'users')
+  }
+
   user.My = user.My || {}
   const products = [...(user.My.products || []), ...(user.my_products || [])]
-  user.My.products = makeUnique(products, 'id')
   const films = [...(user.My.films || []), ...(user.my_films || [])]
-  user.My.films = makeUnique(films, 'id')
   const screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
+
+  aliasUsers.forEach(alias =>{
+    alias.My = alias.My || {}
+    products.push(...(alias.My.products || []))
+    products.push(...(alias.my_products || []))
+
+    films.push(...(alias.My.films || []))
+    films.push(...(alias.my_films || []))
+
+    screenings.push(...(alias.My.screenings || []))
+    screenings.push(...(alias.my_screenings || []))
+  })
+
+  user.My.products = makeUnique(products, 'id')
+  user.My.films = makeUnique(films, 'id')
   user.My.screenings = makeUnique(screenings, 'id')
+
+  return user
 }
 
 export async function createStrapiPerson (user) {
