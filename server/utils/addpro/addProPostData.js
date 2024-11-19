@@ -7,7 +7,7 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
     }
 
     if (body.filmography) {
-        saveFilmography(originalData, body.filmography, body, newCollectionIds, 'organisation')
+        await saveFilmography(originalData, body.filmography, body, newCollectionIds, 'organisation')
         return cleanedPostData;
     }
 
@@ -86,7 +86,7 @@ export async function getAddProPersonPostData(body, originalData, newCollectionI
     }
 
     if (body.filmography) {
-        saveFilmography(originalData, body.filmography, body, newCollectionIds, 'person')
+        await saveFilmography(originalData, body.filmography, body, newCollectionIds, 'person')
         return cleanedPostData;
     }
 

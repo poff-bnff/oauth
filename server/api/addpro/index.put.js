@@ -5,12 +5,11 @@ export default defineEventHandler(async (event) => {
   const flatPostData = await getFlatPostData(event)
 
   const formType = flatPostData.addProType
+  console.log(`api::addpro ${formType} PUT - body`, flatPostData) // eslint-disable-line no-console
 
   validateAllowedFormType(formType)
 
   const newCollectionIds = {}
-
-  console.log(`api::addpro ${formType} PUT - body`, flatPostData) // eslint-disable-line no-console
 
   const id = getUserIdFromEvent(event)
   const user = await getStrapiUser(id)
@@ -44,7 +43,7 @@ export default defineEventHandler(async (event) => {
     console.log(`api::addPro (${formType}) PUT - error ${error}`) // eslint-disable-line no-console
     throw createError({ statusCode: 500, statusMessage: `Error setting ${formType}`})
   }
-
+  console.log('api::addpro return', returnValue)
   return returnValue
 })
 
@@ -70,6 +69,7 @@ async function getFlatPostData(event) {
 
 function validateAllowedFormType(formType) {
   if (formType !== 'organisation' && formType !== 'person') {
+    console.log(`api::addPro validateError not suported type: ${formType}`)
     throw createError({
       statusCode: 409,
       statusMessage: `not suported type: ${formType}`
@@ -79,6 +79,7 @@ function validateAllowedFormType(formType) {
 
 function validateUserIsFound(user) {
   if (!user) {
+    console.log(`api::addPro validateError User not found`)
     throw createError({
       statusCode: 404,
       statusMessage: 'person::PUT User not Found'
@@ -88,6 +89,7 @@ function validateUserIsFound(user) {
 
 async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
   if (!Array.isArray(user.organisations) || user.organisations.length === 0) {
+    console.log(`api::addPro validateError Organisation not found`)
     throw createError({
       statusCode: 404,
       statusMessage: 'addpro::PUT Organisation not Found'
@@ -100,6 +102,7 @@ async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
 
 async function getPersonPostData(flatPostData, user, newCollectionIds) {
   if (!user.person || Object.keys(user.person).length === 0) {
+    console.log(`api::addPro validateError Person not found`)
     throw createError({
       statusCode: 404,
       statusMessage: 'addpro::PUT person not Found'

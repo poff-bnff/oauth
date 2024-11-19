@@ -824,7 +824,7 @@ export async function getStrapiOrganisation (id) {
   return organisation
 }
 
-export async function setStrapiOrganisation (organisationData) {
+export async function setStrapiOrganisation(organisationData) {
   if (!organisationData) return null
   const token = await getStrapiToken()
 
@@ -839,7 +839,6 @@ export async function setStrapiOrganisation (organisationData) {
     },
     body: organisationData
   })
-  console.log('setStrapiOrganisation returning', organisationData.name_en)
   return organisation
 }
 
