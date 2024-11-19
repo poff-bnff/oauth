@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
     console.log(`api::addPro (${formType}) PUT - error ${error}`) // eslint-disable-line no-console
     throw createError({ statusCode: 500, statusMessage: `Error setting ${formType}`})
   }
-
+  console.log('api::addpro return', returnValue)
   return returnValue
 })
 
