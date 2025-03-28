@@ -111,6 +111,39 @@ export async function readCourseEventVideolevelsUrl (courseEventId) {
   return courseEvent.video_url
 }
 
+export async function getStrapiUserForFiona (id, token) {
+  if (!id) {
+    throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
+  }
+
+  const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  if (!user) {
+    throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
+  }
+
+  if (user.mainUser) {
+    return getStrapiUserForFiona(user.mainUser.id, token)
+  }
+
+  if (user.user_profile === null) {
+    // create profile
+    // eslint-disable-next-line no-console
+    console.log('api::getStrapiUser - creating profile for user', id)
+    user.user_profile = await createStrapiUserProfile(user)
+  }
+
+  const data = {
+    id: user.id,
+    emailAddress: user.user_profile.email.indexOf("@eesti.ee") == -1 ? user.user_profile.email : null,
+    lastname: user.user_profile.lastName,
+    firstname: user.user_profile.firstName
+  }
+
+  return data
+}
+
 export async function getStrapiUser (id) {
   if (!id) {
     throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
@@ -435,6 +468,16 @@ export async function setFavorites (user, favorites) {
   })
 
   return result.My
+}
+
+export function getAdminBearer (event) {
+  const headers = getRequestHeaders(event)
+
+  const token = headers?.authorization?.split(' ')[1]
+
+  if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+
+  return token
 }
 
 export function getUserIdFromEvent (event) {
