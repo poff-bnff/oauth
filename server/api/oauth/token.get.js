@@ -3,22 +3,16 @@ import jwt from 'jsonwebtoken'
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const query = getQuery(event)
-  const redirectUri = getCookie(event, 'redirect_uri') || '/?jwt='
-  const stateCookie = getCookie(event, 'state')
 
-  setCookie(event, 'redirect_uri', null)
-  setCookie(event, 'state', null)
-
-  if (!query.code || !query.state || query.state !== stateCookie) {
+  if (!query.code || !query.client_id || !query.client_secret || !query.redirect_uri) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid arguments' })
   }
 
   const body = {
-    client_id: config.public.oauthClientId,
-    client_secret: config.oauthClientSecret,
+    client_id: query.client_id,
+    client_secret: query.client_secret,
     code: query.code,
-    grant_type: 'authorization_code',
-    state: stateCookie
+    grant_type: 'authorization_code'
   }
 
   try {
@@ -40,11 +34,11 @@ export default defineEventHandler(async (event) => {
 
     const jwtToken = jwt.sign(jwtData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
 
-    return sendRedirect(event, redirectUri + jwtToken, 302)
+    return sendRedirect(event, query.redirect_uri + '/?access_token=' + jwtToken, 302)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(error)
 
-    throw createError({ statusCode: 500, statusMessage: 'OAuth.ee error' })
+    throw createError(error)
   }
 })
