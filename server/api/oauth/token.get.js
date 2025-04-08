@@ -34,7 +34,8 @@ export default defineEventHandler(async (event) => {
 
     const jwtToken = jwt.sign(jwtData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
 
-    return sendRedirect(event, query.redirect_uri + '/?access_token=' + jwtToken, 302)
+    //return sendRedirect(event, query.redirect_uri + '/?access_token=' + jwtToken, 302)
+    return { access_token:jwtToken }
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(error)
