@@ -406,7 +406,7 @@ async function addGallery(body, originalData, cleanedPostData, newFileName, objT
 }
 
 async function addPrivateFields(body, originalData, cleanedPostData) {
-    if (body['name_en'] && (body['name_en'] != originalData[`name_en`] || originalData['slug_en'])) {
+    if (body['name_en'] && (body['name_en'] != originalData[`name_en`] || !originalData[`slug_en`])) {
         cleanedPostData['namePrivate'] = body['name_en'];
         const slug = slugify(body['name_en']);
         cleanedPostData['slug_en'] = await getUniqSlug(slug, 'application::organisation.organisation', `slug_en`);
