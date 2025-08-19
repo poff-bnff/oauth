@@ -62,6 +62,7 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
     addTextField('phoneNr', body, originalData, cleanedPostData);
     addTextField('eMail', body, originalData, cleanedPostData);
 
+    addBooleanField('show_in_cg_search', body, originalData, cleanedPostData);
 
     await addAddrColl('addr_coll', body, originalData, cleanedPostData);
 
@@ -142,6 +143,8 @@ export async function getAddProPersonPostData(body, originalData, newCollectionI
 
     addTextField('phoneNr', body, originalData, cleanedPostData);
     addTextField('eMail', body, originalData, cleanedPostData);
+
+    addBooleanField('show_in_cg_search', body, originalData, cleanedPostData);
 
     await addAddrColl('addr_coll', body, originalData, cleanedPostData);
 
@@ -255,6 +258,17 @@ function addTextField(field, body, originalData, cleanedPostData) {
     }
 }
 
+function addBooleanField(field, body, originalData, cleanedPostData) {
+    if (body[field] === "" || body[field] === undefined) {
+        body[field] = false;
+    }
+
+    body[field] = Boolean(body[field])
+
+    if (body[field] !== originalData[field]) {
+        cleanedPostData[field] = body[field]
+    }
+}
 
 function addIntField(field, body, originalData, cleanedPostData) {
     if (body[field] === "" || body[field] === undefined) {
