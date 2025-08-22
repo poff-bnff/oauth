@@ -112,7 +112,7 @@ onMounted(async () => {
 
     <div class="textcenter">
       <p class="textcenter back">{{ t('info') }}</p>
-      <p class="textcenter">{{ t('info2') }}</p>
+      <p class="textcenter smaller">{{ t('info2') }}</p>
     </div>
   </main>
 </template>
@@ -124,14 +124,14 @@ onMounted(async () => {
     mobileid: Mobile-ID
     email: E-Mail
     info: Select authentication method.
-    info2: Authentication service by OAuth.ee.
+    info2: by OAuth.ee
   et:
     back: Tagasi
     idcard: ID-kaart
     mobileid: Mobiil-ID
     email: E-post
     info: Vali autentimismeetod.
-    info2: Autentimisteenus OAuth.ee.
+    info2: OAuth.ee
 </i18n>
 
 <style scoped>
