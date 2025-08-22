@@ -7,4 +7,9 @@ html,
 body,
 #__nuxt {
   @apply h-full w-full;
+  display: grid;
+}
+
+main {
+  place-self: center;
 }
