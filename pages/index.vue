@@ -111,7 +111,7 @@ onMounted(async () => {
     </div>
 
     <div class="textcenter">
-      <p class="textcenter bigger">{{ t('info') }}</p>
+      <p class="textcenter back">{{ t('info') }}</p>
       <p class="textcenter">{{ t('info2') }}</p>
     </div>
   </main>
@@ -150,6 +150,11 @@ p {
 
 a {
   @apply cursor-pointer;
+}
+
+.back {
+  @apply flex items-center gap-2;
+  @apply font-extralight text-xl;
 }
 
 a.back {
