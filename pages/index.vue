@@ -122,13 +122,13 @@ onMounted(async () => {
     idcard: ID-card
     mobileid: Mobile-ID
     email: E-Mail
-    info: Log in using one of the methods. Authentication is provided by OAuth.ee.
+    info: Select authentication method. <br />Authentication service by OAuth.ee.
   et:
     back: Tagasi
     idcard: ID-kaart
     mobileid: Mobiil-ID
     email: E-post
-    info: Logi sisse, kasutades ühte meetoditest. Autentimist pakub OAuth.ee.
+    info: Vali autentimismeetod. <br />Autentimisteenus OAuth.ee.
 </i18n>
 
 <style scoped>
