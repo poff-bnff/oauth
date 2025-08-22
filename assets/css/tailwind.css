@@ -24,3 +24,7 @@ main {
 .textcenter {
   text-align: center;
 }
+
+.bigger {
+  font-size: 1.8rem;
+}
