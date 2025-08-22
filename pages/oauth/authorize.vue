@@ -82,13 +82,13 @@ onMounted(async () => {
     idcard: ID-card
     mobileid: Mobile-ID
     email: E-Mail
-    info: PÖFF (Tallinn Black Nights Film Festival) user identification service allows you to identify yourself with an e-mail, ID-card, Mobile-ID, Smart-ID or an Apple, Google and Eventival account. E-mail, ID-card, Mobile-ID, Smart-ID, Apple and Google authentication is provided by OAuth.ee.
+    info: Log in using one of the methods. Authentication is provided by OAuth.ee.
   et:
     back: Tagasi
     idcard: ID-kaart
     mobileid: Mobiil-ID
     email: E-post
-    info: PÖFFi kasutajate tuvastamisteenus lubab sul end tuvastada e-posti, ID-kaardi, Mobiil-ID, Smart-ID või Apple'i, Google'i ja Eventivali kontoga. E-posti, ID-kaardi, Mobiil-ID, Smart-ID, Apple'i ja Google'i autentimist vahendab OAuth.ee.
+    info: Logi sisse, kasutades ühte meetoditest. Autentimist pakub OAuth.ee.
 </i18n>
 
 <style scoped>
