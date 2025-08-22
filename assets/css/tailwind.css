@@ -11,10 +11,11 @@ body,
 
 #__nuxt {
   display: grid;
-  background-color: #f9fafb
+  background-color: #f9fafb;
 }
 
 main {
   place-self: center;
   margin-bottom: 10vh;
+  background-color: #ffffff;
 }
