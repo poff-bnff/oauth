@@ -18,4 +18,5 @@ main {
   place-self: center;
   margin-bottom: 10vh;
   background-color: #ffffff;
+  border-radius: 15px;
 }
