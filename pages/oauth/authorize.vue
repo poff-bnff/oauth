@@ -70,9 +70,9 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div>
-      <p>{{ t('info') }}</p>
-      <p>{{ t('info2') }}</p>
+    <div class="textcenter">
+      <p class="textcenter">{{ t('info') }}</p>
+      <p class="textcenter">{{ t('info2') }}</p>
     </div>
   </main>
 </template>
