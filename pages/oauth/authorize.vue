@@ -57,6 +57,10 @@ onMounted(async () => {
       <a v-else @click.prevent="() => locale = 'et'">ET</a>
     </div>
 
+    <div>
+      <img src="https://assets.poff.ee/img/hunt_oauth_logos.svg" alt="Authenticate" width="100%" height="100%">
+    </div>
+
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
         <a class="auth" :href="getOauthUrl('apple')">Apple</a>
