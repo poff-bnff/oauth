@@ -3,7 +3,7 @@ const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
 export async function getAddProOrganisationPostData(body, originalData, newCollectionIds) {
 
     const cleanedPostData = {
-        id: parseInt(body.id),
+        id: parseInt(originalData.id),
     }
 
     if (body.filmography) {
@@ -25,7 +25,6 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
         cleanedPostData['clients'] = body.clients;
         return cleanedPostData;
     }
-
 
     originalData = await simplifyOrganisationCollection(originalData, null, false)
     const newFileName = body.name_en.substring(0, 100)
@@ -83,7 +82,7 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
 
 export async function getAddProPersonPostData(body, originalData, newCollectionIds) {
     const cleanedPostData = {
-        id: parseInt(body.id),
+        id: parseInt(originalData.id),
     }
 
     if (body.filmography) {

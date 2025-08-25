@@ -89,11 +89,8 @@ function validateUserIsFound(user) {
 
 async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
   if (!user.organisation || Object.keys(user.organisation).length === 0) {
-    console.log(`api::addPro validateError Organisation not found`)
-    throw createError({
-      statusCode: 404,
-      statusMessage: 'addpro::PUT Organisation not Found'
-    })
+    console.log(`api::organisation GET - creating organisation for user ${user.id}`) // eslint-disable-line no-console
+    user.organisation = await createStrapiOrganisation(user)
   }
 
   const originalObject = await getStrapiOrganisation(user.organisation.id)
@@ -102,11 +99,8 @@ async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
 
 async function getPersonPostData(flatPostData, user, newCollectionIds) {
   if (!user.person || Object.keys(user.person).length === 0) {
-    console.log(`api::addPro validateError Person not found`)
-    throw createError({
-      statusCode: 404,
-      statusMessage: 'addpro::PUT person not Found'
-    })
+    console.log(`api::person GET - creating person for user ${user.id}`) // eslint-disable-line no-console
+    user.person = await createStrapiPerson(user)
   }
 
   const originalObject = await getStrapiPerson(user.person.id)
