@@ -67,7 +67,7 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
 
     addTextField('showreel', body, originalData, cleanedPostData);
 
-    addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'organisation');
+    await addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'organisation');
 
     await addGallery(body, originalData, cleanedPostData, newFileName, 'organisation')
 
@@ -149,7 +149,7 @@ export async function getAddProPersonPostData(body, originalData, newCollectionI
 
     addTextField('showreel', body, originalData, cleanedPostData);
 
-    addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'person');
+    await addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'person');
 
     await addGallery(body, originalData, cleanedPostData, newFileName, 'person')
 
