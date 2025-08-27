@@ -93,6 +93,10 @@ onMounted(async () => {
       <a v-else @click.prevent="() => locale = 'et'">ET</a>
     </div>
 
+    <div>
+      <img src="https://assets.poff.ee/img/hunt_oauth_logos.svg" alt="Authenticate" width="100%" height="100%">
+    </div>
+
     <div class="w-full flex flex-col sm:flex-row items-start justify-center gap-4">
       <div class="w-full flex flex-col gap-4">
         <a class="auth" :href="getOauthUrl('apple')">Apple</a>
@@ -106,8 +110,9 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div>
-      <p>{{ t('info') }}</p>
+    <div class="textcenter">
+      <p class="textcenter back">{{ t('info') }}</p>
+      <p class="textcenter smaller">{{ t('info2') }}</p>
     </div>
   </main>
 </template>
@@ -118,13 +123,15 @@ onMounted(async () => {
     idcard: ID-card
     mobileid: Mobile-ID
     email: E-Mail
-    info: PÖFF (Tallinn Balck Nights Film Festival) user identification service allows you to identify yourself with an e-mail, ID-card, Mobile-ID, Smart-ID or an Apple and Google account. E-mail, ID-card, Mobile-ID, Smart-ID, Apple and Google authentication is provided by OAuth.ee.
+    info: Select authentication method
+    info2: by OAuth.ee
   et:
     back: Tagasi
     idcard: ID-kaart
     mobileid: Mobiil-ID
     email: E-post
-    info: PÖFFi kasutajate tuvastamisteenus lubab sul end tuvastada e-posti, ID-kaardi, Mobiil-ID, Smart-ID või Apple'i ja Google'i kontoga. E-posti, ID-kaardi, Mobiil-ID, Smart-ID, Apple'i ja Google'i autentimist vahendab OAuth.ee.
+    info: Vali autentimismeetod
+    info2: OAuth.ee
 </i18n>
 
 <style scoped>
@@ -143,6 +150,11 @@ p {
 
 a {
   @apply cursor-pointer;
+}
+
+.back {
+  @apply flex items-center gap-2;
+  @apply font-extralight text-xl;
 }
 
 a.back {

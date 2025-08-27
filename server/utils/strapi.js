@@ -144,7 +144,7 @@ export async function getStrapiUserForFiona (id, token) {
   return data
 }
 
-export async function getStrapiUser (id) {
+export async function getStrapiUser(id) {
   if (!id) {
     throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
   }
@@ -180,7 +180,6 @@ export async function getStrapiUser (id) {
 
   // TODO: will become obsolete, when we finish with move to My
   await mergeUserMy(user)
-
   return user
 }
 
@@ -741,6 +740,7 @@ export async function createStrapiPerson (user) {
     phoneNr: profile.phoneNr,
     profile_img: profile.picture,
     country: profile.country,
+    user: user.id,
     festival_editions: [FESTIVAL_EDITION_CREATIVE_GATE_ID]
   }
   // eslint-disable-next-line no-console
@@ -843,7 +843,7 @@ export async function getStrapiOrganisationByField(field, name) {
   })
 
   if (organisations.length) {
-     return organisations[0]
+    return organisations[0]
   }
 
   const organisation = await createStrapiOrganisationWithData({
@@ -906,7 +906,6 @@ export async function createStrapiOrganisationWithData(data) {
 export async function createStrapiOrganisation (user) {
   if (!user) return null
   const token = await getStrapiToken()
-
   const organisation = await $fetch(`${config.strapiUrl}/organisations`, {
     method: 'POST',
     headers: {
@@ -914,7 +913,8 @@ export async function createStrapiOrganisation (user) {
       'Content-Type': 'application/json'
     },
     body: {
-      festival_editions: [FESTIVAL_EDITION_CREATIVE_GATE_ID]
+      festival_editions: [FESTIVAL_EDITION_CREATIVE_GATE_ID],
+      user: user.id
     }
   })
 
@@ -928,13 +928,13 @@ export async function createStrapiOrganisation (user) {
     },
     body: {
       id: user.id,
-      organisations: [organisation.id]
+      organisation: organisation.id
     }
   })
 
   console.log('createStrapiOrganisation user updated')
 
-  return [organisation]
+  return organisation
 }
 
 export async function postStrapiCollection (collectionName, collectionData) {

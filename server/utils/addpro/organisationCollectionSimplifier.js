@@ -1,5 +1,4 @@
 export async function simplifyOrganisationCollection(organisation, user = null, extended = true) {
-
     const simplifiedObject = {
         id: organisation.id,
         name_en: organisation.name_en,
@@ -37,6 +36,9 @@ export async function simplifyOrganisationCollection(organisation, user = null, 
         audioreel: formatMedia(organisation.audioreel),
         images: formatImages(organisation.images),
         festival_editions: organisation.festival_editions.map(festival_edition => festival_edition.id),
+        allowed_to_publish_valid_to_date: organisation.allowed_to_publish_valid_to_date,
+        allowed_to_publish: organisation.allowed_to_publish,
+        show_in_cg_search: organisation.show_in_cg_search,
     }
 
 

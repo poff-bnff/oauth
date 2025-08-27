@@ -8,3 +8,24 @@ body,
 #__nuxt {
   @apply h-full w-full;
 }
+
+#__nuxt {
+  display: grid;
+  background-color: #202030;
+}
+
+main {
+  place-self: center;
+  margin-bottom: 10vh;
+  background-color: #ffffff;
+  border-radius: 15px;
+}
+
+.textcenter {
+  text-align: center;
+}
+
+.smaller {
+  font-size: 0.8rem;
+  font-weight: 400;
+}

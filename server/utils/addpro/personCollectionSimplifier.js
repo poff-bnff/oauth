@@ -47,7 +47,11 @@ export async function simplifyPersonCollection(person, user = null, extended = t
         showreel: person.showreel,
         audioreel: formatMedia(person.audioreel),
         images: formatImages(person.images),
-        slug_en: person.slug_en
+        slug_en: person.slug_en,
+
+        allowed_to_publish_valid_to_date: person.allowed_to_publish_valid_to_date,
+        allowed_to_publish: person.allowed_to_publish,
+        show_in_cg_search: person.show_in_cg_search,
     }
 
     if (user !== null) {
