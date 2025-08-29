@@ -42,7 +42,6 @@ export async function simplifyPersonCollection(person, user = null, extended = t
         eMail: person.eMail,
 
         addr_coll: formatAddressFields(person.addr_coll),
-        filmographies: await formatFilmographies(person.filmographies),
 
         showreel: person.showreel,
         audioreel: formatMedia(person.audioreel),
