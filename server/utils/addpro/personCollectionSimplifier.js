@@ -52,6 +52,7 @@ export async function simplifyPersonCollection(person, user = null, extended = t
         allowed_to_publish_valid_to_date: person.allowed_to_publish_valid_to_date,
         allowed_to_publish: person.allowed_to_publish,
         show_in_cg_search: person.show_in_cg_search,
+        estimated_build_time: person.estimated_build_time
     }
 
     if (user !== null) {
