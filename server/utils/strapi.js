@@ -790,7 +790,7 @@ export async function setStrapiPerson (personData) {
   const token = await getStrapiToken()
 
   console.log('setStrapiPerson', personData.id)
-  const url = `${config.strapiUrl}/people/${personData.id}`
+  const url = `${config.strapiUrl}/people/addpro/${personData.id}`
   console.log('setStrapiPerson url', url)
   const person = await $fetch(url, {
     method: 'PUT',
@@ -872,7 +872,7 @@ export async function setStrapiOrganisation(organisationData) {
   const token = await getStrapiToken()
 
   console.log('setStrapiOrganisation', organisationData.id)
-  const url = `${config.strapiUrl}/organisations/${organisationData.id}`
+  const url = `${config.strapiUrl}/organisations/addpro/${organisationData.id}`
   console.log('setStrapiOrganisation url', url)
   const organisation = await $fetch(url, {
     method: 'PUT',
@@ -994,8 +994,29 @@ export async function putStrapiCollection (collectionName, collectionData) {
 }
 
 
-export async function getUniqSlug (slug, contentTypeUID, field) {
+export async function getUniqSlug(slug, contentTypeUID, field) {
+  //  grep -r -P "^path: " . | grep -v _fetchdir | grep source | awk -F': ' '{print "\""$2"\","}' | uniq
+  const reserverdSlugs = [
+      "artikkel", "about", "artikl", "intervjuud", "interviews",
+      "projects", "industry-projects", "toetajad", "supporters", "supportersru",
+      "featured-persons-archive", "toetajalood", "sponsorstories", "sponsorstoriesru", "shop",
+      "filmid", "films", "filmy", "discamp-events-search", "my-events",
+      "otsi_filmi", "search_film", "iskat_film", "news", "mycalendar",
+      "search-projects", "minu_seansid", "my_screenings", "moi_seanss", "locations",
+      "menu2", "praktika", "training_positions", "praktika_ru", "kursused",
+      "courses", "sockets", "filmikool-courses-search", "otsi_seanssi", "search_screening",
+      "iskat_seanss", "whos-here", "otsi_filmi_arhiivist", "search_film_archive", "iskat_film_arhiv",
+      "virtual-booth", "menu", "locations-search", "letschat", "creative_gate",
+      "dc-persons", "programmid", "programmes", "programmy", "persons-search",
+      "search-projects-archive", "persons-search-cg", "poff-soovitab", "poff-soovitab-en", "poff-soovitab-ru",
+      "screenings", "minupoff", "mypoff", "moipoff", "my_profile",
+      "cg_uudised", "cg_news", "cg_novosti", "industry-events-search", "uudised",
+      "news", "novosti"
+  ]
   try {
+    if (reserverdSlugs.includes(slug.toLowerCase())) {
+      slug = slug + '-1'
+    }
     const token = await getStrapiToken()
     const url = `${config.strapiUrl}/content-manager/uid/check-availability`
     const result = await $fetch(url, {

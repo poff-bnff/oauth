@@ -39,6 +39,7 @@ export async function simplifyOrganisationCollection(organisation, user = null, 
         allowed_to_publish_valid_to_date: organisation.allowed_to_publish_valid_to_date,
         allowed_to_publish: organisation.allowed_to_publish,
         show_in_cg_search: organisation.show_in_cg_search,
+        estimated_build_time: organisation.estimated_build_time
     }
 
 
