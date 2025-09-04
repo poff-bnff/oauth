@@ -184,6 +184,36 @@ export async function getStrapiUser (id) {
   return user
 }
 
+export async function getStrapiIndividual (id) {
+  if (!id) {
+    throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
+  }
+  const token = await getStrapiToken()
+
+  const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  if (!user) {
+    throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
+  }
+
+  if (user.mainUser) {
+    const mainUser =  await getStrapiUser(user.mainUser.id)
+
+    if(mainUser){
+      user.user_profile = mainUser.user_profile
+    }
+  }
+
+  if (user.user_profile !== null) {
+    // remove properties with null values from profile
+    Object.keys(user.user_profile).forEach(key => user.user_profile[key] === null && delete user.user_profile[key])
+    Object.keys(user).forEach(key => user[key] === null && delete user[key])
+  }
+
+  return user
+}
+
 export async function setStrapiUser (user) {
   if (!user) return null
   const token = await getStrapiToken()
