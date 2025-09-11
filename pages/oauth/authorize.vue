@@ -73,8 +73,9 @@ onMounted(async () => {
         <a class="auth" :href="getOauthUrl('mobile-id')">{{ t('mobileid') }}</a>
         <a class="auth" :href="getOauthUrl('id-card')">{{ t('idcard') }}</a>
       </div>
-    </div>
 -->
+    </div>
+
 
     <div class="textcenter">
       <p class="textcenter back">{{ t('info') }}</p>
