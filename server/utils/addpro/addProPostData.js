@@ -3,7 +3,7 @@ const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
 export async function getAddProOrganisationPostData(body, originalData, newCollectionIds) {
 
     const cleanedPostData = {
-        id: parseInt(body.id),
+        id: parseInt(originalData.id),
     }
 
     if (body.filmography) {
@@ -25,7 +25,6 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
         cleanedPostData['clients'] = body.clients;
         return cleanedPostData;
     }
-
 
     originalData = await simplifyOrganisationCollection(originalData, null, false)
     const newFileName = body.name_en.substring(0, 100)
@@ -62,12 +61,13 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
     addTextField('phoneNr', body, originalData, cleanedPostData);
     addTextField('eMail', body, originalData, cleanedPostData);
 
+    addBooleanField('show_in_cg_search', body, originalData, cleanedPostData);
 
     await addAddrColl('addr_coll', body, originalData, cleanedPostData);
 
     addTextField('showreel', body, originalData, cleanedPostData);
 
-    addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'organisation');
+    await addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'organisation');
 
     await addGallery(body, originalData, cleanedPostData, newFileName, 'organisation')
 
@@ -82,7 +82,7 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
 
 export async function getAddProPersonPostData(body, originalData, newCollectionIds) {
     const cleanedPostData = {
-        id: parseInt(body.id),
+        id: parseInt(originalData.id),
     }
 
     if (body.filmography) {
@@ -143,11 +143,13 @@ export async function getAddProPersonPostData(body, originalData, newCollectionI
     addTextField('phoneNr', body, originalData, cleanedPostData);
     addTextField('eMail', body, originalData, cleanedPostData);
 
+    addBooleanField('show_in_cg_search', body, originalData, cleanedPostData);
+
     await addAddrColl('addr_coll', body, originalData, cleanedPostData);
 
     addTextField('showreel', body, originalData, cleanedPostData);
 
-    addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'person');
+    await addFile('audioreel', body, originalData, cleanedPostData, '', false, newFileName, 'person');
 
     await addGallery(body, originalData, cleanedPostData, newFileName, 'person')
 
@@ -255,6 +257,17 @@ function addTextField(field, body, originalData, cleanedPostData) {
     }
 }
 
+function addBooleanField(field, body, originalData, cleanedPostData) {
+    if (body[field] === "" || body[field] === undefined) {
+        body[field] = false;
+    }
+
+    body[field] = Boolean(body[field])
+
+    if (body[field] !== originalData[field]) {
+        cleanedPostData[field] = body[field]
+    }
+}
 
 function addIntField(field, body, originalData, cleanedPostData) {
     if (body[field] === "" || body[field] === undefined) {
@@ -406,7 +419,7 @@ async function addGallery(body, originalData, cleanedPostData, newFileName, objT
 }
 
 async function addPrivateFields(body, originalData, cleanedPostData) {
-    if (body['name_en'] && (body['name_en'] != originalData[`name_en`] || originalData['slug_en'])) {
+    if (body['name_en'] && (body['name_en'] != originalData[`name_en`] || !originalData[`slug_en`])) {
         cleanedPostData['namePrivate'] = body['name_en'];
         const slug = slugify(body['name_en']);
         cleanedPostData['slug_en'] = await getUniqSlug(slug, 'application::organisation.organisation', `slug_en`);

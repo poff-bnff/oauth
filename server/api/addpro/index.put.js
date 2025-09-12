@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
   try {
     console.log(`api::addpro ${formType} PUT - sending postData:`, postData) // eslint-disable-line no-console
     if (user['ok_to_contact'] != flatPostData['ok_to_contact']) {
-      await setStrapiUser({ 'id': id, 'ok_to_contact': flatPostData['ok_to_contact'] })
+      await setStrapiUser({ 'id': user.id, 'ok_to_contact': flatPostData['ok_to_contact'] })
     }
 
     if (formType == 'organisation') {
@@ -88,25 +88,19 @@ function validateUserIsFound(user) {
 }
 
 async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
-  if (!Array.isArray(user.organisations) || user.organisations.length === 0) {
-    console.log(`api::addPro validateError Organisation not found`)
-    throw createError({
-      statusCode: 404,
-      statusMessage: 'addpro::PUT Organisation not Found'
-    })
+  if (!user.organisation || Object.keys(user.organisation).length === 0) {
+    console.log(`api::organisation GET - creating organisation for user ${user.id}`) // eslint-disable-line no-console
+    user.organisation = await createStrapiOrganisation(user)
   }
 
-  const originalObject = await getStrapiOrganisation(user.organisations[0].id)
+  const originalObject = await getStrapiOrganisation(user.organisation.id)
   return await getAddProOrganisationPostData(flatPostData, originalObject, newCollectionIds)
 }
 
 async function getPersonPostData(flatPostData, user, newCollectionIds) {
   if (!user.person || Object.keys(user.person).length === 0) {
-    console.log(`api::addPro validateError Person not found`)
-    throw createError({
-      statusCode: 404,
-      statusMessage: 'addpro::PUT person not Found'
-    })
+    console.log(`api::person GET - creating person for user ${user.id}`) // eslint-disable-line no-console
+    user.person = await createStrapiPerson(user)
   }
 
   const originalObject = await getStrapiPerson(user.person.id)
