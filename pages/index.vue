@@ -103,6 +103,7 @@ onMounted(async () => {
         <a class="auth" :href="getOauthUrl('google')">Google</a>
         <a class="auth" :href="getOauthUrl('e-mail')">{{ t('email') }}</a>
       </div>
+
       <div class="w-full flex flex-col gap-4">
         <a class="auth" :href="getOauthUrl('smart-id')">Smart-ID</a>
         <a class="auth" :href="getOauthUrl('mobile-id')">{{ t('mobileid') }}</a>
