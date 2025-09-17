@@ -111,7 +111,6 @@ onMounted(async () => {
       </div>
     </div>
 
-
     <div class="textcenter">
       <p class="textcenter back">{{ t('info') }}</p>
       <p class="textcenter smaller">{{ t('info2') }}</p>
