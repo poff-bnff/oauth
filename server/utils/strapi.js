@@ -55,6 +55,130 @@ export async function emailInUse (email) {
   return false
 }
 
+export async function loadFionaBadges (user) {
+  const mainUserId = user.id
+  const aliasUserIds = Array.isArray(user.aliasUsers) && user.aliasUsers.length
+    ? user.aliasUsers.map(u => u.id)
+    : []
+  const allIds = [mainUserId, ...aliasUserIds]
+
+  // Use a Map to consolidate all badges by badge_name, ensuring unique statuses
+  const consolidatedBadgesMap = new Map()
+
+  const guestbooks = await getActiveFionaGuestbooks() // Assuming getActiveFionaGuestbooks is available
+
+  for (const guestbookId of guestbooks) {
+    for (const id of allIds) {
+      try {
+        // fetchFionaBadges returns an array of structured objects:
+        // [{ badge_name: 'Name', statuses: ['A', 'B'] }, ...]
+        const fionaBadges = await fetchFionaBadges(guestbookId, id)
+
+        if (Array.isArray(fionaBadges) && fionaBadges.length) {
+          // Iterate over the results from this query and merge them into the Map
+          for (const badge of fionaBadges) {
+            const existingBadge = consolidatedBadgesMap.get(badge.badge_name)
+
+            if (existingBadge) {
+              // 1. Merge the statuses from the existing badge and the new badge
+              const mergedStatuses = [...existingBadge.statuses, ...badge.statuses]
+
+              // 2. Use a Set to extract only the unique statuses
+              const uniqueStatuses = Array.from(new Set(mergedStatuses))
+
+              // 3. Update the existing badge's status list
+              existingBadge.statuses = uniqueStatuses
+              // No need to set the map value again, as objects are passed by reference
+            } else {
+              // If it's a new badge name, add a copy to the Map
+              consolidatedBadgesMap.set(badge.badge_name, { ...badge })
+            }
+          }
+        }
+      } catch (err) {
+        console.error('loadFionaBadges error', { guestbookId, id, err })
+      }
+    }
+  }
+
+  // Convert the Map values back into the final array and assign it
+  user.badges = Array.from(consolidatedBadgesMap.values())
+
+  return user
+}
+
+export async function fetchFionaBadges (guestbookId, userId) {
+  if (!guestbookId || !userId) return []
+
+  const token = config.fionaApiKey
+  const options = {
+    headers: {
+      'X-ApiKey': token
+    },
+    method: 'GET'
+  }
+
+  const fionaBadges = await $fetch(`https://poff-xapi.fiona-app.com/api/account/MyPoff/${userId}/guestbook/${guestbookId}/badges`, options)
+
+  // --- Data Transformation Logic ---
+
+  // 1. Group the badges by name and collect unique statuses using a Map/Object
+  // We use a Set to ensure statuses are unique for each badge name
+  const groupedBadgesMap = fionaBadges.reduce((acc, badge) => {
+    const badgeName = badge.GuestbookBadge?.Description;
+    const statusDescription = badge.Status?.Description;
+
+    // Skip any entries that are missing critical information
+    if (!badgeName || !statusDescription) {
+        return acc;
+    }
+
+    // If this badge name hasn't been seen yet, initialize its entry
+    if (!acc[badgeName]) {
+      acc[badgeName] = {
+        badge_name: badgeName,
+        // Use a Set to store statuses for automatic uniqueness
+        statuses: new Set()
+      };
+    }
+
+    // Add the current status to the Set
+    acc[badgeName].statuses.add(statusDescription);
+
+    return acc;
+  }, {});
+
+  // 2. Convert the grouped object (which contains Sets) into the final array format
+  const finalBadgesArray = Object.values(groupedBadgesMap).map(item => ({
+    badge_name: item.badge_name,
+    // Convert the Set of statuses back into a standard Array
+    statuses: Array.from(item.statuses)
+  }));
+
+  return finalBadgesArray;
+}
+
+async function getActiveFionaGuestbooks () {
+  const token = await getStrapiToken()
+
+  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+  const params = new URLSearchParams()
+  params.append('validUntil_gt', today)
+  params.append('validFrom_lte', today)
+
+  const festivals = await $fetch(`${config.strapiUrl}/festival-editions?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+
+  const guestbookIds = [...new Set(
+    festivals
+      .map(f => f?.guestbook_id)
+      .filter(id => id !== null && id !== undefined)
+  )]
+
+  return guestbookIds
+}
+
 export async function fetchEventivalBadges (email) {
   if (!email) return []
 

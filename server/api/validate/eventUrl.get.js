@@ -6,36 +6,52 @@ export default defineEventHandler(async (event) => {
   const user = await getStrapiUser(id)
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
-  await loadEventivalBadges(user)
+  // Fetches and consolidates all user badges, including all statuses for each badge name
+  await loadFionaBadges(user)
 
   const WHITELIST = [
-    '2024 MANAGEMENT',
-    '2024 JURY',
-    '2024 VIP',
-    '2024 GUEST',
-    '2024 TEAM',
-    '2024 PRESS',
-    '2024 PRESS ONLINE',
-    '2024 VOLUNTEER GREEN',
-    '2024 VOLUNTEER',
-    '2024 Industry PRO',
-    '2024 Industry PRO ONLINE',
-    '2024 Industry Student / Talent',
-    '2024 INTERN'
+    'Management',
+    'Jury',
+    'VIP',
+    'Team',
+    'Press',
+    'Volunteer Green',
+    'Volunteer Blue',
+    'Industry@Tallinn & Baltic Event / Student Talent',
+    'Industry@Tallinn & Baltic Event / PRO',
+    'Intern'
   ]
-  const badges = user.badges
-    .map(badge => badge.type.name)
-    .filter(badgeName => WHITELIST.includes(badgeName))
 
-  if (badges.length === 0) {
+  const ALLOWED_STATUSES = [
+    'Approved',
+    'Delivered',
+    'Paid',
+    'Printed'
+  ]
+
+  // Filter badges by name and status
+  const validAndActiveBadges = user.badges
+    // 1. Filter by Name: Must be in the WHITELIST
+    .filter(badge => WHITELIST.includes(badge.badge_name))
+    // 2. Filter by Status: Must contain at least one ALLOWED_STATUS
+    .filter(badge => {
+      // Use .some() to check if any status in the badge's statuses array is in ALLOWED_STATUSES
+      return badge.statuses.some(status => ALLOWED_STATUSES.includes(status))
+    })
+
+  // The access check now uses the fully filtered list
+  if (validAndActiveBadges.length === 0) {
     console.log(`api::validate::eventUrl.get user ${user.id} was denied access to courseEventId ${courseEventId}`) // eslint-disable-line no-console
     return {
       message: 'You are not allowed to access this page. with existing badges:',
-      existingBadges: user.badges.map(badge => badge.type.name)
+      existingBadges: user.badges.map(badge => badge.badge_name)
     }
   }
+
+  // Access Granted
   const videoUrl = await readCourseEventVideolevelsUrl(courseEventId)
   console.log(`api::validate::eventUrl.get user ${user.id} was granted access to courseEvent ${courseEventId}: ${videoUrl}`) // eslint-disable-line no-console
+
   try {
     const videoProvider = videoUrl.split('/')[2]
     const videoId = videoUrl.split('/bc/')[1].split('/')[0]
