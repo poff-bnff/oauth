@@ -41,6 +41,7 @@ export default defineNuxtConfig({
     oauthClientSecret: '',
     eventivalClientSecret: '',
     eventivalApiToken: '',
+    fionaApiKey: '',
     public: {
       url: '',
       oauthUrl: '',
