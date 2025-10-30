@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
 
   const user = await getStrapiUser(uid)
 
-  const response = await loadFionaBadges(user)
+  const response = await updateUserAndAliasesRoles(user)
 
   return response
 })
