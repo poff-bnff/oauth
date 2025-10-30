@@ -18,6 +18,18 @@ const STRAPI_ADMIN_TOKEN = {
   expires: null
 }
 
+export async function getStrapiSingleUser (userId) {
+  if (!userId) return null
+  const token = await getStrapiToken() // Assuming this returns a general token
+
+  // Fetch the user's current data, crucial for getting existing user_roles
+  return await $fetch(`${config.strapiUrl}/users/${userId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  })
+}
+
 export async function authenticateStrapiUser (email) {
   if (!email) return null
 
@@ -55,57 +67,44 @@ export async function emailInUse (email) {
   return false
 }
 
-export async function loadFionaBadges (user) {
-  const mainUserId = user.id
-  const aliasUserIds = Array.isArray(user.aliasUsers) && user.aliasUsers.length
-    ? user.aliasUsers.map(u => u.id)
-    : []
-  const allIds = [mainUserId, ...aliasUserIds]
+// --- CONFIGURATION/UTILITY FUNCTIONS (Assume these are available globally or imported) ---
+// const config = { strapiUrl: '...', fionaApiKey: '...' };
+// const $fetch = async (url, options) => { ... };
+// const getStrapiToken = async () => { ... };
+// const getStrapiAdminToken = async () => { ... };
 
-  // Use a Map to consolidate all badges by badge_name, ensuring unique statuses
-  const consolidatedBadgesMap = new Map()
+// A simple delay utility for retry logic
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  const guestbooks = await getActiveFionaGuestbooks() // Assuming getActiveFionaGuestbooks is available
+// --- STRAPI ROLE UTILITY ---
 
-  for (const guestbookId of guestbooks) {
-    for (const id of allIds) {
-      try {
-        // fetchFionaBadges returns an array of structured objects:
-        // [{ badge_name: 'Name', statuses: ['A', 'B'] }, ...]
-        const fionaBadges = await fetchFionaBadges(guestbookId, id)
+export async function getStrapiUserRoles () {
+  const token = await getStrapiAdminToken()
 
-        if (Array.isArray(fionaBadges) && fionaBadges.length) {
-          // Iterate over the results from this query and merge them into the Map
-          for (const badge of fionaBadges) {
-            const existingBadge = consolidatedBadgesMap.get(badge.badge_name)
-
-            if (existingBadge) {
-              // 1. Merge the statuses from the existing badge and the new badge
-              const mergedStatuses = [...existingBadge.statuses, ...badge.statuses]
-
-              // 2. Use a Set to extract only the unique statuses
-              const uniqueStatuses = Array.from(new Set(mergedStatuses))
-
-              // 3. Update the existing badge's status list
-              existingBadge.statuses = uniqueStatuses
-              // No need to set the map value again, as objects are passed by reference
-            } else {
-              // If it's a new badge name, add a copy to the Map
-              consolidatedBadgesMap.set(badge.badge_name, { ...badge })
-            }
-          }
-        }
-      } catch (err) {
-        console.error('loadFionaBadges error', { guestbookId, id, err })
-      }
-    }
-  }
-
-  // Convert the Map values back into the final array and assign it
-  user.badges = Array.from(consolidatedBadgesMap.values())
-
-  return user
+  // NOTE: This call only needs to happen once per run
+  return await $fetch(`${config.strapiUrl}/user-roles`, { headers: { Authorization: `Bearer ${token}` } })
 }
+
+export async function setStrapiUserRoles (userId, roleIds) {
+  if (!userId || !Array.isArray(roleIds)) return null
+
+  // Ensure you are using a token with permission to update users and their custom relations (user_roles)
+  const token = await getStrapiToken()
+
+  return await $fetch(`${config.strapiUrl}/users/${userId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    // Only send the custom user_roles field with an array of IDs
+    body: {
+      user_roles: roleIds
+    }
+  })
+}
+
+// --- FIONA BADGE FETCHING (With Resilience/Retry) ---
 
 export async function fetchFionaBadges (guestbookId, userId) {
   if (!guestbookId || !userId) return []
@@ -117,32 +116,48 @@ export async function fetchFionaBadges (guestbookId, userId) {
     },
     method: 'GET'
   }
+  const url = `https://poff-xapi.fiona-app.com/api/account/MyPoff/${userId}/guestbook/${guestbookId}/badges`
 
-  const fionaBadges = await $fetch(`https://poff-xapi.fiona-app.com/api/account/MyPoff/${userId}/guestbook/${guestbookId}/badges`, options)
+  // --- RETRY LOGIC for External API Failure ---
+  const MAX_RETRIES = 3
+  let fionaBadges = []
 
-  // --- Data Transformation Logic ---
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      // Use a timeout option if $fetch supports it, to prevent infinite hang
+      fionaBadges = await $fetch(url, options)
+      break // Success!
+    } catch (err) {
+      // Check for common network/DNS errors (EAI_AGAIN, ENOTFOUND, network timeouts)
+      const isRetryable = err.code === 'EAI_AGAIN' || err.code === 'ENOTFOUND' || err.name === 'FetchError'
+
+      if (i === MAX_RETRIES - 1 || !isRetryable) {
+        console.error(`Fiona fetch failed after ${i + 1} attempts for ${url}. Aborting.`, err)
+        throw err // Re-throw the original error
+      }
+
+      // Wait a bit longer on each retry attempt (Exponential backoff)
+      console.warn(`Retry attempt ${i + 1} failed for ${url} (Error: ${err.code || err.name}). Retrying...`)
+      await delay(500 * (i + 1))
+    }
+  }
+  // --- END RETRY LOGIC ---
 
   // 1. Group the badges by name and collect unique statuses using a Map/Object
-  // We use a Set to ensure statuses are unique for each badge name
   const groupedBadgesMap = fionaBadges.reduce((acc, badge) => {
     const badgeName = badge.GuestbookBadge?.Description;
     const statusDescription = badge.Status?.Description;
 
-    // Skip any entries that are missing critical information
     if (!badgeName || !statusDescription) {
         return acc;
     }
 
-    // If this badge name hasn't been seen yet, initialize its entry
     if (!acc[badgeName]) {
       acc[badgeName] = {
         badge_name: badgeName,
-        // Use a Set to store statuses for automatic uniqueness
         statuses: new Set()
       };
     }
-
-    // Add the current status to the Set
     acc[badgeName].statuses.add(statusDescription);
 
     return acc;
@@ -151,7 +166,6 @@ export async function fetchFionaBadges (guestbookId, userId) {
   // 2. Convert the grouped object (which contains Sets) into the final array format
   const finalBadgesArray = Object.values(groupedBadgesMap).map(item => ({
     badge_name: item.badge_name,
-    // Convert the Set of statuses back into a standard Array
     statuses: Array.from(item.statuses)
   }));
 
@@ -177,6 +191,225 @@ async function getActiveFionaGuestbooks () {
   )]
 
   return guestbookIds
+}
+
+export async function loadFionaBadges (user) {
+  const mainUserId = user.id
+  const aliasUserIds = Array.isArray(user.aliasUsers) && user.aliasUsers.length
+    ? user.aliasUsers.map(u => u.id)
+    : []
+  const allIds = [mainUserId, ...aliasUserIds]
+
+  const consolidatedBadgesMap = new Map()
+  const guestbooks = await getActiveFionaGuestbooks()
+
+  for (const guestbookId of guestbooks) {
+    for (const id of allIds) {
+      try {
+        const fionaBadges = await fetchFionaBadges(guestbookId, id)
+
+        if (Array.isArray(fionaBadges) && fionaBadges.length) {
+          for (const badge of fionaBadges) {
+            const existingBadge = consolidatedBadgesMap.get(badge.badge_name)
+
+            if (existingBadge) {
+              const mergedStatuses = [...existingBadge.statuses, ...badge.statuses]
+              const uniqueStatuses = Array.from(new Set(mergedStatuses))
+              existingBadge.statuses = uniqueStatuses
+            } else {
+              consolidatedBadgesMap.set(badge.badge_name, { ...badge })
+            }
+          }
+        }
+      } catch (err) {
+        // Log the individual fetch error, but the overall loadFionaBadges continues
+        console.error('loadFionaBadges error (single ID/guestbook fetch failed)', { guestbookId, id, err })
+      }
+    }
+  }
+
+  user.badges = Array.from(consolidatedBadgesMap.values())
+
+  return user
+}
+
+
+// --- ROLE VALIDATION LOGIC ---
+
+// A helper function to check if a user has a specific badge and status (kept unchanged)
+function userHasMatchingBadge (userBadges, requiredBadgeName, requiredBadgeStatuses) {
+  const userBadge = userBadges.find(
+    badge => badge.badge_name === requiredBadgeName
+  )
+  if (!userBadge) return false
+  const requiredStatusesArray = requiredBadgeStatuses.split(',').map(s => s.trim()).filter(s => s.length > 0)
+  const userStatuses = userBadge.statuses
+  return requiredStatusesArray.some(requiredStatus => userStatuses.includes(requiredStatus))
+}
+
+/**
+ * Filters the roles based on badges for a given user object.
+ * @param {Object} user - The user object with aggregated badges.
+ * @param {Array<Object>} allStrapiRoles - The pre-fetched list of all available Strapi roles.
+ * @param {Array<Object>} existingUserRoles - The roles currently assigned to the user.
+ * @param {boolean} isAlias - Flag to exclude badge-based roles for alias users.
+ * @returns {Array<number>} An array of Role IDs to be assigned.
+ */
+export async function validateUserRoles (user, allStrapiRoles, existingUserRoles, isAlias = false) {
+  const userBadges = user.badges || []
+  const rolesToAssign = []
+
+  // Create a quick lookup set for the IDs of the user's existing roles
+  const existingRoleIds = new Set(existingUserRoles.map(role => role.id));
+
+  for (const role of allStrapiRoles) {
+    const roleHasBadgesDefined = Array.isArray(role.user_badges) && role.user_badges.length > 0
+
+    // Requirement 3: Skip badge-based roles for aliases
+    if (isAlias && roleHasBadgesDefined) {
+        continue;
+    }
+
+    if (roleHasBadgesDefined) {
+      // **Process Badge-Based Roles** (Always ADD if criteria met)
+
+      let roleIsAssignedByBadge = false
+
+      for (const requiredBadge of role.user_badges) {
+        if (
+          userHasMatchingBadge(
+            userBadges,
+            requiredBadge.badgeName,
+            requiredBadge.badgeStatuses
+          )
+        ) {
+          rolesToAssign.push(role)
+          roleIsAssignedByBadge = true
+          break
+        }
+      }
+    } else {
+      // **Process Non-Badge Roles** (PRESERVE if already assigned)
+
+      // ONLY push this role if the user ALREADY has it assigned.
+      if (existingRoleIds.has(role.id)) {
+        rolesToAssign.push(role)
+      }
+    }
+  }
+
+  return rolesToAssign.map(role => role.id)
+}
+
+/**
+ * Checks if two arrays of role IDs are identical, regardless of order.
+ * @param {Array<number>} array1 - The newly calculated role IDs.
+ * @param {Array<number>} array2 - The existing role IDs from Strapi.
+ * @returns {boolean} True if both arrays contain the same IDs, false otherwise.
+ */
+function areRoleArraysEqual (array1, array2) {
+  if (array1.length !== array2.length) {
+    return false;
+  }
+
+  // Convert one array to a Set for efficient lookup
+  const set1 = new Set(array1);
+
+  // Check if every element in array2 is present in set1
+  return array2.every(id => set1.has(id));
+}
+
+// --- MASTER ORCHESTRATOR (Updated for Optimization and Resilience) ---
+
+export async function updateUserAndAliasesRoles (mainUser) {
+  const aliasUsers = Array.isArray(mainUser.aliasUsers) ? mainUser.aliasUsers : []
+  let allStrapiRoles = []
+
+  // 1. Fetch ALL Strapi roles ONCE (Optimization)
+  try {
+    allStrapiRoles = await getStrapiUserRoles()
+  } catch (err) {
+    console.error('CRITICAL: Failed to fetch Strapi roles. Aborting role validation.', err)
+    return mainUser
+  }
+
+  // 2. Load/Aggregate all badges ONTO the main user object (Resilience)
+  let userWithBadges = mainUser;
+  let allUserBadges = [];
+
+  try {
+    userWithBadges = await loadFionaBadges(mainUser)
+    allUserBadges = userWithBadges.badges || []
+  } catch (err) {
+    console.error('Non-critical: Total failure fetching Fiona badges. Roles will only include non-badge-dependent roles.', err)
+    userWithBadges.badges = []
+  }
+
+  // --- Process Main User ---
+  const mainUserId = mainUser.id;
+
+  // 3. Fetch current user details to get existing roles
+  const mainUserCurrentDetails = await getStrapiUser(mainUserId)
+  const mainUserExistingRoles = mainUserCurrentDetails?.user_roles || []
+  const mainUserExistingRoleIds = mainUserExistingRoles.map(role => role.id); // Array of current IDs
+
+  // 4. Validate roles
+  const mainUserRoleIds = await validateUserRoles(
+    userWithBadges,
+    allStrapiRoles,
+    mainUserExistingRoles,
+    false
+  )
+
+  // 5. Compare and conditionally update (NEW LOGIC)
+  if (mainUserId && !areRoleArraysEqual(mainUserRoleIds, mainUserExistingRoleIds)) {
+    try {
+      await setStrapiUserRoles(mainUserId, mainUserRoleIds)
+      console.log(`✅ Successfully updated roles (CHANGE DETECTED) for Main User ID: ${mainUserId}`)
+    } catch (error) {
+      console.error(`Error updating roles for Main User ID: ${mainUserId}`, error)
+    }
+  } else {
+    console.log(`ℹ️ Roles for Main User ID: ${mainUserId} are up-to-date. Skipping update.`)
+  }
+
+  // --- Process Alias Users ---
+  for (const alias of aliasUsers) {
+    const aliasId = alias.id;
+
+    // 6. Fetch current alias details to get existing roles
+    const aliasCurrentDetails = await getStrapiUser(aliasId)
+    const aliasExistingRoles = aliasCurrentDetails?.user_roles || []
+    const aliasExistingRoleIds = aliasExistingRoles.map(role => role.id); // Array of current IDs
+
+    const aliasUserContext = {
+        id: aliasId,
+        badges: allUserBadges
+    }
+
+    // 7. Validate alias roles
+    const aliasRoleIds = await validateUserRoles(
+      aliasUserContext,
+      allStrapiRoles,
+      aliasExistingRoles,
+      true
+    )
+
+    // 8. Compare and conditionally update (NEW LOGIC)
+    if (aliasId && !areRoleArraysEqual(aliasRoleIds, aliasExistingRoleIds)) {
+      try {
+          await setStrapiUserRoles(aliasId, aliasRoleIds)
+          console.log(`✅ Successfully updated roles (CHANGE DETECTED) for Alias User ID: ${aliasId}`)
+      } catch (error) {
+          console.error(`Error updating roles for Alias User ID: ${aliasId}`, error)
+      }
+    } else {
+      console.log(`ℹ️ Roles for Alias User ID: ${aliasId} are up-to-date. Skipping update.`)
+    }
+  }
+
+  mainUser.user_roles = mainUserRoleIds
+  return mainUser
 }
 
 export async function fetchEventivalBadges (email) {
