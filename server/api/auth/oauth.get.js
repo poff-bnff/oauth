@@ -28,6 +28,9 @@ export default defineEventHandler(async (event) => {
     if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No OAuth.ee e-mail' })
 
     const strapiUser = await authenticateStrapiUser(user.email)
+
+    const response = await updateUserAndAliasesRoles(strapiUser)
+
     try {
       const id = getUserIdFromEvent(event)
       console.log(`api::oauth GET - user ${strapiUser.id} (${strapiUser.email}). Old user id ${id}`) // eslint-disable-line no-console
