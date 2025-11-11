@@ -468,34 +468,70 @@ export async function readCourseEventVideolevelsUrl (courseEventId) {
   return courseEvent.video_url
 }
 
-export async function getStrapiUserForFiona (id, token) {
-  if (!id) {
+/**
+ * Retrieves user context data, prioritizing the main user's profile for names,
+ * but always using the base user's ID/Email for identification.
+ * Ensures the profile for the profile source user (main or base) exists.
+ *
+ * @param {string | number} baseUserId The ID of the currently queried user (the base user).
+ * @param {string} token The Strapi authorization token.
+ * @returns {Promise<object>} The merged user context data.
+ */
+export async function getStrapiUserForFiona (baseUserId, token) {
+  if (!baseUserId) {
     throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
   }
 
-  const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
+  // 1. Fetch the Base User (the current session user, providing ID/Email)
+  const baseUser = await $fetch(`${config.strapiUrl}/users/${baseUserId}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  if (!user) {
-    throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
+  if (!baseUser) {
+    throw createError({ statusCode: 404, statusMessage: `No user with ID ${baseUserId}` })
   }
 
-  if (user.mainUser) {
-    return getStrapiUserForFiona(user.mainUser.id, token)
+  // Set the default source for profile data to the base user
+  let profileSourceUser = baseUser
+  let sourceUserProfile = baseUser.user_profile
+
+  // 2. Check for Main User Link
+  if (baseUser.mainUser && baseUser.mainUser.id) {
+    const mainUserId = baseUser.mainUser.id
+
+    // Fetch the Main User record
+    const mainUser = await $fetch(`${config.strapiUrl}/users/${mainUserId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+
+    // If the main user is found, use them as the source for profile names
+    if (mainUser) {
+      profileSourceUser = mainUser
+      sourceUserProfile = mainUser.user_profile
+    }
+    // If the main user fetch fails, we fall back to using the base user profile,
+    // ensuring names are always sourced, even if the main link is broken.
   }
 
-  if (user.user_profile === null) {
-    // create profile
+  // 3. Ensure the Profile exists for the designated Source User (main or base)
+  if (sourceUserProfile === null) {
+    // Create profile for the user we are sourcing name/lastname from
     // eslint-disable-next-line no-console
-    console.log('api::getStrapiUser - creating profile for user', id)
-    user.user_profile = await createStrapiUserProfile(user)
+    console.log('api::getStrapiUser - creating profile for user', profileSourceUser.id)
+    sourceUserProfile = await createStrapiUserProfile(profileSourceUser)
   }
 
+  // 4. Construct the Final Output
   const data = {
-    id: user.id,
-    emailAddress: user.user_profile.email.indexOf("@eesti.ee") == -1 ? user.user_profile.email : null,
-    lastname: user.user_profile.lastName,
-    firstname: user.user_profile.firstName
+    // ID: ALWAYS from the CURRENTLY queried user (baseUser)
+    id: baseUser.id,
+
+    // Email: ALWAYS from the CURRENTLY queried user (baseUser),
+    // using the original logic which checks the email property.
+    emailAddress: baseUser.email,
+
+    // Name/Lastname: ALWAYS from the SOURCE USER's profile (mainUser or baseUser)
+    lastname: sourceUserProfile.lastName,
+    firstname: sourceUserProfile.firstName
   }
 
   return data
