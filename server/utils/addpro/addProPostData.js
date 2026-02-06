@@ -290,9 +290,6 @@ function addIntField(field, body, originalData, cleanedPostData) {
 }
 
 function addIntArrayField(field, body, originalData, cleanedPostData) {
-    if (body[field] === undefined) {
-        return;
-    }
     if (!Array.isArray(body[field])) {
         body[field] = [];
     }
