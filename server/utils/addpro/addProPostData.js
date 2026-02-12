@@ -49,6 +49,8 @@ export async function getAddProOrganisationPostData(body, originalData, newColle
 
     addIntArrayField('tag_looking_fors', body, originalData, cleanedPostData)
 
+    addIntArrayField('festival_editions', body, originalData, cleanedPostData)
+
     addTextField('webpage_url', body, originalData, cleanedPostData);
     addTextField('acc_imdb', body, originalData, cleanedPostData);
     addTextField('acc_efis', body, originalData, cleanedPostData);
@@ -119,6 +121,8 @@ export async function getAddProPersonPostData(body, originalData, newCollectionI
 
     addIntArrayField('tag_looking_fors', body, originalData, cleanedPostData)
 
+    addIntArrayField('festival_editions', body, originalData, cleanedPostData)
+
     addTextField('webpage_url', body, originalData, cleanedPostData);
     addTextField('acc_imdb', body, originalData, cleanedPostData);
     addTextField('acc_efis', body, originalData, cleanedPostData);
@@ -163,7 +167,9 @@ export async function getAddProPersonPostData(body, originalData, newCollectionI
 }
 
 function addFestivalEdition(originalData, cleanedPostData) {
-    cleanedPostData.festival_editions = originalData.festival_editions;
+    if (!cleanedPostData.festival_editions) {
+        cleanedPostData.festival_editions = originalData.festival_editions;
+    }
     if (!cleanedPostData.festival_editions.includes(FESTIVAL_EDITION_CREATIVE_GATE_ID)) {
         cleanedPostData.festival_editions.push(FESTIVAL_EDITION_CREATIVE_GATE_ID)
     }
