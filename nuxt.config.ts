@@ -31,17 +31,6 @@ export default defineNuxtConfig({
       autoprefixer: {}
     }
   },
-  nitro: {
-    experimental: {
-      // Required for defineTask / scheduledTasks (Nitro ≥ 2.9)
-      tasks: true
-    },
-    scheduledTasks: {
-      // Run the Fiona → Strapi sync every 15 minutes.
-      // Override via NUXT_NITRO_SCHEDULED_TASKS env var if needed.
-      '*/15 * * * *': ['fiona:sync']
-    }
-  },
   runtimeConfig: {
     jwtSecret: '',
     strapiUrl: '',
