@@ -11,7 +11,22 @@
  * Optional body: { "dryRun": true }  — logs intended changes without writing to Strapi.
  */
 
+import crypto from 'crypto'
 import { runFionaSync } from '../../utils/fionaSync.js'
+
+/**
+ * Constant-time string comparison to prevent timing attacks on secret comparison.
+ * Pads both buffers to the same length before calling timingSafeEqual.
+ */
+function timingSafeCompare (a, b) {
+  const aBuf = Buffer.from(a, 'utf8')
+  const bBuf = Buffer.from(b, 'utf8')
+  // Use the longer length so neither value leaks its length via short-circuit
+  const len = Math.max(aBuf.length, bBuf.length)
+  const aPadded = Buffer.concat([aBuf, Buffer.alloc(len - aBuf.length)])
+  const bPadded = Buffer.concat([bBuf, Buffer.alloc(len - bBuf.length)])
+  return crypto.timingSafeEqual(aPadded, bPadded) && aBuf.length === bBuf.length
+}
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
@@ -28,7 +43,7 @@ export default defineEventHandler(async (event) => {
     ? authHeader.slice(7).trim()
     : ''
 
-  if (!providedToken || providedToken !== expectedSecret) {
+  if (!providedToken || !timingSafeCompare(providedToken, expectedSecret)) {
     throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
   }
 

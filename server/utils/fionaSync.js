@@ -139,10 +139,9 @@ export async function fetchPersonCommunications (personId) {
 
 /**
  * GET /person/{personId}/{providerName}/externalauthentications
- * Returns the external auth records; `externalIdentification` is the login email.
+ * Returns the external auth records; `externalIdentification` is Strapi user object id.
  */
 export async function fetchPersonExternalAuthentications (personId, providerName = FIONA_PROVIDER_NAME) {
-  console.log(`[fionaSync] Fetching external authentications for person ${personId} and provider ${providerName}`)
   return await fionaFetch(`/person/${personId}/${providerName}/externalauthentications`)
 }
 
@@ -284,7 +283,6 @@ export async function upsertStrapiPersonFromFiona (loginEmail, personPayload, ph
   } catch { /* no match */ }
 
   const existingPerson = Array.isArray(existingPeople) ? existingPeople[0] : null
-  console.log(`[fionaSync] Existing Strapi person for email ${loginEmail}:`, existingPerson ? `ID ${existingPerson.id}` : 'none')
   // 2. Upload photo if provided
   let pictureId = existingPerson?.picture?.id || null
   if (photoBuffer) {
@@ -337,10 +335,13 @@ export async function linkPersonToUser (personId, userId) {
 }
 
 /**
- * Create a user-profile for a Strapi user if one doesn't exist yet.
+ * Create a user-profile for a Strapi user if one doesn't already exist.
+ * Note: authenticateStrapiUser() returns a simplified object without user_profile,
+ * so we always check existence via the API rather than trusting the user object.
  */
 async function ensureStrapiUserProfile (strapiUser) {
-  if (strapiUser.user_profile) return
+  const existing = await strapiAdminFetch(`/user-profiles?user=${strapiUser.id}&_limit=1`)
+  if (Array.isArray(existing) && existing.length > 0) return
 
   const token = await getStrapiAdminToken()
   await $fetch(`${config.strapiUrl}/user-profiles`, {
@@ -483,7 +484,6 @@ export async function runFionaSync ({ dryRun = false } = {}) {
             if (extId) {
               existingStrapiUser = await strapiAdminFetch(`/users/${extId}`)
               loginEmail = existingStrapiUser?.email || null
-              console.log(`[fionaSync] Resolved Strapi user ${existingStrapiUser?.id} via Fiona external auth for person ${personId}`)
             }
           } catch { /* no external auth record */ }
 
@@ -505,7 +505,7 @@ export async function runFionaSync ({ dryRun = false } = {}) {
             continue
           }
 
-          console.log(`[fionaSync] Processing accreditation ${accreditationId} for person ${personId} (${fionaPerson.FirstName} ${fionaPerson.LastName}), login email: ${loginEmail}`)
+          console.log(`[fionaSync] Processing accreditation ${accreditationId} for person ${personId} (${fionaPerson.FirstName} ${fionaPerson.LastName})`)
 
           // 4e. Resolve phone — ContactDetails first, then communicationItems
           let phoneNr = null
@@ -573,10 +573,7 @@ export async function runFionaSync ({ dryRun = false } = {}) {
           }
           if (strapiUser && person?.id) {
             await linkPersonToUser(person.id, strapiUser.id)
-            // Only create user-profile if it doesn't already exist
-            if (!strapiUser.user_profile) {
-              await ensureStrapiUserProfile(strapiUser)
-            }
+            await ensureStrapiUserProfile(strapiUser)
           }
 
           wasNew ? stats.created++ : stats.updated++
