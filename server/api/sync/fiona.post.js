@@ -11,31 +11,31 @@
  * Optional body: { "dryRun": true }  — logs intended changes without writing to Strapi.
  */
 
-import { runFionaSync } from "../../utils/fionaSync.js";
+import { runFionaSync } from '../../utils/fionaSync.js'
 
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig();
+  const config = useRuntimeConfig()
 
   // Guard: compare the bearer token against the shared secret from .env (NUXT_SYNC_SECRET).
   // This avoids any Strapi round-trip and keeps the endpoint independent of Strapi user tokens.
-  const expectedSecret = config.syncSecret;
+  const expectedSecret = config.syncSecret
   if (!expectedSecret) {
-    throw createError({ statusCode: 500, statusMessage: "NUXT_SYNC_SECRET is not configured" });
+    throw createError({ statusCode: 500, statusMessage: 'NUXT_SYNC_SECRET is not configured' })
   }
 
-  const authHeader = getRequestHeader(event, "authorization") || "";
-  const providedToken = authHeader.startsWith("Bearer ")
+  const authHeader = getRequestHeader(event, 'authorization') || ''
+  const providedToken = authHeader.startsWith('Bearer ')
     ? authHeader.slice(7).trim()
-    : "";
+    : ''
 
   if (!providedToken || providedToken !== expectedSecret) {
-    throw createError({ statusCode: 401, statusMessage: "Unauthorized" });
+    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
   }
 
-  const body = await readBody(event).catch(() => ({}));
-  const dryRun = body?.dryRun === true;
+  const body = await readBody(event).catch(() => ({}))
+  const dryRun = body?.dryRun === true
 
-  const stats = await runFionaSync({ dryRun });
+  const stats = await runFionaSync({ dryRun })
 
-  return { ok: true, stats };
-});
+  return { ok: true, stats }
+})

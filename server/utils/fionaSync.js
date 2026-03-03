@@ -123,7 +123,7 @@ export async function fetchAccreditationDetail (accreditationId) {
 
 /**
  * GET /person/{personId}
- * Returns basic person data: { id, firstName, lastName, address, nationality, profession, ... }
+ * Returns basic person data: { id, FirstName, LastName, Address, Nationality, Profession, ... }
  */
 export async function fetchFionaPerson (personId) {
   return await fionaFetch(`/person/${personId}`)
@@ -142,7 +142,7 @@ export async function fetchPersonCommunications (personId) {
  * Returns the external auth records; `externalIdentification` is the login email.
  */
 export async function fetchPersonExternalAuthentications (personId, providerName = FIONA_PROVIDER_NAME) {
-    console.log(`[fionaSync] Fetching external authentications for person ${personId} and provider ${providerName}`)
+  console.log(`[fionaSync] Fetching external authentications for person ${personId} and provider ${providerName}`)
   return await fionaFetch(`/person/${personId}/${providerName}/externalauthentications`)
 }
 
@@ -284,7 +284,7 @@ export async function upsertStrapiPersonFromFiona (loginEmail, personPayload, ph
   } catch { /* no match */ }
 
   const existingPerson = Array.isArray(existingPeople) ? existingPeople[0] : null
-console.log(`[fionaSync] Existing Strapi person for email ${loginEmail}:`, existingPerson ? `ID ${existingPerson.id}` : 'none')
+  console.log(`[fionaSync] Existing Strapi person for email ${loginEmail}:`, existingPerson ? `ID ${existingPerson.id}` : 'none')
   // 2. Upload photo if provided
   let pictureId = existingPerson?.picture?.id || null
   if (photoBuffer) {
@@ -393,7 +393,7 @@ let syncRunning = false
 export async function runFionaSync ({ dryRun = false } = {}) {
   if (syncRunning) {
     console.warn('[fionaSync] Sync already running — skipping this invocation')
-    return null
+    return { processed: 0, created: 0, updated: 0, skipped: 1, errors: 0 }
   }
   syncRunning = true
   const startedAt = Date.now()
@@ -451,7 +451,7 @@ export async function runFionaSync ({ dryRun = false } = {}) {
             continue
           }
 
-          const { matched, badge: matchingBadge } = matchesWhitelist(badges, badgeWL, statusWL)
+          const { matched } = matchesWhitelist(badges, badgeWL, statusWL)
           if (!matched) {
             stats.skipped++
             continue
