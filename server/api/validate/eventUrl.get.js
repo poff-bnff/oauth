@@ -2,73 +2,102 @@ export default defineEventHandler(async (event) => {
   const q = getQuery(event)
   const courseEventId = parseInt(Object.keys(q)[0])
 
-  const id = getUserIdFromEvent(event)
-  const user = await getStrapiUser(id)
-  if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+  const userId = getUserIdFromEvent(event)
+  if (!userId) {
+    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
+  }
 
-  // Fetches and consolidates all user badges, including all statuses for each badge name
-  await loadFionaBadges(user)
+  // Fetch user with populated user_roles and nested relations
+  const config = useRuntimeConfig()
+  const token = await getStrapiToken()
+  
+  const populateQuery = 'populate[user_roles][populate][0]=user_right.functions.function_parameters'
+  const user = await $fetch(`${config.strapiUrl}/users/${userId}?${populateQuery}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
 
-  const WHITELIST = [
-    'Management',
-    'Jury',
-    'VIP',
-    'Team',
-    'Press',
-    'Volunteer Green',
-    'Volunteer Blue',
-    'Industry@Tallinn & Baltic Event / Student Talent',
-    'Industry@Tallinn & Baltic Event / PRO',
-    'Intern'
-  ]
+  if (!user) {
+    throw createError({ statusCode: 404, statusMessage: 'User not found' })
+  }
 
-  const ALLOWED_STATUSES = [
-    'Approved',
-    'Delivered',
-    'Paid',
-    'Printed'
-  ]
+  // Check for show_courseevent_video permission
+  const currentDate = new Date()
+  let hasPermission = false
 
-  // Filter badges by name and status
-  const validAndActiveBadges = user.badges
-    // 1. Filter by Name: Must be in the WHITELIST
-    .filter(badge => WHITELIST.includes(badge.badge_name))
-    // 2. Filter by Status: Must contain at least one ALLOWED_STATUS
-    .filter(badge => {
-      // Use .some() to check if any status in the badge's statuses array is in ALLOWED_STATUSES
-      return badge.statuses.some(status => ALLOWED_STATUSES.includes(status))
+  if (user.user_roles && Array.isArray(user.user_roles)) {
+    // Filter roles that are currently valid
+    const validRoles = user.user_roles.filter(role => {
+      const validFrom = role.valid_from ? new Date(role.valid_from) : null
+      const validTo = role.valid_to ? new Date(role.valid_to) : null
+      
+      const isValidFrom = !validFrom || validFrom <= currentDate
+      const isValidTo = !validTo || validTo >= currentDate
+      
+      return isValidFrom && isValidTo
     })
 
-  // The access check now uses the fully filtered list
-  if (validAndActiveBadges.length === 0) {
-    console.log(`api::validate::eventUrl.get user ${user.id} was denied access to courseEventId ${courseEventId}`) // eslint-disable-line no-console
-    return {
-      message: 'You are not allowed to access this page. with existing badges:',
-      existingBadges: user.badges.map(badge => badge.badge_name)
+    // Check if any valid role has the show_courseevent_video permission
+    for (const role of validRoles) {
+      if (!role.user_right || !Array.isArray(role.user_right)) continue
+
+      for (const right of role.user_right) {
+        if (!right.functions || !Array.isArray(right.functions)) continue
+
+        for (const func of right.functions) {
+          if (!func.function_parameters || !Array.isArray(func.function_parameters)) continue
+
+          const hasVideoPermission = func.function_parameters.some(param => 
+            param.property === 'show_courseevent_video' && param.value === 'true'
+          )
+
+          if (hasVideoPermission) {
+            hasPermission = true
+            break
+          }
+        }
+
+        if (hasPermission) break
+      }
+
+      if (hasPermission) break
     }
   }
 
-  // Access Granted
+  // Log the permission check result
+  console.log(`Video access for user ${userId}, course-event ${courseEventId}: ${hasPermission ? 'GRANTED' : 'DENIED'}`) // eslint-disable-line no-console
+
+  // If permission denied, return error
+  if (!hasPermission) {
+    return {
+      error: 'No permission to view video',
+      code: 403
+    }
+  }
+
+  // Permission granted - fetch course-event and parse video URL
   const videoUrl = await readCourseEventVideolevelsUrl(courseEventId)
-  console.log(`api::validate::eventUrl.get user ${user.id} was granted access to courseEvent ${courseEventId}: ${videoUrl}`) // eslint-disable-line no-console
+
+  if (!videoUrl) {
+    return {
+      error: 'Video URL not found',
+      code: 404
+    }
+  }
 
   try {
+    // Parse video URL: https://videolevels.com/bc/VIDEO_ID/something
     const videoProvider = videoUrl.split('/')[2]
     const videoId = videoUrl.split('/bc/')[1].split('/')[0]
+    
     return {
-      message: 'You are allowed to access this video.',
-      status: 200,
-      videoUrl,
       videoProvider,
       videoId
     }
   } catch (error) {
+    console.error(`Failed to parse video URL for course-event ${courseEventId}: ${videoUrl}`, error) // eslint-disable-line no-console
     return {
-      message: 'You are allowed to access the video but alas, there is no videoUrl.',
-      status: 200,
-      videoUrl: null,
-      videoProvider: null,
-      videoId: null
+      error: 'Failed to parse video URL',
+      code: 500
     }
   }
 })
