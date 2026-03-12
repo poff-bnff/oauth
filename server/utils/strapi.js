@@ -929,7 +929,7 @@ export function getUserIdFromToken (token) {
   }
 }
 
-async function getStrapiToken () {
+export async function getStrapiToken () {
   // If a cached token exists, and it's not expired, return it
   if (STRAPI_TOKEN.token && STRAPI_TOKEN.expires > Date.now()) {
     return STRAPI_TOKEN.token
@@ -938,7 +938,7 @@ async function getStrapiToken () {
   }
 }
 
-async function getStrapiAdminToken () {
+export async function getStrapiAdminToken () {
   // If a cached token exists, and it's not expired, return it
   if (STRAPI_ADMIN_TOKEN.token && STRAPI_ADMIN_TOKEN.expires > Date.now()) {
     return STRAPI_ADMIN_TOKEN.token
