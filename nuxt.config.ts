@@ -42,6 +42,7 @@ export default defineNuxtConfig({
     eventivalClientSecret: '',
     eventivalApiToken: '',
     fionaApiKey: '',
+    syncSecret: '',  // NUXT_SYNC_SECRET — shared secret for POST /api/sync/fiona
     public: {
       url: '',
       oauthUrl: '',
