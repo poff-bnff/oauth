@@ -1,17 +1,21 @@
 // helpful article: https://www.freecodecamp.org/news/handle-file-uploads-on-the-backend-in-node-js-nuxt/
 
 import { setStrapiUserProfile } from '~/server/utils/strapi'
+import { logOperational } from '~/server/utils/safeLogger'
 
 export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
-  const id = getUserIdFromEvent(event)
-  // console.log('api::profile PUT - user id', id)
-  const user = await getStrapiUser(id)
+  const userId = getUserIdFromEvent(event)
+  const route = 'api::profile PUT'
+  const user = await getStrapiUser(userId)
 
-  if (user.profile === null) {
+  if (!user) {
+    logOperational(event, { route, status: 404, errorCode: 'PROFILE_USER_NOT_FOUND' })
+    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+  }
+
+  if (user.user_profile === null) {
     // create profile
-    // eslint-disable-next-line no-console
-    console.log('api::profile PUT - creating profile for user', id)
     user.user_profile = await createStrapiUserProfile(user)
   }
 
@@ -22,7 +26,7 @@ export default defineEventHandler(async (event) => {
 
   // Add all properties sans picture to profileData
   const profileData = {}
-  body.forEach(({ name, data, filename, type }) => {
+  body.forEach(({ name, data }) => {
     if (name !== 'picture') {
       profileData[name] = data.toString()
     }
@@ -54,8 +58,10 @@ export default defineEventHandler(async (event) => {
     await setStrapiUserProfile(user.user_profile.id, profileData)
     returnValue.body = 'all good, thanks for the all the fish, '.repeat(20) + 'and the dolphins too.'
   } catch (error) {
+    logOperational(event, { route, status: 500, errorCode: 'PROFILE_UPDATE_FAILED' })
     throw createError({ statusCode: 500, statusMessage: 'Error setting profile' })
   }
 
+  logOperational(event, { route, status: 200 })
   return returnValue
 })
