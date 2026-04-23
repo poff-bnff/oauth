@@ -1,14 +1,20 @@
-export default defineEventHandler(async (event) => {
-  const id = getUserIdFromEvent(event)
-  console.log('api::profile GET - user id', id)
-  const user = await getStrapiUser(id)
+import { logOperational } from '~/server/utils/safeLogger'
 
-  if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+export default defineEventHandler(async (event) => {
+  const userId = getUserIdFromEvent(event)
+  const route = 'api::profile GET'
+  const user = await getStrapiUser(userId)
+
+  if (!user) {
+    logOperational(event, { route, status: 404, errorCode: 'PROFILE_USER_NOT_FOUND' })
+    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+  }
 
   if (user.user_profile === null) {
     // create profile
-    console.log('api::profile GET - creating profile for user', id)
     user.user_profile = await createStrapiUserProfile(user)
   }
+
+  logOperational(event, { route, status: 200 })
   return user.user_profile
 })
