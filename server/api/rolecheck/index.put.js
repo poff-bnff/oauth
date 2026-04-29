@@ -1,19 +1,14 @@
-import { logOperational } from '~/server/utils/safeLogger'
-
 export default defineEventHandler(async (event) => {
-  const route = 'api::rolecheck PUT'
   const userId = getUserIdFromEvent(event)
+  // const user = await getStrapiUser(id)
 
   const body = await readBody(event)
 
   body.userId = userId
 
-  const productToBuy = await roleCheck(body)
-  if (!productToBuy) {
-    logOperational(event, { route, status: 404, errorCode: 'ROLECHECK_PRODUCT_NOT_FOUND' })
-    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
-  }
+  console.log('Rolecheck put', body)
 
-  logOperational(event, { route, status: 200 })
+  const productToBuy = await roleCheck(body)
+  if (!productToBuy) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
   return productToBuy
 })
