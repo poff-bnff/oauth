@@ -98,14 +98,15 @@ export default defineEventHandler(async (event) => {
 
   // Support both new format (?contentType=course-event&contentId=123)
   // and old deployed format (?123) for backward compatibility.
-  const contentType = ALLOWED_CONTENT_TYPES.includes(q.contentType) ? q.contentType : 'course-event'
-    : legacyContentIdKey !== undefined
-        ? parseInt(legacyContentIdKey, 10)
-        : NaN
   const legacyContentIdKey = Object.keys(q).find(key => /^\d+$/.test(key))
+  const contentType = ALLOWED_CONTENT_TYPES.includes(q.contentType)
+    ? q.contentType
+    : 'course-event'
   const contentId = q.contentId
     ? parseInt(q.contentId, 10)
-    : parseInt(legacyContentIdKey, 10)
+    : legacyContentIdKey !== undefined
+      ? parseInt(legacyContentIdKey, 10)
+      : NaN
 
   if (!contentId || isNaN(contentId)) {
     throw createError({ statusCode: 400, statusMessage: 'Missing or invalid contentId' })
@@ -153,4 +154,3 @@ export default defineEventHandler(async (event) => {
 
   return parsed
 })
-
