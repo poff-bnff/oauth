@@ -1,22 +1,20 @@
 // helpful article: https://www.freecodecamp.org/news/handle-file-uploads-on-the-backend-in-node-js-nuxt/
 
-import { logOperational } from '~/server/utils/safeLogger'
-
 export default defineEventHandler(async (event) => {
-  const route = 'api::addpro PUT'
 
   const flatPostData = await getFlatPostData(event)
 
   const formType = flatPostData.addProType
+  console.log(`api::addpro ${formType} PUT - body`, flatPostData) // eslint-disable-line no-console
 
-  validateAllowedFormType(formType, event, route)
+  validateAllowedFormType(formType)
 
   const newCollectionIds = {}
 
   const id = getUserIdFromEvent(event)
   const user = await getStrapiUser(id)
 
-  validateUserIsFound(user, event, route)
+  validateUserIsFound(user)
 
   const postData = formType == 'organisation' ? await getOrganisationPostData(flatPostData, user, newCollectionIds) : await getPersonPostData(flatPostData, user, newCollectionIds)
 
@@ -24,6 +22,7 @@ export default defineEventHandler(async (event) => {
     statusCode: 200
   }
   try {
+    console.log(`api::addpro ${formType} PUT - sending postData:`, postData) // eslint-disable-line no-console
     if (user['ok_to_contact'] != flatPostData['ok_to_contact']) {
       await setStrapiUser({ 'id': user.id, 'ok_to_contact': flatPostData['ok_to_contact'] })
     }
@@ -41,15 +40,10 @@ export default defineEventHandler(async (event) => {
     returnValue.body = 'Thanks for the all the fish, and the sofa.'
     returnValue.newCollectionIds = newCollectionIds
   } catch (error) {
-    logOperational(event, {
-      route,
-      status: 500,
-      errorCode: `ADDPRO_${String(formType || 'UNKNOWN').toUpperCase()}_SET_FAILED`
-    })
-    throw createError({ statusCode: 500, statusMessage: `Error setting ${formType}` })
+    console.log(`api::addPro (${formType}) PUT - error ${error}`) // eslint-disable-line no-console
+    throw createError({ statusCode: 500, statusMessage: `Error setting ${formType}`})
   }
-
-  logOperational(event, { route, status: 200 })
+  console.log('api::addpro return', returnValue)
   return returnValue
 })
 
@@ -70,12 +64,12 @@ async function getFlatPostData(event) {
   for (let ix = 0; ix < body.length; ix++) {
     flatPostData[body[ix].name] = body[ix]
   }
-  return flatPostData
+  return flatPostData;
 }
 
-function validateAllowedFormType(formType, event, route) {
+function validateAllowedFormType(formType) {
   if (formType !== 'organisation' && formType !== 'person') {
-    logOperational(event, { route, status: 409, errorCode: 'ADDPRO_UNSUPPORTED_TYPE' })
+    console.log(`api::addPro validateError not suported type: ${formType}`)
     throw createError({
       statusCode: 409,
       statusMessage: `not suported type: ${formType}`
@@ -83,9 +77,9 @@ function validateAllowedFormType(formType, event, route) {
   }
 }
 
-function validateUserIsFound(user, event, route) {
+function validateUserIsFound(user) {
   if (!user) {
-    logOperational(event, { route, status: 404, errorCode: 'ADDPRO_USER_NOT_FOUND' })
+    console.log(`api::addPro validateError User not found`)
     throw createError({
       statusCode: 404,
       statusMessage: 'person::PUT User not Found'
@@ -95,6 +89,7 @@ function validateUserIsFound(user, event, route) {
 
 async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
   if (!user.organisation || Object.keys(user.organisation).length === 0) {
+    console.log(`api::organisation GET - creating organisation for user ${user.id}`) // eslint-disable-line no-console
     user.organisation = await createStrapiOrganisation(user)
   }
 
@@ -104,9 +99,11 @@ async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
 
 async function getPersonPostData(flatPostData, user, newCollectionIds) {
   if (!user.person || Object.keys(user.person).length === 0) {
+    console.log(`api::person GET - creating person for user ${user.id}`) // eslint-disable-line no-console
     user.person = await createStrapiPerson(user)
   }
 
   const originalObject = await getStrapiPerson(user.person.id)
   return await getAddProPersonPostData(flatPostData, originalObject, newCollectionIds)
+
 }
