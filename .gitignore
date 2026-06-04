@@ -1,8 +1,10 @@
 .cache
 .DS_Store
 .env
+.env*.local
 .nitro
 .nuxt
+.nuxt-*
 .output
 *.log*
 dist

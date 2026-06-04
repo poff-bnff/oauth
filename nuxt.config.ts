@@ -1,5 +1,6 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
+  buildDir: process.env.NUXT_BUILD_DIR || '.nuxt',
   app: {
     head: {
       htmlAttrs: { lang: 'en' },
@@ -42,6 +43,9 @@ export default defineNuxtConfig({
     eventivalClientSecret: '',
     eventivalApiToken: '',
     fionaApiKey: '',
+    maksekeskusHost: '',
+    maksekeskusId: '',
+    maksekeskusSecret: '',
     syncSecret: '',  // NUXT_SYNC_SECRET — shared secret for POST /api/sync/fiona
     public: {
       url: '',
