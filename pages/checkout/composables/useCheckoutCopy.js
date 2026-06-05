@@ -37,7 +37,10 @@ export function useCheckoutCopy (locale) {
       photoPlaceholder: ru ? 'ФОТО' : et ? 'FOTO' : 'PHOTO',
       chooseFile: ru ? 'Выбрать файл' : et ? 'Vali fail' : 'Choose file',
       uploadPassPhoto: ru ? 'Загрузить фото для пропуска' : et ? 'Laadi üles passifoto' : 'Upload pass photo',
-      photoHelp: ru ? 'JPG или PNG, минимум 600×800px. Лицо по центру, нейтральный фон.' : et ? 'JPG või PNG, vähemalt 600×800px. Nägu keskel, neutraalne taust.' : 'JPG or PNG, min 600×800px. Face centered, neutral background.',
+      photoHelp: ru ? 'JPG или PNG, от 600×600 до 3000×3000px, до 5 МБ. Лицо по центру, нейтральный фон.' : et ? 'JPG või PNG, 600×600 kuni 3000×3000px, kuni 5 MB. Nägu keskel, neutraalne taust.' : 'JPG or PNG, 600×600 to 3000×3000px, up to 5 MB. Face centered, neutral background.',
+      photoNotImage: ru ? 'Пожалуйста, выберите файл изображения.' : et ? 'Palun vali pildifail.' : 'Please choose an image file.',
+      photoTooLarge: ru ? 'Изображение слишком большое (максимум 5 МБ).' : et ? 'Pilt on liiga suur (kuni 5 MB).' : 'Image is too large (max 5 MB).',
+      photoWrongSize: ru ? 'Размер изображения должен быть от 600×600 до 3000×3000px.' : et ? 'Pildi suurus peab olema 600×600 kuni 3000×3000px.' : 'Image must be between 600×600 and 3000×3000px.',
       replaceFile: ru ? 'Заменить' : et ? 'Asenda' : 'Replace',
       suppressEmail: ru ? 'Не отправлять уведомление' : et ? 'Ära saada teavituskirja' : "Don't send notification email",
       suppressEmailHint: ru ? 'Сохраните сюрприз — мы дадим PDF-подтверждение, которое можно передать самостоятельно.' : et ? 'Hoia see üllatusena — anname PDF-kinnituse, mille saad ise edasi anda.' : "Keep it a surprise — we'll give you a PDF confirmation you can pass along yourself.",
@@ -106,7 +109,22 @@ export function useCheckoutCopy (locale) {
       startAgain: ru ? 'Начать заново' : et ? 'Alusta uuesti' : 'Start again',
       paymentCancelledTitle: ru ? 'Платёж отменён' : et ? 'Makse katkestatud' : 'Payment was cancelled',
       paymentCancelledText: ru ? 'Вы можете попробовать снова или выбрать другой способ оплаты.' : et ? 'Saad uuesti proovida või valida teise makseviisi.' : 'You can try again or choose a different payment method.',
-      tryAgain: ru ? 'Попробовать снова' : et ? 'Proovi uuesti' : 'Try again'
+      tryAgain: ru ? 'Попробовать снова' : et ? 'Proovi uuesti' : 'Try again',
+      // ── Success / order confirmed view ──
+      paymentReceived: ru ? 'Платёж получен' : et ? 'Makse laekus' : 'Payment received',
+      orderConfirmedHeading: ru ? 'Ваш заказ подтверждён' : et ? 'Sinu tellimus on kinnitatud' : 'Your order is confirmed',
+      invoiceOnWay: ru ? 'Подтверждение и счёт с НДС уже в пути' : et ? 'Kinnitus ja käibemaksuarve on teel' : 'A confirmation and VAT invoice are on their way',
+      invoiceOnWayTo: ru ? 'на' : et ? 'aadressile' : 'to',
+      orderSummary: ru ? 'Сводка заказа' : et ? 'Tellimuse kokkuvõte' : 'Order summary',
+      deliveredByEmail: ru ? 'Доставка по эл. почте' : et ? 'Saadetakse e-postiga' : 'Delivered by email',
+      giftTo: ru ? 'Подарок для' : et ? 'Kingitus' : 'Gift to',
+      paidWith: ru ? 'Оплачено через' : et ? 'Makstud' : 'Paid with',
+      totalPaid: ru ? 'Итого оплачено' : et ? 'Kokku makstud' : 'Total paid',
+      pickupNoticeTitle: ru ? 'Получение с 5 ноября.' : et ? 'Kättesaamine alates 5. novembrist.' : 'Pick up from November 5th.',
+      pickupNoticeText: ru ? 'Покажите номер заказа или QR-код из письма в пункте выдачи.' : et ? 'Näita kättesaamiskohas oma tellimuse numbrit või e-kirja QR-koodi.' : 'Show your order number or the QR code from your email at the collection point.',
+      goToMyPoff: ru ? 'Перейти в Мой PÖFF' : et ? 'Mine Minu PÖFF' : 'Go to My PÖFF',
+      startNewOrder: ru ? 'Начать новый заказ' : et ? 'Alusta uut tellimust' : 'Start a new order',
+      questionsAbout: ru ? 'Вопросы о заказе?' : et ? 'Küsimused tellimuse kohta?' : 'Questions about your order?'
     }
   })
 }

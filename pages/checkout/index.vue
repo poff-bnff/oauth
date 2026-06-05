@@ -47,9 +47,18 @@ const itemForms = reactive({})
 const brokenImages = reactive({})
 
 const invoiceForm = reactive({
-  firstName: '', lastName: '', email: '', phone: '',
-  country: 'Estonia', address: '', city: '', postalCode: '',
-  companyName: '', registryCode: '', vatNumber: '', contactPerson: ''
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  country: 'Estonia',
+  address: '',
+  city: '',
+  postalCode: '',
+  companyName: '',
+  registryCode: '',
+  vatNumber: '',
+  contactPerson: ''
 })
 
 // ── Derived from context ──────────────────────────────────────────────────────
@@ -60,10 +69,10 @@ const organisationProfiles = computed(() => profiles.value.filter(p => isOrganis
 const paymentMethodGroups = computed(() => {
   const methods = context.value?.paymentMethods || {}
   return [
-    { label: copy.value.bankTransfer,  methods: methods.banklinks || [] },
-    { label: copy.value.cardPayment,   methods: methods.cards     || [] },
-    { label: copy.value.otherPayments, methods: methods.other     || [] },
-    { label: copy.value.payLaterLabel, methods: methods.payLater  || [] }
+    { label: copy.value.bankTransfer, methods: methods.banklinks || [] },
+    { label: copy.value.cardPayment, methods: methods.cards || [] },
+    { label: copy.value.otherPayments, methods: methods.other || [] },
+    { label: copy.value.payLaterLabel, methods: methods.payLater || [] }
   ].filter(g => g.methods.length)
 })
 const vatAmount = computed(() => Number(cart.value.total || 0) * 24 / 124)
@@ -81,6 +90,10 @@ const shopBackUrl = computed(() => {
   if (clean) return clean
   const path = locale.value === 'et' ? '/shop' : `/${locale.value}/shop`
   return runtime.public.url?.includes('localhost') ? `http://localhost:4000${path}` : `https://poff.ee${path}`
+})
+const myPoffUrl = computed(() => {
+  const urls = { en: 'https://poff.ee/en/mypoff/', ru: 'https://poff.ee/ru/moipoff/', et: 'https://poff.ee/minupoff/' }
+  return urls[locale.value] || urls.et
 })
 const maxStep = computed(() => {
   if (!cart.value.items?.length) return 1
@@ -149,9 +162,15 @@ function ensureItemForm (item, index = 0) {
   const key = itemKey(item, index)
   if (!itemForms[key]) {
     itemForms[key] = {
-      pickupLocationId: '', ownerMode: 'me',
-      firstName: '', lastName: '', email: '',
-      photo: null, photoName: '', sendEmail: true
+      pickupLocationId: '',
+      ownerMode: 'me',
+      firstName: '',
+      lastName: '',
+      email: '',
+      photo: null,
+      photoName: '',
+      photoError: '',
+      sendEmail: true
     }
   }
   return itemForms[key]
@@ -176,12 +195,18 @@ function cartSignature (items = []) {
 function fillInvoiceFormFromProfile (profile) {
   const address = profile?.address || {}
   Object.assign(invoiceForm, {
-    firstName: profile?.firstName || '', lastName: profile?.lastName || '',
-    email: profile?.email_for_invoice || '', phone: profile?.phone_nr || '',
-    country: address.add_country || 'Estonia', address: address.street_name || '',
-    city: address.add_municipality || '', postalCode: address.postal_code || '',
-    companyName: profile?.org_name || '', registryCode: profile?.reg_code || '',
-    vatNumber: profile?.vat_code || '', contactPerson: profile?.firstNameLastName || ''
+    firstName: profile?.firstName || '',
+    lastName: profile?.lastName || '',
+    email: profile?.email_for_invoice || '',
+    phone: profile?.phone_nr || '',
+    country: address.add_country || 'Estonia',
+    address: address.street_name || '',
+    city: address.add_municipality || '',
+    postalCode: address.postal_code || '',
+    companyName: profile?.org_name || '',
+    registryCode: profile?.reg_code || '',
+    vatNumber: profile?.vat_code || '',
+    contactPerson: profile?.firstNameLastName || ''
   })
 }
 
@@ -368,7 +393,7 @@ function selectInvoiceFor (value) {
   if (value === 'someone') {
     selectedBillingProfileId.value = null
     startInvoiceForm('personal', 'someone') // resets saveAsInvoiceProfile → true
-    saveAsInvoiceProfile.value = false       // override: someone-else profile must NOT auto-save
+    saveAsInvoiceProfile.value = false // override: someone-else profile must NOT auto-save
     return
   }
   invoiceView.value = selectedBillingProfileId.value ? 'selected' : 'list'
@@ -387,8 +412,14 @@ function startInvoiceForm (type, target = invoiceFor.value) {
     lastName: target === 'me' ? profile.lastName || '' : '',
     email: target === 'me' ? profile.email || context.value?.user?.email || '' : '',
     phone: target === 'me' ? profile.phoneNr || '' : '',
-    country: 'Estonia', address: '', city: '', postalCode: '',
-    companyName: '', registryCode: '', vatNumber: '', contactPerson: ''
+    country: 'Estonia',
+    address: '',
+    city: '',
+    postalCode: '',
+    companyName: '',
+    registryCode: '',
+    vatNumber: '',
+    contactPerson: ''
   })
   invoiceFormSnapshot.value = ''
 }
@@ -470,6 +501,20 @@ function buildPaymentReturnUrl () {
   return base.toString()
 }
 
+async function removeItem ({ item, index }) {
+  error.value = ''
+  try {
+    await $fetch('/api/cart/items/remove', {
+      method: 'POST',
+      headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
+      body: { index: item.index ?? index, productId: item.productId }
+    })
+    await refreshContext()
+  } catch (err) {
+    error.value = err?.data?.statusMessage || err?.message || 'Could not remove item'
+  }
+}
+
 async function pay () {
   if (!paymentMethodId.value) return
   paying.value = true
@@ -478,12 +523,17 @@ async function pay () {
     const items = cart.value.items.map((item, index) => {
       const form = ensureItemForm(item, index)
       return {
-        productId: item.productId, index: item.index,
+        productId: item.productId,
+        index: item.index,
         pickupLocationId: form.pickupLocationId || null,
         owner: {
           mode: item.transferable && form.ownerMode === 'gift' ? 'gift' : 'me',
-          firstName: form.firstName, lastName: form.lastName, email: form.email,
-          photo: form.photo, hasPhoto: !!form.photo, sendEmail: form.sendEmail
+          firstName: form.firstName,
+          lastName: form.lastName,
+          email: form.email,
+          photo: form.photo,
+          hasPhoto: !!form.photo,
+          sendEmail: form.sendEmail
         }
       }
     })
@@ -493,17 +543,37 @@ async function pay () {
       body: {
         paymentMethodId: paymentMethodId.value,
         billingProfileId: selectedBillingProfileId.value,
-        locale: locale.value, items,
+        locale: locale.value,
+        items,
         return_url: buildPaymentReturnUrl(),
         cancel_url: buildPaymentReturnUrl()
       }
     })
     if (result?.url) {
       try {
+        const selectedMethod = paymentMethodGroups.value.flatMap(g => g.methods).find(m => m.id === paymentMethodId.value)
+        const invoiceEmail = selectedBillingProfile.value?.email || invoiceForm.email || ''
+        const summaryItems = (cart.value.items || []).map((item, index) => {
+          const form = ensureItemForm(item, index)
+          const location = (item.pickupLocations || []).find(l => String(l.id) === String(form.pickupLocationId))
+          const isGift = item.transferable && form.ownerMode === 'gift'
+          return {
+            productId: item.productId,
+            title: item.title,
+            price: item.price,
+            imageUrl: item.imageUrl,
+            pickupName: location?.name || null,
+            giftName: isGift ? form.firstName.trim() : null
+          }
+        })
         sessionStorage.setItem('poff_order_summary', JSON.stringify({
-          items: cart.value.items || [],
+          items: summaryItems,
           total: cart.value.total || 0,
-          orderId: result.orderId
+          orderId: result.orderId,
+          orderNo: result.orderId,
+          paymentLabel: selectedMethod?.name || '',
+          invoiceEmail,
+          hasPickup: summaryItems.some(it => it.pickupName)
         }))
       } catch { /* sessionStorage unavailable — success page will show generic message */ }
       await navigateTo(result.url, { external: true })
@@ -535,7 +605,9 @@ watch(sessionRemainingSeconds, (seconds) => {
 
 <template>
   <div class="checkout-page">
-    <div v-if="loading" class="loading">Loading checkout...</div>
+    <div v-if="loading" class="loading">
+      Loading checkout...
+    </div>
     <main
       v-else
       class="checkout-wrap"
@@ -545,117 +617,180 @@ watch(sessionRemainingSeconds, (seconds) => {
       @keydown="handleCheckoutActivity"
     >
       <a class="back-shop" :href="shopBackUrl">&larr; {{ copy.backToShop }}</a>
-      <p class="page-kicker">Checkout</p>
-      <h1 class="page-title">{{ copy.completeOrder }}</h1>
+      <template v-if="transactionResult !== 'success'">
+        <p class="page-kicker">
+          Checkout
+        </p>
+        <h1 class="page-title">
+          {{ copy.completeOrder }}
+        </h1>
 
-      <CheckoutSessionBanner
-        :tone="sessionBannerTone"
-        :banner-text="sessionBannerText"
-        :display="sessionDisplay"
-        :copy="copy"
-      />
+        <CheckoutSessionBanner
+          :tone="sessionBannerTone"
+          :banner-text="sessionBannerText"
+          :display="sessionDisplay"
+          :copy="copy"
+        />
+      </template>
 
       <template v-if="transactionResult === 'success'">
-        <div class="checkout-grid">
-          <section class="checkout-main">
-            <div class="order-confirmed">
-              <div class="order-confirmed-icon" aria-hidden="true">
-                <svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="24" fill="#52b14a"/><path d="M14 24l7 7 13-14" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </div>
-              <h2 class="order-confirmed-title">{{ copy.orderConfirmedTitle }}</h2>
-              <p class="order-confirmed-text">{{ copy.orderConfirmedText }}</p>
-              <a class="order-confirmed-cta" :href="shopBackUrl">{{ copy.backToShop }}</a>
+        <div class="order-complete">
+          <div class="order-complete-head">
+            <div class="order-complete-check" aria-hidden="true">
+              &#10003;
             </div>
-          </section>
+            <p class="order-complete-kicker">
+              {{ copy.paymentReceived }}
+            </p>
+            <h2 class="order-complete-title">
+              {{ copy.orderConfirmedHeading }}
+            </h2>
+            <p v-if="orderSnapshot?.orderNo" class="order-complete-no">
+              {{ copy.order }} <span>#{{ orderSnapshot.orderNo }}</span>
+            </p>
+          </div>
 
-          <aside class="order-summary-panel">
-            <p class="summary-label">{{ copy.order }}</p>
-            <template v-if="orderSnapshot?.items?.length">
-              <div v-for="item in orderSnapshot.items" :key="item.productId" class="summary-product">
-                <div class="summary-product-image">
-                  <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.title" @error="() => {}">
-                  <div v-else class="summary-product-image-placeholder" />
+          <div class="order-complete-notice">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#f5a623"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="3" y="5" width="18" height="14" rx="1" />
+              <polyline points="3 6 12 13 21 6" />
+            </svg>
+            <p>
+              {{ copy.invoiceOnWay }}<template v-if="orderSnapshot?.invoiceEmail">
+                {{ ` ${copy.invoiceOnWayTo} ` }}<strong>{{ orderSnapshot.invoiceEmail }}</strong>
+              </template>.
+            </p>
+          </div>
+
+          <div class="order-complete-summary">
+            <div class="order-complete-summary-head">
+              {{ copy.orderSummary }}
+            </div>
+            <div class="order-complete-items">
+              <div v-for="(item, i) in (orderSnapshot?.items || [])" :key="`${item.productId}-${i}`" class="order-complete-item">
+                <div class="order-complete-thumb">
+                  <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.title">
+                  <span v-else class="order-complete-thumb-placeholder" aria-hidden="true" />
                 </div>
-                <div class="summary-product-info">
-                  <span class="summary-product-name">{{ item.title }}</span>
-                  <span class="summary-product-price">{{ formatPrice(item.price) }}</span>
-                  <span class="summary-product-qty">1 &times; {{ formatPrice(item.price) }}</span>
+                <div class="order-complete-item-copy">
+                  <span class="order-complete-item-name">{{ item.title }}</span>
+                  <span class="order-complete-item-meta">
+                    {{ item.pickupName ? `${copy.pickup} · ${item.pickupName}` : copy.deliveredByEmail }}<template v-if="item.giftName"> · {{ copy.giftTo }} {{ item.giftName }}</template>
+                  </span>
                 </div>
+                <span class="order-complete-item-price">{{ formatPrice(item.price) }}</span>
               </div>
-              <div class="payment-summary">
-                <div><span>{{ copy.subtotal }}</span><strong>{{ formatPrice(orderSnapshot.total) }}</strong></div>
-                <div><span>{{ copy.vatIncluded }}</span><strong>{{ formatPrice(orderSnapshot.total * 24 / 124) }}</strong></div>
-                <div class="total"><span>{{ copy.total }}</span><strong>{{ formatPrice(orderSnapshot.total) }}</strong></div>
+            </div>
+            <div class="order-complete-totals">
+              <div class="order-complete-paid">
+                <span>{{ copy.paidWith }}</span><span>{{ orderSnapshot?.paymentLabel || '—' }}</span>
               </div>
-            </template>
-          </aside>
+              <div class="order-complete-total">
+                <span>{{ copy.totalPaid }}</span><strong>{{ formatPrice(orderSnapshot?.total) }}</strong>
+              </div>
+            </div>
+          </div>
+
+          <a class="order-complete-cta" :href="myPoffUrl" target="_blank" rel="noopener noreferrer">{{ copy.goToMyPoff }} &rarr;</a>
+          <p class="order-complete-cta-url">
+            {{ myPoffUrl }}
+          </p>
+
+          <div class="order-complete-restart">
+            <a :href="shopBackUrl">{{ copy.startNewOrder }}</a>
+          </div>
+
+          <div class="order-complete-foot">
+            {{ copy.questionsAbout }} <a href="mailto:shop@poff.ee">shop@poff.ee</a>
+          </div>
         </div>
       </template>
 
       <template v-else>
-        <div v-if="error" class="error">{{ error }}</div>
-        <div v-if="!cart.items.length" class="empty">{{ copy.empty }}</div>
+        <div v-if="error" class="error">
+          {{ error }}
+        </div>
+        <div v-if="!cart.items.length" class="empty">
+          {{ copy.empty }}
+        </div>
 
         <div v-if="cart.items.length" class="checkout-grid">
-        <section class="checkout-main">
-          <nav class="steps">
-            <button :class="{ active: step === 1, done: step > 1 }" type="button" @click="goStep(1)">1. {{ copy.details }}</button>
-            <button :class="{ active: step === 2, done: step > 2 }" type="button" :disabled="maxStep < 2" @click="goStep(2)">2. {{ copy.invoice }}</button>
-            <button :class="{ active: step === 3 }" type="button" :disabled="maxStep < 3" @click="goStep(3)">3. {{ copy.payStep }}</button>
-          </nav>
+          <section class="checkout-main">
+            <nav class="steps">
+              <button :class="{ active: step === 1, done: step > 1 }" type="button" @click="goStep(1)">
+                1. {{ copy.details }}
+              </button>
+              <button :class="{ active: step === 2, done: step > 2 }" type="button" :disabled="maxStep < 2" @click="goStep(2)">
+                2. {{ copy.invoice }}
+              </button>
+              <button :class="{ active: step === 3 }" type="button" :disabled="maxStep < 3" @click="goStep(3)">
+                3. {{ copy.payStep }}
+              </button>
+            </nav>
 
-          <CheckoutItemStep
-            v-if="step === 1"
-            :cart="cart"
-            :item-forms="itemForms"
-            :open-item-key="openItemKey"
-            :broken-images="brokenImages"
-            :locale="locale"
-            :copy="copy"
-            @update:open-item-key="openItemKey = $event"
-            @error="error = $event"
-            @continue="step = 2"
-          />
+            <CheckoutItemStep
+              v-if="step === 1"
+              :cart="cart"
+              :item-forms="itemForms"
+              :open-item-key="openItemKey"
+              :broken-images="brokenImages"
+              :locale="locale"
+              :copy="copy"
+              @update:open-item-key="openItemKey = $event"
+              @error="error = $event"
+              @continue="step = 2"
+              @remove="removeItem"
+            />
 
-          <CheckoutInvoiceStep
-            v-if="step === 2"
-            :copy="copy"
-            :invoice-view="invoiceView"
-            :invoice-form="invoiceForm"
-            :invoice-form-type="invoiceFormType"
-            :invoice-for="invoiceFor"
-            :personal-profiles="personalProfiles"
-            :organisation-profiles="organisationProfiles"
-            :selected-billing-profile="selectedBillingProfile"
-            :save-as-invoice-profile="saveAsInvoiceProfile"
-            :saving-invoice-profile="savingInvoiceProfile"
-            @select-profile="selectProfile"
-            @select-invoice-for="selectInvoiceFor"
-            @start-form="startInvoiceForm"
-            @return-to-list="returnToInvoiceList"
-            @save-new="saveInvoiceProfile"
-            @save-selected="saveSelectedProfile"
-            @update:save-as-invoice-profile="saveAsInvoiceProfile = $event"
-            @update:invoice-form-type="invoiceFormType = $event"
-            @back="step = 1"
-          />
+            <CheckoutInvoiceStep
+              v-if="step === 2"
+              :copy="copy"
+              :invoice-view="invoiceView"
+              :invoice-form="invoiceForm"
+              :invoice-form-type="invoiceFormType"
+              :invoice-for="invoiceFor"
+              :personal-profiles="personalProfiles"
+              :organisation-profiles="organisationProfiles"
+              :selected-billing-profile="selectedBillingProfile"
+              :save-as-invoice-profile="saveAsInvoiceProfile"
+              :saving-invoice-profile="savingInvoiceProfile"
+              @select-profile="selectProfile"
+              @select-invoice-for="selectInvoiceFor"
+              @start-form="startInvoiceForm"
+              @return-to-list="returnToInvoiceList"
+              @save-new="saveInvoiceProfile"
+              @save-selected="saveSelectedProfile"
+              @update:save-as-invoice-profile="saveAsInvoiceProfile = $event"
+              @update:invoice-form-type="invoiceFormType = $event"
+              @back="step = 1"
+            />
 
-          <CheckoutPaymentStep
-            v-if="step === 3"
-            :copy="copy"
-            :cart="cart"
-            :selected-billing-profile="selectedBillingProfile"
-            :payment-method-groups="paymentMethodGroups"
-            :payment-method-id="paymentMethodId"
-            :paying="paying"
-            @update:payment-method-id="paymentMethodId = $event"
-            @pay="pay"
-            @back="step = 2"
-          />
-        </section>
+            <CheckoutPaymentStep
+              v-if="step === 3"
+              :copy="copy"
+              :cart="cart"
+              :selected-billing-profile="selectedBillingProfile"
+              :payment-method-groups="paymentMethodGroups"
+              :payment-method-id="paymentMethodId"
+              :paying="paying"
+              @update:payment-method-id="paymentMethodId = $event"
+              @pay="pay"
+              @back="step = 2"
+            />
+          </section>
 
-        <CheckoutOrderSummary :cart="cart" :vat-amount="vatAmount" :copy="copy" />
-      </div>
+          <CheckoutOrderSummary :cart="cart" :vat-amount="vatAmount" :copy="copy" />
+        </div>
       </template>
     </main>
 
@@ -667,14 +802,20 @@ watch(sessionRemainingSeconds, (seconds) => {
           <svg v-else viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
         </div>
         <h2>{{ sessionExpired ? copy.sessionExpiredTitle : copy.sessionAboutToExpire }}</h2>
-        <p v-if="sessionExpired">{{ copy.sessionExpiredText }}</p>
-        <p v-else>{{ copy.sessionClearedIn }}</p>
+        <p v-if="sessionExpired">
+          {{ copy.sessionExpiredText }}
+        </p>
+        <p v-else>
+          {{ copy.sessionClearedIn }}
+        </p>
         <strong v-if="!sessionExpired" class="session-modal-time">{{ sessionDisplay }}</strong>
         <a v-if="sessionExpired" class="primary session-modal-button" :href="shopBackUrl">{{ copy.backToShop }}</a>
         <button v-else class="primary session-modal-button" type="button" :disabled="touchingCartSession" @click="resumeSession">
           {{ touchingCartSession ? '...' : copy.keepCart }}
         </button>
-        <button v-if="!sessionExpired" class="session-dismiss" type="button" @click="dismissSessionWarning">{{ copy.dismiss }}</button>
+        <button v-if="!sessionExpired" class="session-dismiss" type="button" @click="dismissSessionWarning">
+          {{ copy.dismiss }}
+        </button>
       </section>
     </div>
   </div>

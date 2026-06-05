@@ -1819,6 +1819,18 @@ export async function getCheckoutCart(userId, locale = 'et') {
   return await serializeCheckoutCart(cart, locale)
 }
 
+// How many more products of a category this user can still add to their cart
+// (in stock, not owned/reserved/transacted, and not already in their cart).
+// Used by the shop to disable "Add to cart" / "Add another" up front.
+export async function getCheckoutCategoryAvailability(userId, categoryId, codePrefix) {
+  const category = await getProductCategoryByAnyId(categoryId || codePrefix, codePrefix)
+  if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
+  const cart = userId ? await getCurrentCheckoutCart(userId) : null
+  const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
+  const products = await getAvailableCheckoutProducts(category, 50, existingProductIds)
+  return { availableCount: products.length }
+}
+
 export async function addCheckoutCartItem(userId, body = {}) {
   if (!userId) return { code: 401, case: 'unauthorized' }
 

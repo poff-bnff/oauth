@@ -13,7 +13,7 @@ const props = defineProps({
   copy: { type: Object, required: true }
 })
 
-const emit = defineEmits(['update:openItemKey', 'continue', 'error'])
+const emit = defineEmits(['update:openItemKey', 'continue', 'error', 'remove'])
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,7 @@ function ensureItemForm (item, index = 0) {
       email: '',
       photo: null,
       photoName: '',
+      photoError: '',
       sendEmail: true
     }
   }
@@ -135,12 +136,41 @@ function fileToDataUrl (file) {
   })
 }
 
+function getImageDimensions (src) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    img.onerror = () => resolve(null)
+    img.src = src
+  })
+}
+
+// Same rules as the userprofile photo upload: image type, max 5 MB, 600×600–3000×3000 px.
 async function handleOwnerPhoto (event, item, index) {
-  const file = event.target.files?.[0]
+  const input = event.target
+  const file = input.files?.[0]
   if (!file) return
   const form = ensureItemForm(item, index)
+
+  const reject = (message) => {
+    form.photo = null
+    form.photoName = ''
+    form.photoError = message
+    input.value = ''
+  }
+
+  if (!file.type.startsWith('image/')) return reject(props.copy.photoNotImage)
+  if (file.size > 5 * 1024 * 1024) return reject(props.copy.photoTooLarge)
+
+  const dataUrl = await fileToDataUrl(file)
+  const dims = await getImageDimensions(dataUrl)
+  if (!dims || dims.width < 600 || dims.width > 3000 || dims.height < 600 || dims.height > 3000) {
+    return reject(props.copy.photoWrongSize)
+  }
+
+  form.photoError = ''
   form.photoName = file.name
-  form.photo = { name: file.name, data: await fileToDataUrl(file) }
+  form.photo = { name: file.name, data: dataUrl }
 }
 
 function validateAndContinue () {
@@ -164,9 +194,13 @@ function validateAndContinue () {
 
 <template>
   <div class="step-panel">
-    <p class="step-kicker">{{ `${copy.stepLabel} 1 / 3 · ${(cart.items || []).filter((item, i) => isItemComplete(item, i)).length} / ${(cart.items || []).length} ${copy.complete}` }}</p>
+    <p class="step-kicker">
+      {{ `${copy.stepLabel} 1 / 3 · ${(cart.items || []).filter((item, i) => isItemComplete(item, i)).length} / ${(cart.items || []).length} ${copy.complete}` }}
+    </p>
     <h2>{{ copy.details }}</h2>
-    <p class="intro">{{ copy.needsDetails }}</p>
+    <p class="intro">
+      {{ copy.needsDetails }}
+    </p>
 
     <article
       v-for="(item, index) in cart.items"
@@ -174,23 +208,44 @@ function validateAndContinue () {
       :class="{ complete: isItemComplete(item, index), open: isItemOpen(item, index), configurable: hasConfigurableDetails(item) }"
       class="item-card"
     >
-      <button class="item-summary" type="button" @click="toggleItem(item, index)">
-        <div class="status-circle" aria-hidden="true">
-          <span v-if="isItemComplete(item, index)">&#10003;</span>
-        </div>
-        <div class="thumb">
-          <img v-if="hasItemImage(item, index)" :src="item.imageUrl" :alt="item.title" loading="lazy" @error="markImageBroken(item, index)">
-          <span v-else class="thumb-placeholder" aria-hidden="true"></span>
-        </div>
-        <div class="item-copy">
-          <strong>{{ item.title }}</strong>
-          <small>
-            {{ copy.pickup }}: <span :class="{ missing: item.pickupLocations?.length && !ensureItemForm(item, index).pickupLocationId }">{{ pickupSummary(item, index) }}</span>
-            <span v-if="item.transferable"> · {{ copy.owner }}: <span :class="{ missing: ensureItemForm(item, index).ownerMode === 'gift' && !isGiftOwnerComplete(ensureItemForm(item, index)) }">{{ ownerSummary(item, index) }}</span></span>
-          </small>
-        </div>
-        <span class="item-caret" aria-hidden="true"></span>
-      </button>
+      <div class="item-header">
+        <button class="item-summary" type="button" @click="toggleItem(item, index)">
+          <div class="status-circle" aria-hidden="true">
+            <span v-if="isItemComplete(item, index)">&#10003;</span>
+          </div>
+          <div class="thumb">
+            <img v-if="hasItemImage(item, index)" :src="item.imageUrl" :alt="item.title" loading="lazy" @error="markImageBroken(item, index)">
+            <span v-else class="thumb-placeholder" aria-hidden="true" />
+          </div>
+          <div class="item-copy">
+            <strong>{{ item.title }}</strong>
+            <small>
+              {{ copy.pickup }}: <span :class="{ missing: item.pickupLocations?.length && !ensureItemForm(item, index).pickupLocationId }">{{ pickupSummary(item, index) }}</span>
+              <span v-if="item.transferable"> · {{ copy.owner }}: <span :class="{ missing: ensureItemForm(item, index).ownerMode === 'gift' && !isGiftOwnerComplete(ensureItemForm(item, index)) }">{{ ownerSummary(item, index) }}</span></span>
+            </small>
+          </div>
+          <span class="item-caret" aria-hidden="true" />
+        </button>
+        <button class="item-remove" type="button" :aria-label="copy.remove" :title="copy.remove" @click="emit('remove', { item, index })">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+            <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
+      </div>
 
       <div v-if="isItemOpen(item, index) && hasConfigurableDetails(item)" class="item-body">
         <!-- Pickup location -->
@@ -204,7 +259,7 @@ function validateAndContinue () {
             type="button"
             @click="setPickupLocation(item, index, location.id)"
           >
-            <span class="radio-dot" aria-hidden="true"></span>
+            <span class="radio-dot" aria-hidden="true" />
             <span>
               <strong>{{ location.name }}</strong>
               <small v-if="locationDescription(location)">{{ locationDescription(location) }}</small>
@@ -216,8 +271,12 @@ function validateAndContinue () {
         <div v-if="item.transferable" class="item-block">
           <h3>{{ copy.owner }} <span class="required-dot">*</span></h3>
           <div class="segmented owner-segmented">
-            <button :class="{ active: ensureItemForm(item, index).ownerMode === 'me' }" type="button" @click="setOwnerMode(item, index, 'me')">{{ copy.forMe }}</button>
-            <button :class="{ active: ensureItemForm(item, index).ownerMode === 'gift' }" type="button" @click="setOwnerMode(item, index, 'gift')">{{ copy.gift }}</button>
+            <button :class="{ active: ensureItemForm(item, index).ownerMode === 'me' }" type="button" @click="setOwnerMode(item, index, 'me')">
+              {{ copy.forMe }}
+            </button>
+            <button :class="{ active: ensureItemForm(item, index).ownerMode === 'gift' }" type="button" @click="setOwnerMode(item, index, 'gift')">
+              {{ copy.gift }}
+            </button>
           </div>
           <div v-if="ensureItemForm(item, index).ownerMode === 'gift'" class="form-grid owner-form">
             <label><span class="field-label">{{ copy.firstName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).firstName" autocomplete="given-name" required></label>
@@ -227,13 +286,17 @@ function validateAndContinue () {
               <span class="field-label">{{ copy.photo }} <span class="required-dot">*</span></span>
               <input type="file" accept="image/*" @change="handleOwnerPhoto($event, item, index)">
               <span class="photo-upload-box">
-                <span class="photo-preview">{{ ensureItemForm(item, index).photoName ? '✓' : copy.photoPlaceholder }}</span>
+                <span class="photo-preview">
+                  <img v-if="ensureItemForm(item, index).photo" :src="ensureItemForm(item, index).photo.data" :alt="copy.photo">
+                  <template v-else>{{ copy.photoPlaceholder }}</template>
+                </span>
                 <span class="photo-upload-copy">
                   <strong>{{ ensureItemForm(item, index).photoName || copy.uploadPassPhoto }}</strong>
                   <small>{{ copy.photoHelp }}</small>
                 </span>
                 <span class="choose-file-button">{{ ensureItemForm(item, index).photoName ? copy.replaceFile : copy.chooseFile }}</span>
               </span>
+              <small v-if="ensureItemForm(item, index).photoError" class="photo-error" role="alert">{{ ensureItemForm(item, index).photoError }}</small>
             </label>
             <label class="check owner-notification span">
               <input :checked="!ensureItemForm(item, index).sendEmail" type="checkbox" @change="toggleOwnerEmail($event, item, index)">
@@ -248,7 +311,9 @@ function validateAndContinue () {
     </article>
 
     <div class="actions">
-      <button class="primary" type="button" :disabled="!(cart.items || []).every((item, i) => isItemComplete(item, i))" @click="validateAndContinue">{{ copy.continue }} →</button>
+      <button class="primary" type="button" :disabled="!(cart.items || []).every((item, i) => isItemComplete(item, i))" @click="validateAndContinue">
+        {{ copy.continue }} →
+      </button>
     </div>
   </div>
 </template>
