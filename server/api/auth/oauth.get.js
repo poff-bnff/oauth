@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
 
     const strapiUser = await authenticateStrapiUser(user.email)
 
-    const response = await updateUserAndAliasesRoles(strapiUser)
+    await updateUserAndAliasesRoles(strapiUser)
 
     try {
       const id = getUserIdFromEvent(event)
