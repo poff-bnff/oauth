@@ -124,7 +124,12 @@ export function useCheckoutCopy (locale) {
       pickupNoticeText: ru ? 'Покажите номер заказа или QR-код из письма в пункте выдачи.' : et ? 'Näita kättesaamiskohas oma tellimuse numbrit või e-kirja QR-koodi.' : 'Show your order number or the QR code from your email at the collection point.',
       goToMyPoff: ru ? 'Перейти в Мой PÖFF' : et ? 'Mine Minu PÖFF' : 'Go to My PÖFF',
       startNewOrder: ru ? 'Начать новый заказ' : et ? 'Alusta uut tellimust' : 'Start a new order',
-      questionsAbout: ru ? 'Вопросы о заказе?' : et ? 'Küsimused tellimuse kohta?' : 'Questions about your order?'
+      questionsAbout: ru ? 'Вопросы о заказе?' : et ? 'Küsimused tellimuse kohta?' : 'Questions about your order?',
+      // ── Profile step ──
+      yourProfile: ru ? 'Ваш профиль' : et ? 'Sinu profiil' : 'Your profile',
+      profileIntro: ru ? 'Нам нужно несколько данных перед оформлением покупки.' : et ? 'Vajame enne ostmist mõnda andmet.' : 'We need a few details before your purchase.',
+      saveAndContinue: ru ? 'Сохранить и продолжить' : et ? 'Salvesta ja jätka' : 'Save and continue',
+      savingProfile: ru ? 'Сохранение...' : et ? 'Salvestamine...' : 'Saving...'
     }
   })
 }

@@ -1,4 +1,4 @@
-import { expireStaleCheckoutCarts, getCleanupState, saveCleanupState, runStartupCartRecovery } from '../utils/strapi.js'
+import { expireStaleCheckoutCarts, getCleanupState, saveCleanupState, runStartupCartRecovery, deleteStaleGuestCarts } from '../utils/strapi.js'
 
 const RECOVERY_THRESHOLD_MS = 5 * 60 * 1000
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
@@ -52,6 +52,12 @@ export default defineNitroPlugin(async (nitroApp) => {
       if (result.expired > 0) console.log(`[cleanup] Expired ${result.expired}/${result.checked} carts`)
     } catch (err) {
       console.error('[cleanup] Scheduled cleanup failed:', err.message)
+    }
+    try {
+      const { deleted } = await deleteStaleGuestCarts()
+      if (deleted > 0) console.log(`[cleanup] Hard-deleted ${deleted} stale guest carts`)
+    } catch (err) {
+      console.error('[cleanup] Guest cart hard-delete failed:', err.message)
     }
   }, CLEANUP_INTERVAL_MS)
 
