@@ -9,6 +9,7 @@ const props = defineProps({
   itemForms: { type: Object, required: true }, // reactive — direct mutation is intentional
   openItemKey: { type: String, default: null },
   brokenImages: { type: Object, required: true }, // reactive — direct mutation is intentional
+  removingComponentIds: { type: Object, default: () => new Set() },
   locale: { type: String, default: 'en' },
   copy: { type: Object, required: true }
 })
@@ -226,18 +227,18 @@ function validateAndContinue () {
           </div>
           <span class="item-caret" aria-hidden="true" />
         </button>
-        <button class="item-remove" type="button" :aria-label="copy.remove" :title="copy.remove" @click="emit('remove', { item, index })">
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
+        <button
+          class="item-remove"
+          type="button"
+          :aria-label="copy.remove"
+          :title="copy.remove"
+          :disabled="removingComponentIds.has(item.componentId) || removingComponentIds.size > 0"
+          @click="emit('remove', { item, index })"
+        >
+          <svg v-if="removingComponentIds.has(item.componentId)" class="item-remove-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10" />
+          </svg>
+          <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
             <path d="M10 11v6" />

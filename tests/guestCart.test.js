@@ -88,6 +88,33 @@ describe('guest cart creation (null owner)', () => {
     expect(result.newCartToken).toBeTruthy()
   })
 
+  it('adopts a client-provided guest token instead of minting a new one', async () => {
+    const CLIENT_TOKEN = 'guesttoken-abcdef1234567890'
+    let createdCartBody = null
+    const cartWithProduct = {
+      id: 510,
+      cartProducts: [{ id: 910, product: PRODUCT_A, priceInCart: 75, timeToCart: NOW }],
+      cartUpdatedAt: NOW, cartTimeout: null, cartToken: CLIENT_TOKEN,
+      cart_status: { id: 1, status: 'active' }, users_permissions_user: null, locale: 'et'
+    }
+    const emptyCart = { ...cartWithProduct, cartProducts: [] }
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/product-categories')) return CATEGORY
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/products') && !url.includes('/products/')) return [PRODUCT_A]
+        if (url.includes('/carts/') && opts?.method === 'PUT') return cartWithProduct
+        if (url.includes('/carts') && opts?.method === 'POST') { createdCartBody = opts.body; return emptyCart }
+        if (url.includes('/carts')) return [] // no existing cart for this token
+      }
+    )
+    const result = await addCheckoutCartItem({ cartToken: CLIENT_TOKEN }, { categoryId: 200 })
+    // Cart is created with the client's token; nothing new is minted/returned.
+    expect(createdCartBody?.cartToken).toBe(CLIENT_TOKEN)
+    expect(result.newCartToken).toBeUndefined()
+  })
+
   it('does NOT call the products reservation endpoint for guests', async () => {
     const cartWithProduct = {
       id: 501,
