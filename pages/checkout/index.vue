@@ -48,6 +48,16 @@ const openItemKey = ref(null)
 const itemForms = reactive({})
 const brokenImages = reactive({})
 
+// ── Cart mutation queue ───────────────────────────────────────────────────────
+// Serializes remove ops: rapid clicks enqueue behind the in-flight request so
+// the server's mutex (strapi.js) never receives overlapping writes for this tab.
+let cartOpQueue = Promise.resolve()
+const removingComponentIds = ref(new Set())
+function queueCartMutation (fn) {
+  cartOpQueue = cartOpQueue.catch(() => {}).then(fn)
+  return cartOpQueue
+}
+
 const invoiceForm = reactive({
   firstName: '',
   lastName: '',
@@ -521,18 +531,25 @@ function buildPaymentReturnUrl () {
   return base.toString()
 }
 
-async function removeItem ({ item, index }) {
+function removeItem ({ item }) {
+  const componentId = item.componentId ?? null
   error.value = ''
-  try {
-    await $fetch('/api/cart/items/remove', {
-      method: 'POST',
-      headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
-      body: { index: item.index ?? index, productId: item.productId }
-    })
-    await refreshContext()
-  } catch (err) {
-    error.value = err?.data?.statusMessage || err?.message || 'Could not remove item'
-  }
+  // Mark this row as in-flight so its button shows a spinner and is disabled.
+  removingComponentIds.value = new Set([...removingComponentIds.value, componentId])
+  queueCartMutation(async () => {
+    try {
+      await $fetch('/api/cart/items/remove', {
+        method: 'POST',
+        headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
+        body: { componentId, productId: item.productId }
+      })
+      await refreshContext()
+    } catch (err) {
+      error.value = err?.data?.statusMessage || err?.message || 'Could not remove item'
+    } finally {
+      removingComponentIds.value = new Set([...removingComponentIds.value].filter(id => id !== componentId))
+    }
+  })
 }
 
 async function pay () {
@@ -781,6 +798,7 @@ watch(sessionRemainingSeconds, (seconds) => {
               :item-forms="itemForms"
               :open-item-key="openItemKey"
               :broken-images="brokenImages"
+              :removing-component-ids="removingComponentIds"
               :locale="locale"
               :copy="copy"
               @update:open-item-key="openItemKey = $event"
