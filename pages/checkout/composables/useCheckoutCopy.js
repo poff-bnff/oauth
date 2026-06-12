@@ -124,7 +124,12 @@ export function useCheckoutCopy (locale) {
       pickupNoticeText: ru ? 'Покажите номер заказа или QR-код из письма в пункте выдачи.' : et ? 'Näita kättesaamiskohas oma tellimuse numbrit või e-kirja QR-koodi.' : 'Show your order number or the QR code from your email at the collection point.',
       goToMyPoff: ru ? 'Перейти в Мой PÖFF' : et ? 'Mine Minu PÖFF' : 'Go to My PÖFF',
       startNewOrder: ru ? 'Начать новый заказ' : et ? 'Alusta uut tellimust' : 'Start a new order',
-      questionsAbout: ru ? 'Вопросы о заказе?' : et ? 'Küsimused tellimuse kohta?' : 'Questions about your order?'
+      questionsAbout: ru ? 'Вопросы о заказе?' : et ? 'Küsimused tellimuse kohta?' : 'Questions about your order?',
+      // ── Profile step ──
+      yourProfile: ru ? 'Ваш профиль' : et ? 'Sinu profiil' : 'Your profile',
+      profileIntro: ru ? "В вашем аккаунте PÖFF отсутствуют некоторые данные. Такие вещи, как фестивальный пропуск, являются персональными, поэтому нам нужны ваше имя и фотография — это нужно будет сделать только один раз." : et ? "Sinu PÖFFi kontolt on mõned andmed puudu. Festivalipass ja teised sarnased asjad on isiklikud, seega vajame sinu nime ja fotot – seda pead tegema ainult üks kord." : "Your PÖFF account is missing a few details. Items like the festival pass are personal, so we need your name and a photo — you'll only do this once.",
+      saveAndContinue: ru ? 'Сохранить и продолжить' : et ? 'Salvesta ja jätka' : 'Save and continue',
+      savingProfile: ru ? 'Сохранение...' : et ? 'Salvestamine...' : 'Saving...'
     }
   })
 }

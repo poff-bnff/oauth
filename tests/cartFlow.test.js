@@ -25,11 +25,17 @@ const ACTIVE_PRICE_PERIOD = {
   price: 100
 }
 
+const ACTIVE_SALES_PERIOD = {
+  startDateTime: '2026-01-01T00:00:00.000Z',
+  endDateTime:   '2027-01-01T00:00:00.000Z'
+}
+
 const CATEGORY = {
   id: 109,
   codePrefix: 'LOCAL-INVOICE-TEST-2026',
   namePrivate: 'Arve testpass 2026',
   priceAtPeriod: [ACTIVE_PRICE_PERIOD],
+  salesPeriod: [ACTIVE_SALES_PERIOD],
   pickup_locations: [],
   business_profile: { id: 6490 }
 }
@@ -109,27 +115,23 @@ afterEach(() => { vi.useRealTimers() })
 // ─── Add to cart ──────────────────────────────────────────────────────────────
 
 describe('addCheckoutCartItem', () => {
-  it('returns 401 when user is not authenticated', async () => {
-    const result = await addCheckoutCartItem(null, { categoryId: 109 })
-    expect(result).toMatchObject({ code: 401, case: 'unauthorized' })
-    expect(globalThis.$fetch).not.toHaveBeenCalled()
-  })
+  // Null owner = brand-new anonymous guest — valid for add. Guest cart tests are in guestCart.test.js.
 
   it('returns 400 noCategoryId when categoryId is missing', async () => {
     setupFetch(
       adminTokenHandler,
       (url) => { if (url.includes('/product-categories')) return null }
     )
-    const result = await addCheckoutCartItem(USER_ID, {})
+    const result = await addCheckoutCartItem({ userId: USER_ID }, {})
     expect(result).toMatchObject({ code: 400, case: 'noCategoryId' })
   })
 
   it('returns 400 noCurrentPrice when category has no active price period', async () => {
     setupFetch(
       adminTokenHandler,
-      (url) => { if (url.includes('/product-categories')) return { id: 109, codePrefix: 'TEST', priceAtPeriod: [] } }
+      (url) => { if (url.includes('/product-categories')) return { id: 109, codePrefix: 'TEST', priceAtPeriod: [], salesPeriod: [ACTIVE_SALES_PERIOD] } }
     )
-    const result = await addCheckoutCartItem(USER_ID, { categoryId: 109 })
+    const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109 })
     expect(result).toMatchObject({ code: 400, case: 'noCurrentPrice' })
   })
 
@@ -144,7 +146,7 @@ describe('addCheckoutCartItem', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
       }
     )
-    const result = await addCheckoutCartItem(USER_ID, { categoryId: 109 })
+    const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109 })
     expect(result).toMatchObject({ code: 404, case: 'noItems', available: 0 })
   })
 
@@ -159,7 +161,7 @@ describe('addCheckoutCartItem', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
       }
     )
-    const result = await addCheckoutCartItem(USER_ID, { categoryId: 109, quantity: 2 })
+    const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109, quantity: 2 })
     expect(result).toMatchObject({ code: 404, case: 'noItems', available: 1 })
   })
 
@@ -174,7 +176,7 @@ describe('addCheckoutCartItem', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
       }
     )
-    const result = await addCheckoutCartItem(USER_ID, { categoryId: 109, quantity: -5 })
+    const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109, quantity: -5 })
     // quantity clamped to 1, but no items available
     expect(result).toMatchObject({ code: 404, case: 'noItems' })
   })
@@ -195,7 +197,7 @@ describe('addCheckoutCartItem', () => {
       }
     )
     // With quantity=21, it'll be clamped to 20 — test passes if it doesn't ask for 21
-    const result = await addCheckoutCartItem(USER_ID, { categoryId: 109, quantity: 21 })
+    const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109, quantity: 21 })
     // If it returns noItems, the products mock limited correctly; either way no server error
     expect([409, 404, undefined]).not.toContain(result?.code === 500)
   })
@@ -217,7 +219,7 @@ describe('addCheckoutCartItem', () => {
         if (url.includes('/products')) return [PRODUCT] // id 7255 — already in cart
       }
     )
-    const result = await addCheckoutCartItem(USER_ID, { categoryId: 109 })
+    const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109 })
     expect(result).toMatchObject({ code: 404, case: 'noItems', available: 0 })
   })
 
@@ -249,7 +251,7 @@ describe('addCheckoutCartItem', () => {
         }
       }
     )
-    const result = await addCheckoutCartItem(USER_ID, { categoryId: 109 })
+    const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109 })
 
     // The PUT preserved the existing row (7255, once) and appended the new one (7256)
     const writtenIds = putCartBody.cartProducts.map(r => r.product)
@@ -263,7 +265,7 @@ describe('addCheckoutCartItem', () => {
 // ─── Remove from cart ─────────────────────────────────────────────────────────
 
 describe('removeCheckoutCartItem', () => {
-  it('returns 401 when user is not authenticated', async () => {
+  it('returns 401 when owner is null', async () => {
     globalThis.$fetch = vi.fn()
     const result = await removeCheckoutCartItem(null, { index: 0 })
     expect(result).toMatchObject({ code: 401, case: 'unauthorized' })
@@ -278,7 +280,7 @@ describe('removeCheckoutCartItem', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
       }
     )
-    const result = await removeCheckoutCartItem(USER_ID, { index: 0 })
+    const result = await removeCheckoutCartItem({ userId: USER_ID },{ index: 0 })
     expect(result).toMatchObject({ code: 404, case: 'noCart' })
   })
 
@@ -296,7 +298,7 @@ describe('removeCheckoutCartItem', () => {
         if (url.includes('/products/') && opts?.method === 'PUT') return PRODUCT
       }
     )
-    const result = await removeCheckoutCartItem(USER_ID, { index: 0 })
+    const result = await removeCheckoutCartItem({ userId: USER_ID },{ index: 0 })
     expect(updatedCart?.cartProducts).toHaveLength(0)
   })
 
@@ -314,7 +316,7 @@ describe('removeCheckoutCartItem', () => {
         if (url.includes('/products/') && opts?.method === 'PUT') return PRODUCT
       }
     )
-    const result = await removeCheckoutCartItem(USER_ID, { productId: 7255 })
+    const result = await removeCheckoutCartItem({ userId: USER_ID },{ productId: 7255 })
     expect(updatedCart?.cartProducts).toHaveLength(0)
   })
 })
@@ -322,10 +324,10 @@ describe('removeCheckoutCartItem', () => {
 // ─── Clear cart ───────────────────────────────────────────────────────────────
 
 describe('clearCheckoutCart', () => {
-  it('returns 401 when user is not authenticated', async () => {
+  it('returns { ok: true } when owner is null (idempotent — nothing to clear)', async () => {
     globalThis.$fetch = vi.fn()
     const result = await clearCheckoutCart(null)
-    expect(result).toMatchObject({ code: 401, case: 'unauthorized' })
+    expect(result).toMatchObject({ ok: true })
     expect(globalThis.$fetch).not.toHaveBeenCalled()
   })
 
@@ -337,7 +339,7 @@ describe('clearCheckoutCart', () => {
         if (url.includes('/carts')) return []
       }
     )
-    const result = await clearCheckoutCart(USER_ID)
+    const result = await clearCheckoutCart({ userId: USER_ID })
     expect(result).toMatchObject({ ok: true })
   })
 
@@ -355,7 +357,7 @@ describe('clearCheckoutCart', () => {
         if (url.includes('/products/') && opts?.method === 'PUT') return PRODUCT
       }
     )
-    await clearCheckoutCart(USER_ID)
+    await clearCheckoutCart({ userId: USER_ID })
     expect(clearedBody?.cartProducts).toEqual([])
   })
 })
@@ -363,10 +365,11 @@ describe('clearCheckoutCart', () => {
 // ─── Touch session ────────────────────────────────────────────────────────────
 
 describe('touchCheckoutCartSession', () => {
-  it('returns 401 when user is not authenticated', async () => {
+  it('returns empty cart shape when owner is null (early return, no fetch)', async () => {
     globalThis.$fetch = vi.fn()
     const result = await touchCheckoutCartSession(null)
-    expect(result).toMatchObject({ code: 401, case: 'unauthorized' })
+    expect(result).toMatchObject({ items: [], total: 0 })
+    expect(globalThis.$fetch).not.toHaveBeenCalled()
   })
 
   it('returns empty cart shape when user has no active cart', async () => {
@@ -377,7 +380,7 @@ describe('touchCheckoutCartSession', () => {
         if (url.includes('/carts')) return []
       }
     )
-    const result = await touchCheckoutCartSession(USER_ID)
+    const result = await touchCheckoutCartSession({ userId: USER_ID })
     expect(result).toMatchObject({ items: [], total: 0 })
   })
 
@@ -396,7 +399,7 @@ describe('touchCheckoutCartSession', () => {
         if (url.includes('/products/') && opts?.method === 'PUT') return { reserved_to: USER_ID }
       }
     )
-    await touchCheckoutCartSession(USER_ID, 'en')
+    await touchCheckoutCartSession({ userId: USER_ID },'en')
     expect(touchedAt).toBeTruthy()
     expect(new Date(touchedAt).getTime()).toBeGreaterThanOrEqual(before)
   })
@@ -467,7 +470,8 @@ describe('payCheckoutCart — input validation', () => {
   })
 
   it('returns 400 buyerProfileIncomplete when user profile is missing required fields', async () => {
-    const incompleteProfile = { email: 'jaan@test.ee', firstName: 'Jaan' } // missing lastName, birthdate, phoneNr, gender, picture
+    // 4-field check: email, firstName, lastName, picture
+    const incompleteProfile = { email: 'jaan@test.ee', firstName: 'Jaan' } // missing lastName, picture
     setupFetch(
       adminTokenHandler,
       (url) => {
@@ -483,11 +487,11 @@ describe('payCheckoutCart — input validation', () => {
     })
     expect(result).toMatchObject({ code: 400, case: 'buyerProfileIncomplete' })
     expect(result.missing).toContain('lastName')
-    expect(result.missing).toContain('birthdate')
     expect(result.missing).toContain('picture')
+    expect(result.missing).not.toContain('birthdate') // birthdate not required by 4-field check
   })
 
-  it('returns 400 buyerProfileIncomplete listing ALL missing fields, not just the first', async () => {
+  it('returns 400 buyerProfileIncomplete listing all 4 missing fields when profile is empty', async () => {
     setupFetch(
       adminTokenHandler,
       (url) => {
@@ -498,7 +502,7 @@ describe('payCheckoutCart — input validation', () => {
       }
     )
     const result = await payCheckoutCart(USER_ID, { paymentMethodId: 'nordea', billingProfileId: 6496 })
-    expect(result.missing).toHaveLength(7)
+    expect(result.missing).toHaveLength(4) // email, firstName, lastName, picture
   })
 })
 

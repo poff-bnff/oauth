@@ -13,7 +13,12 @@ if(route.query.user_token && route.query.query_type && route.query.query_type ==
   userToken.value = route.query.user_token
 }
 
-redirectCookie.value = route.query.redirect_uri
+if (route.query.redirect_uri) {
+  const uri = route.query.redirect_uri
+  redirectCookie.value = uri.includes('jwt=') ? uri : uri + (uri.includes('?') ? '&' : '?') + 'jwt='
+} else {
+  redirectCookie.value = null
+}
 
 locale.value = route.query.locale || 'et'
 

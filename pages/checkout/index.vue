@@ -5,6 +5,7 @@ import CheckoutSessionBanner from './components/CheckoutSessionBanner.vue'
 import CheckoutItemStep from './components/CheckoutItemStep.vue'
 import CheckoutInvoiceStep from './components/CheckoutInvoiceStep.vue'
 import CheckoutPaymentStep from './components/CheckoutPaymentStep.vue'
+import CheckoutProfileStep from './components/CheckoutProfileStep.vue'
 import CheckoutOrderSummary from './components/CheckoutOrderSummary.vue'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -33,6 +34,7 @@ const loading = ref(true)
 const error = ref('')
 const paying = ref(false)
 const step = ref(1)
+const profileDone = ref(false)
 const context = ref(null)
 const selectedBillingProfileId = ref(null)
 const paymentMethodId = ref('')
@@ -79,11 +81,13 @@ const vatAmount = computed(() => Number(cart.value.total || 0) * 24 / 124)
 const selectedBillingProfile = computed(() => profiles.value.find(p => String(p.id) === String(selectedBillingProfileId.value)))
 const isInvoiceFormVisible = computed(() => invoiceView.value === 'selected' || invoiceView.value === 'create')
 const checkoutStepTitle = computed(() => {
+  const total = stepTotal.value
   const items = cart.value.items || []
   const done = items.filter((item, i) => isItemComplete(item, i)).length
-  if (step.value === 1) return `STEP 1 / 3 · ${done} of ${items.length} complete`
-  if (step.value === 2) return `STEP 2 / 3 · ${isInvoiceFormVisible.value ? copy.value.taxDocument : copy.value.chooseSavedProfile}`
-  return `STEP 3 / 3 · ${copy.value.confirmPurchase}`
+  if (step.value === 0) return `${copy.value.stepLabel} 1 / ${total} · ${copy.value.yourProfile}`
+  if (step.value === 1) return `${copy.value.stepLabel} ${itemStepNo.value} / ${total} · ${done} of ${items.length} ${copy.value.complete}`
+  if (step.value === 2) return `${copy.value.stepLabel} ${invoiceStepNo.value} / ${total} · ${isInvoiceFormVisible.value ? copy.value.taxDocument : copy.value.chooseSavedProfile}`
+  return `${copy.value.stepLabel} ${payStepNo.value} / ${total} · ${copy.value.confirmPurchase}`
 })
 const shopBackUrl = computed(() => {
   const clean = cleanShopUrl(route.query.shop_url || route.query.cancel_url || route.query.return_url)
@@ -95,7 +99,18 @@ const myPoffUrl = computed(() => {
   const urls = { en: 'https://poff.ee/en/mypoff/', ru: 'https://poff.ee/ru/moipoff/', et: 'https://poff.ee/minupoff/' }
   return urls[locale.value] || urls.et
 })
+const hasProfileStep = computed(() => {
+  const p = context.value?.profile || {}
+  return !(p.email && p.firstName && p.lastName && p.picture)
+})
+
+const stepTotal = computed(() => hasProfileStep.value ? 4 : 3)
+const itemStepNo = computed(() => hasProfileStep.value ? 2 : 1)
+const invoiceStepNo = computed(() => hasProfileStep.value ? 3 : 2)
+const payStepNo = computed(() => hasProfileStep.value ? 4 : 3)
+
 const maxStep = computed(() => {
+  if (hasProfileStep.value && !profileDone.value) return 0
   if (!cart.value.items?.length) return 1
   if (!cart.value.items.every(isItemComplete)) return 1
   if (!selectedBillingProfileId.value) return 2
@@ -278,6 +293,11 @@ function applyCheckoutContext (nextContext, options = {}) {
   if (cartChanged || options.openIncomplete) {
     openFirstIncompleteItem()
     if (step.value > 1 && !nextItems.every(isItemComplete)) step.value = 1
+  }
+
+  // If profile step is needed and we haven't done it yet, park on step 0.
+  if (hasProfileStep.value && !profileDone.value && step.value >= 1) {
+    step.value = 0
   }
 }
 
@@ -727,16 +747,33 @@ watch(sessionRemainingSeconds, (seconds) => {
         <div v-if="cart.items.length" class="checkout-grid">
           <section class="checkout-main">
             <nav class="steps">
-              <button :class="{ active: step === 1, done: step > 1 }" type="button" @click="goStep(1)">
-                1. {{ copy.details }}
+              <button
+                v-if="hasProfileStep"
+                :class="{ active: step === 0, done: profileDone }"
+                type="button"
+                :disabled="step === 0"
+                @click="goStep(0)"
+              >
+                1. {{ copy.yourProfile }}
+              </button>
+              <button :class="{ active: step === 1, done: step > 1 }" type="button" :disabled="maxStep < 1" @click="goStep(1)">
+                {{ itemStepNo }}. {{ copy.details }}
               </button>
               <button :class="{ active: step === 2, done: step > 2 }" type="button" :disabled="maxStep < 2" @click="goStep(2)">
-                2. {{ copy.invoice }}
+                {{ invoiceStepNo }}. {{ copy.invoice }}
               </button>
               <button :class="{ active: step === 3 }" type="button" :disabled="maxStep < 3" @click="goStep(3)">
-                3. {{ copy.payStep }}
+                {{ payStepNo }}. {{ copy.payStep }}
               </button>
             </nav>
+
+            <CheckoutProfileStep
+              v-if="step === 0"
+              :copy="copy"
+              :auth-headers="authHeaders"
+              :profile="context?.profile || {}"
+              @done="profileDone = true; step = 1"
+            />
 
             <CheckoutItemStep
               v-if="step === 1"

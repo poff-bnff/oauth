@@ -1,5 +1,5 @@
 export default defineEventHandler(async (event) => {
-  const userId = getUserIdFromEvent(event)
+  const owner = getCartOwner(event)
   const query = getQuery(event)
-  return await getCheckoutCategoryAvailability(userId, query.categoryId, query.codePrefix)
+  return await getCheckoutCategoryAvailability(owner, query.categoryId, query.codePrefix)
 })
