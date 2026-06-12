@@ -1268,6 +1268,15 @@ export function getCheckoutProductCurrentPrice(category) {
   return current?.price
 }
 
+// True only when today falls within an active sales period. No sales period set,
+// or all periods past/future, means the product is not for sale right now (blocked).
+export function isCategoryOnSale(category) {
+  const periods = category?.salesPeriod || []
+  if (!periods.length) return false
+  const now = new Date()
+  return periods.some(p => p.startDateTime && p.endDateTime && new Date(p.startDateTime) < now && new Date(p.endDateTime) > now)
+}
+
 async function validateCheckoutBusinessProfile(userId, billingProfileId) {
   if (!billingProfileId) return null
   const token = await getStrapiAdminToken()
@@ -1774,9 +1783,10 @@ function checkoutPublicStrapiUrl() {
 function checkoutMediaUrl(media) {
   const file = Array.isArray(media) ? media[0] : media
   if (!file) return ''
+  // Prefer the assets CDN (same source the product page uses) over the Strapi upload folder.
+  if (file.hash && file.ext) return `https://assets.poff.ee/img/${file.hash}${file.ext}`
   if (file.url && /^https?:\/\//.test(file.url)) return file.url
   if (file.url && file.url.startsWith('/') && checkoutPublicStrapiUrl()) return `${checkoutPublicStrapiUrl()}${file.url}`
-  if (file.hash && file.ext) return `https://assets.poff.ee/img/${file.hash}${file.ext}`
   return ''
 }
 
@@ -1865,13 +1875,43 @@ export async function getCheckoutCart(owner, locale = 'et') {
 // How many more products of a category this owner can still add to their cart
 // (in stock, not owned/reserved/transacted, and not already in their cart).
 // Used by the shop to disable "Add to cart" / "Add another" up front.
+// How many products of this category are already in the cart.
+async function countCheckoutCartCategoryItems(cart, categoryId) {
+  const ids = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
+  if (!ids.length || !categoryId) return 0
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  ids.forEach(id => params.append('id_in', id))
+  params.append('product_category', String(categoryId))
+  params.append('_limit', '-1')
+  const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => [])
+  return Array.isArray(products) ? products.length : 0
+}
+
+// Admin-set max of this category allowed in a cart (null/empty = unlimited).
+function checkoutCategoryCartLimit(category) {
+  return category?.cartLimit != null && category.cartLimit !== '' ? Number(category.cartLimit) : null
+}
+
 export async function getCheckoutCategoryAvailability(owner, categoryId, codePrefix) {
   const category = await getProductCategoryByAnyId(categoryId || codePrefix, codePrefix)
   if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
   const cart = owner ? await getCurrentCheckoutCart(owner) : null
   const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
   const products = await getAvailableCheckoutProducts(category, 50, existingProductIds)
-  return { availableCount: products.length }
+  const cartLimit = checkoutCategoryCartLimit(category)
+  const inCart = cartLimit != null ? await countCheckoutCartCategoryItems(cart, category.id) : 0
+
+  // Reasons the product can't be added right now. Frontend shows the specific
+  // message when there's exactly one, otherwise a generic "unavailable".
+  const reasons = []
+  if (!isCategoryOnSale(category)) reasons.push('notOnSale')
+  if (getCheckoutProductCurrentPrice(category) == null) reasons.push('noPrice')
+  if (products.length <= 0) reasons.push('soldOut')
+
+  return { availableCount: products.length, cartLimit, inCart, reasons }
 }
 
 // owner: { userId } | { cartToken } | null (null = brand-new guest, cart will be created)
@@ -1879,6 +1919,7 @@ export async function addCheckoutCartItem(owner, body = {}) {
   const quantity = Math.max(1, Math.min(20, Number(body.quantity || 1)))
   const category = await getProductCategoryByAnyId(body.categoryId || body.codePrefix, body.codePrefix)
   if (!category?.id) return { code: 400, case: 'noCategoryId' }
+  if (!isCategoryOnSale(category)) return { code: 400, case: 'notOnSale' }
   const price = getCheckoutProductCurrentPrice(category)
   if (price === undefined || price === null || Number.isNaN(Number(price))) return { code: 400, case: 'noCurrentPrice' }
 
@@ -1886,6 +1927,15 @@ export async function addCheckoutCartItem(owner, body = {}) {
 
   if ((cart.cartProducts || []).length >= CART_LIMITS.maxItemsPerCart) {
     return { code: 400, case: 'cartFull' }
+  }
+
+  // Per-category cart limit (admin-set on the product category; empty = unlimited).
+  const categoryCartLimit = checkoutCategoryCartLimit(category)
+  if (categoryCartLimit != null) {
+    const inCategory = await countCheckoutCartCategoryItems(cart, category.id)
+    if (inCategory + quantity > categoryCartLimit) {
+      return { code: 400, case: 'categoryLimit', limit: categoryCartLimit, inCart: inCategory }
+    }
   }
 
   const existingProductIds = (cart.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)

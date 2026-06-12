@@ -25,11 +25,17 @@ const ACTIVE_PRICE_PERIOD = {
   price: 100
 }
 
+const ACTIVE_SALES_PERIOD = {
+  startDateTime: '2026-01-01T00:00:00.000Z',
+  endDateTime:   '2027-01-01T00:00:00.000Z'
+}
+
 const CATEGORY = {
   id: 109,
   codePrefix: 'LOCAL-INVOICE-TEST-2026',
   namePrivate: 'Arve testpass 2026',
   priceAtPeriod: [ACTIVE_PRICE_PERIOD],
+  salesPeriod: [ACTIVE_SALES_PERIOD],
   pickup_locations: [],
   business_profile: { id: 6490 }
 }
@@ -123,7 +129,7 @@ describe('addCheckoutCartItem', () => {
   it('returns 400 noCurrentPrice when category has no active price period', async () => {
     setupFetch(
       adminTokenHandler,
-      (url) => { if (url.includes('/product-categories')) return { id: 109, codePrefix: 'TEST', priceAtPeriod: [] } }
+      (url) => { if (url.includes('/product-categories')) return { id: 109, codePrefix: 'TEST', priceAtPeriod: [], salesPeriod: [ACTIVE_SALES_PERIOD] } }
     )
     const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109 })
     expect(result).toMatchObject({ code: 400, case: 'noCurrentPrice' })

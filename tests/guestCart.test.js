@@ -17,11 +17,16 @@ const ACTIVE_PRICE_PERIOD = {
   endDateTime:   '2027-01-01T00:00:00.000Z',
   price: 75
 }
+const ACTIVE_SALES_PERIOD = {
+  startDateTime: '2026-01-01T00:00:00.000Z',
+  endDateTime:   '2027-01-01T00:00:00.000Z'
+}
 const CATEGORY = {
   id: 200,
   codePrefix: 'GUEST-PASS-2026',
   namePrivate: 'Guest pass 2026',
   priceAtPeriod: [ACTIVE_PRICE_PERIOD],
+  salesPeriod: [ACTIVE_SALES_PERIOD],
   pickup_locations: [],
   business_profile: { id: 7000 }
 }
@@ -178,5 +183,42 @@ describe('guest cart item cap', () => {
     )
     const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 200 })
     expect(result).toMatchObject({ code: 400, case: 'cartFull' })
+  })
+})
+
+describe('per-category cart limit', () => {
+  it('returns 400 categoryLimit when the category cartLimit is reached', async () => {
+    const limitedCategory = { ...CATEGORY, cartLimit: 1 }
+    const oneItemCart = {
+      id: 601, cartProducts: [{ id: 9100, product: { id: 8001 }, priceInCart: 75, timeToCart: NOW }],
+      cartUpdatedAt: NOW, cartToken: GUEST_TOKEN, cart_status: { id: 1, status: 'active' }, users_permissions_user: null
+    }
+    setupFetch(
+      adminTokenHandler,
+      (url) => {
+        if (url.includes('/product-categories')) return limitedCategory
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [oneItemCart]
+        if (url.includes('/products') && !url.includes('/products/')) return [PRODUCT_A]
+      }
+    )
+    const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 200 })
+    expect(result).toMatchObject({ code: 400, case: 'categoryLimit', limit: 1 })
+  })
+})
+
+describe('sales period gate', () => {
+  it('returns 400 notOnSale when the category has no sales period at all', async () => {
+    const notForSale = { ...CATEGORY, salesPeriod: [] }
+    setupFetch(adminTokenHandler, (url) => { if (url.includes('/product-categories')) return notForSale })
+    const result = await addCheckoutCartItem(null, { categoryId: 200 })
+    expect(result).toMatchObject({ code: 400, case: 'notOnSale' })
+  })
+
+  it('returns 400 notOnSale when the sales period has passed', async () => {
+    const expired = { ...CATEGORY, salesPeriod: [{ startDateTime: '2025-01-01T00:00:00.000Z', endDateTime: '2025-06-01T00:00:00.000Z' }] }
+    setupFetch(adminTokenHandler, (url) => { if (url.includes('/product-categories')) return expired })
+    const result = await addCheckoutCartItem(null, { categoryId: 200 })
+    expect(result).toMatchObject({ code: 400, case: 'notOnSale' })
   })
 })

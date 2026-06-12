@@ -127,7 +127,7 @@ export function useCheckoutCopy (locale) {
       questionsAbout: ru ? 'Вопросы о заказе?' : et ? 'Küsimused tellimuse kohta?' : 'Questions about your order?',
       // ── Profile step ──
       yourProfile: ru ? 'Ваш профиль' : et ? 'Sinu profiil' : 'Your profile',
-      profileIntro: ru ? 'Нам нужно несколько данных перед оформлением покупки.' : et ? 'Vajame enne ostmist mõnda andmet.' : 'We need a few details before your purchase.',
+      profileIntro: ru ? "В вашем аккаунте PÖFF отсутствуют некоторые данные. Такие вещи, как фестивальный пропуск, являются персональными, поэтому нам нужны ваше имя и фотография — это нужно будет сделать только один раз." : et ? "Sinu PÖFFi kontolt on mõned andmed puudu. Festivalipass ja teised sarnased asjad on isiklikud, seega vajame sinu nime ja fotot – seda pead tegema ainult üks kord." : "Your PÖFF account is missing a few details. Items like the festival pass are personal, so we need your name and a photo — you'll only do this once.",
       saveAndContinue: ru ? 'Сохранить и продолжить' : et ? 'Salvesta ja jätka' : 'Save and continue',
       savingProfile: ru ? 'Сохранение...' : et ? 'Salvestamine...' : 'Saving...'
     }
