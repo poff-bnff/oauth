@@ -64,6 +64,20 @@ const CART_WITH_ITEM = {
   cartProducts: [{ id: 100, product: PRODUCT, priceInCart: 100, timeToCart: NOW }]
 }
 
+const SECOND_PRODUCT = {
+  ...PRODUCT,
+  id: 7256,
+  code: 'TEST-2026-0005'
+}
+
+const CART_WITH_TWO_ITEMS = {
+  ...EMPTY_CART,
+  cartProducts: [
+    { id: 100, product: PRODUCT, priceInCart: 100, timeToCart: NOW },
+    { id: 101, product: SECOND_PRODUCT, priceInCart: 100, timeToCart: NOW }
+  ]
+}
+
 const SERIALIZED_CART = {
   items: [{ productId: 7255, price: 100, index: 0, codePrefix: 'LOCAL-INVOICE-TEST-2026', categoryId: 109 }],
   total: 100,
@@ -318,6 +332,36 @@ describe('removeCheckoutCartItem', () => {
     )
     const result = await removeCheckoutCartItem({ userId: USER_ID },{ productId: 7255 })
     expect(updatedCart?.cartProducts).toHaveLength(0)
+  })
+
+  it('clears only the removed product reservation without refreshing remaining items', async () => {
+    const productPuts = []
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_TWO_ITEMS]
+        if (url.includes('/products/7255') && !opts?.method) return { ...PRODUCT, reserved_to: USER_ID }
+        if (url.includes('/products/7256') && !opts?.method) return SECOND_PRODUCT
+        if (url.includes('/products/') && opts?.method === 'PUT') {
+          productPuts.push({ url, body: opts.body })
+          return url.includes('/products/7255') ? PRODUCT : SECOND_PRODUCT
+        }
+        if (url.includes('/carts/') && opts?.method === 'PUT') {
+          return { ...CART_WITH_TWO_ITEMS, cartProducts: opts.body.cartProducts }
+        }
+      }
+    )
+
+    await removeCheckoutCartItem({ userId: USER_ID }, { productId: 7255 })
+
+    expect(productPuts).toHaveLength(1)
+    expect(productPuts[0].url).toContain('/products/7255')
+    expect(productPuts[0].body).toMatchObject({
+      reserved_to: null,
+      reservation_price: null,
+      reservation_time: null
+    })
   })
 })
 
