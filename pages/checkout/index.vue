@@ -179,6 +179,20 @@ function checkoutRedirectUri () {
   return redirect.toString()
 }
 
+function checkoutLoginRedirectUri () {
+  const nextUrl = checkoutRedirectUri()
+  const shopUrl = cleanShopUrl(route.query.shop_url)
+  if (!shopUrl) return nextUrl
+
+  try {
+    const claimUrl = new URL('/shop/cart/claim', shopUrl)
+    claimUrl.searchParams.set('next', nextUrl)
+    return claimUrl.toString()
+  } catch {
+    return nextUrl
+  }
+}
+
 function itemKey (item, index = 0) {
   return `${item.productId}-${item.index ?? index}`
 }
@@ -335,7 +349,7 @@ async function refreshContext () {
     }
 
     if (!token.value) {
-      await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutRedirectUri())}&locale=${locale.value}`, { external: false })
+      await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: false })
       return
     }
     const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
