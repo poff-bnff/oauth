@@ -241,6 +241,7 @@ describe('addCheckoutCartItem', () => {
     // Cart holds 7255; stock has 7255 + 7256. Adding another must pick 7256.
     const PRODUCT_2 = { ...PRODUCT, id: 7256, code: 'TEST-2026-0005' }
     let putCartBody = null
+    const productPuts = []
     setupFetch(
       adminTokenHandler,
       (url, opts) => {
@@ -248,7 +249,10 @@ describe('addCheckoutCartItem', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         // Single-product reservation: PUT returns a reserved record, GET returns the product
         if (url.includes('/products/')) {
-          if (opts?.method === 'PUT') return { reserved_to: USER_ID }
+          if (opts?.method === 'PUT') {
+            productPuts.push({ url, body: opts.body })
+            return { reserved_to: USER_ID }
+          }
           return url.includes('7256') ? PRODUCT_2 : PRODUCT
         }
         if (url.includes('/products')) return [PRODUCT, PRODUCT_2] // list: both in stock
@@ -273,6 +277,10 @@ describe('addCheckoutCartItem', () => {
     expect(writtenIds.filter(id => id === 7255)).toHaveLength(1) // not duplicated
     // Serialized cart returned to the client has both items
     expect(result.items.map(i => i.productId)).toEqual([7255, 7256])
+    // Existing cart items are already reserved; adding another should reserve only
+    // the newly selected product instead of refreshing every existing reservation.
+    expect(productPuts).toHaveLength(1)
+    expect(productPuts[0].url).toContain('/products/7256')
   })
 })
 
