@@ -2070,7 +2070,6 @@ export async function removeCheckoutCartItem(owner, body = {}) {
 
     if (userId) {
       await Promise.all(removedProductIds.map(productId => clearCheckoutProductReservation(productId, userId).catch(() => null)))
-      await refreshCheckoutCartReservations({ ...cart, cartProducts: rows }, userId)
     }
 
     const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
