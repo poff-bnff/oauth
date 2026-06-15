@@ -1243,6 +1243,27 @@ async function getStrapiCollectionItem(collection, id) {
   })
 }
 
+function normalizeStrapiList(value) {
+  if (!value) return []
+  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean)
+}
+
+async function getStrapiCollectionItemsByIds(collection, ids = []) {
+  const uniqueIds = [...new Set(ids.map(id => String(id || '')).filter(Boolean))]
+  if (!uniqueIds.length) return new Map()
+
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  uniqueIds.forEach(id => params.append('id_in', id))
+  params.append('_limit', '-1')
+
+  const rows = await $fetch(`${config.strapiUrl}/${collection}?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+
+  return new Map(normalizeStrapiList(rows).map(row => [String(row.id), row]))
+}
+
 async function getAvailableCheckoutProduct(categoryId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
@@ -1760,22 +1781,40 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
 
 async function getAvailableCheckoutProducts(category, limit = 1, excludedProductIds = []) {
   const token = await getStrapiAdminToken()
-  const params = new URLSearchParams()
-  params.append('_limit', String(Math.max(limit + excludedProductIds.length + 5, 10)))
-  params.append('code_null', 'false')
-  params.append('reserved_to_null', 'true')
-  params.append('owner_null', 'true')
-  params.append('product_category_null', 'false')
-  params.append('transactions_null', 'true')
-  params.append('active', 'true')
-  if (category?.id) params.append('product_category', category.id)
-  else if (category?.codePrefix) params.append('product_category.codePrefix', category.codePrefix)
-
-  const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
   const excluded = new Set(excludedProductIds.map(id => String(id)))
-  return (Array.isArray(products) ? products : [products]).filter(product => product && !excluded.has(String(product.id))).slice(0, limit)
+  const buildParams = (queryLimit) => {
+    const params = new URLSearchParams()
+    params.append('_limit', String(Math.max(queryLimit, 10)))
+    params.append('code_null', 'false')
+    params.append('reserved_to_null', 'true')
+    params.append('owner_null', 'true')
+    params.append('product_category_null', 'false')
+    params.append('transactions_null', 'true')
+    params.append('active', 'true')
+    if (category?.id) params.append('product_category', category.id)
+    else if (category?.codePrefix) params.append('product_category.codePrefix', category.codePrefix)
+    return params
+  }
+
+  const fetchProducts = async (params) => {
+    const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return normalizeStrapiList(products).filter(product => product && !excluded.has(String(product.id))).slice(0, limit)
+  }
+
+  if (excludedProductIds.length) {
+    const params = buildParams(limit + 5)
+    excludedProductIds.forEach(id => params.append('id_nin', id))
+    try {
+      return await fetchProducts(params)
+    } catch (error) {
+      // Older Strapi/query-parser setups may not support id_nin. Keep the
+      // previous over-fetch-and-filter behavior as a compatibility fallback.
+    }
+  }
+
+  return await fetchProducts(buildParams(limit + excludedProductIds.length + 5))
 }
 
 function checkoutCategoryTitle(category, locale = 'et') {
@@ -1843,14 +1882,36 @@ async function serializeCheckoutCart(cart, locale = 'et') {
   const items = []
   const expiry = checkoutCartExpiry(cart)
 
-  const resolved = await Promise.all(products.map(async (row, index) => {
+  const missingProductIds = []
+  for (const row of products) {
+    if (!(row.product && typeof row.product === 'object') && row.product) {
+      missingProductIds.push(row.product)
+    }
+  }
+
+  const fetchedProducts = await getStrapiCollectionItemsByIds('products', missingProductIds)
+
+  const missingCategoryIds = []
+  for (const row of products) {
+    const product = row.product && typeof row.product === 'object'
+      ? row.product
+      : fetchedProducts.get(String(row.product))
+    const category = product?.product_category
+    if (category && typeof category !== 'object') {
+      missingCategoryIds.push(category)
+    }
+  }
+
+  const fetchedCategories = await getStrapiCollectionItemsByIds('product-categories', missingCategoryIds)
+
+  const resolved = products.map((row, index) => {
     const productIsPopulated = row.product && typeof row.product === 'object'
-    const product = productIsPopulated ? row.product : await getStrapiCollectionItem('products', row.product)
+    const product = productIsPopulated ? row.product : fetchedProducts.get(String(row.product))
     if (!product) return null
     const categoryIsPopulated = product.product_category && typeof product.product_category === 'object'
     const category = categoryIsPopulated
       ? product.product_category
-      : await getStrapiCollectionItem('product-categories', product.product_category)
+      : fetchedCategories.get(String(product.product_category))
     const price = Number(row.priceInCart || getCheckoutProductCurrentPrice(category) || 0)
     return {
       index,
@@ -1867,7 +1928,7 @@ async function serializeCheckoutCart(cart, locale = 'et') {
       sellerBusinessProfileId: category?.business_profile?.id || category?.business_profile || null,
       timeToCart: row.timeToCart || null
     }
-  }))
+  })
   for (const item of resolved) { if (item) items.push(item) }
 
   return {
@@ -1893,8 +1954,24 @@ export async function getCheckoutCart(owner, locale = 'et') {
 // Used by the shop to disable "Add to cart" / "Add another" up front.
 // How many products of this category are already in the cart.
 async function countCheckoutCartCategoryItems(cart, categoryId) {
-  const ids = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-  if (!ids.length || !categoryId) return 0
+  if (!categoryId) return 0
+  let count = 0
+  const unknownIds = []
+  for (const item of cart?.cartProducts || []) {
+    const product = item.product
+    if (product && typeof product === 'object') {
+      const productCategoryId = product.product_category?.id || product.product_category || null
+      if (productCategoryId != null) {
+        if (String(productCategoryId) === String(categoryId)) count++
+      } else if (product.id) {
+        unknownIds.push(product.id)
+      }
+    } else if (product) {
+      unknownIds.push(product)
+    }
+  }
+  const ids = [...new Set(unknownIds.map(id => String(id)).filter(Boolean))]
+  if (!ids.length) return count
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   ids.forEach(id => params.append('id_in', id))
@@ -1903,7 +1980,7 @@ async function countCheckoutCartCategoryItems(cart, categoryId) {
   const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` }
   }).catch(() => [])
-  return Array.isArray(products) ? products.length : 0
+  return count + normalizeStrapiList(products).length
 }
 
 // Admin-set max of this category allowed in a cart (null/empty = unlimited).
@@ -1945,6 +2022,21 @@ function ownerLockKey(owner) {
   if (owner?.userId) return `userId:${owner.userId}`
   if (owner?.cartToken) return `token:${owner.cartToken}`
   return 'new'
+}
+
+function wantsMinimalCartMutationResponse(body = {}) {
+  return body.response === 'minimal'
+}
+
+function minimalCartMutationResponse(cart, newToken = null) {
+  const response = {
+    ok: true,
+    cartId: cart?.id || null,
+    itemCount: (cart?.cartProducts || []).length,
+    cartUpdatedAt: cart?.cartUpdatedAt || null
+  }
+  if (newToken) response.newCartToken = newToken
+  return response
 }
 
 // owner: { userId } | { cartToken } | null (null = brand-new guest, cart will be created)
@@ -2014,6 +2106,10 @@ export async function addCheckoutCartItem(owner, body = {}) {
         }
       })
 
+      if (wantsMinimalCartMutationResponse(body)) {
+        return minimalCartMutationResponse(updated, newToken)
+      }
+
       const serialized = await serializeCheckoutCart(updated, body.locale || cart.locale || 'et')
       if (newToken) return { ...serialized, newCartToken: newToken }
       return serialized
@@ -2079,6 +2175,9 @@ export async function removeCheckoutCartItem(owner, body = {}) {
         cartUpdatedAt: new Date().toISOString()
       }
     })
+    if (wantsMinimalCartMutationResponse(body)) {
+      return minimalCartMutationResponse(updated)
+    }
     return await serializeCheckoutCart(updated, body.locale || cart.locale || 'et')
   })
   return result
