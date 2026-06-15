@@ -182,6 +182,8 @@ describe('cleanup plugin — dev mode', () => {
 
   beforeEach(async () => {
     vi.resetModules()
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
     vi.clearAllMocks()
     vi.stubEnv('NODE_ENV', 'development')
     mockGetCleanupState.mockResolvedValue({ lastCleanupRun: new Date(NOW - 2 * MIN).toISOString() })
@@ -191,7 +193,10 @@ describe('cleanup plugin — dev mode', () => {
     cleanupPlugin = mod.default
   })
 
-  afterEach(() => { vi.unstubAllEnvs() })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllEnvs()
+  })
 
   it('still runs startup recovery in dev mode', async () => {
     mockGetCleanupState.mockResolvedValue({ lastCleanupRun: new Date(NOW - 10 * MIN).toISOString() })
@@ -199,14 +204,14 @@ describe('cleanup plugin — dev mode', () => {
     expect(mockRunStartupCartRecovery).toHaveBeenCalledOnce()
   })
 
-  it('does not register shutdown hook in dev mode', async () => {
+  it('registers shutdown hook in dev mode', async () => {
     const nitroApp = makeNitroApp()
     await cleanupPlugin(nitroApp)
-    expect(nitroApp.hooks.hookOnce).not.toHaveBeenCalled()
+    expect(nitroApp.hooks.hookOnce).toHaveBeenCalledOnce()
   })
 
-  it('does not run initial cleanup in dev mode', async () => {
+  it('runs initial cleanup in dev mode', async () => {
     await cleanupPlugin(makeNitroApp())
-    expect(mockExpireStaleCheckoutCarts).not.toHaveBeenCalled()
+    expect(mockExpireStaleCheckoutCarts).toHaveBeenCalledOnce()
   })
 })
