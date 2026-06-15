@@ -217,20 +217,25 @@ describe('per-category cart limit', () => {
   it('returns 400 categoryLimit when the category cartLimit is reached', async () => {
     const limitedCategory = { ...CATEGORY, cartLimit: 1 }
     const oneItemCart = {
-      id: 601, cartProducts: [{ id: 9100, product: { id: 8001 }, priceInCart: 75, timeToCart: NOW }],
+      id: 601, cartProducts: [{ id: 9100, product: { id: 8001, product_category: CATEGORY }, priceInCart: 75, timeToCart: NOW }],
       cartUpdatedAt: NOW, cartToken: GUEST_TOKEN, cart_status: { id: 1, status: 'active' }, users_permissions_user: null
     }
+    let productListFetches = 0
     setupFetch(
       adminTokenHandler,
       (url) => {
         if (url.includes('/product-categories')) return limitedCategory
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         if (url.includes('/carts') && !url.includes('/carts/')) return [oneItemCart]
-        if (url.includes('/products') && !url.includes('/products/')) return [PRODUCT_A]
+        if (url.includes('/products') && !url.includes('/products/')) {
+          productListFetches++
+          return [PRODUCT_A]
+        }
       }
     )
     const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 200 })
     expect(result).toMatchObject({ code: 400, case: 'categoryLimit', limit: 1 })
+    expect(productListFetches).toBe(0)
   })
 })
 

@@ -78,6 +78,14 @@ const CART_WITH_TWO_ITEMS = {
   ]
 }
 
+const CART_WITH_TWO_UNPOPULATED_ITEMS = {
+  ...EMPTY_CART,
+  cartProducts: [
+    { id: 100, product: PRODUCT.id, priceInCart: 100, timeToCart: NOW },
+    { id: 101, product: SECOND_PRODUCT.id, priceInCart: 100, timeToCart: NOW }
+  ]
+}
+
 const SERIALIZED_CART = {
   items: [{ productId: 7255, price: 100, index: 0, codePrefix: 'LOCAL-INVOICE-TEST-2026', categoryId: 109 }],
   total: 100,
@@ -241,6 +249,7 @@ describe('addCheckoutCartItem', () => {
     // Cart holds 7255; stock has 7255 + 7256. Adding another must pick 7256.
     const PRODUCT_2 = { ...PRODUCT, id: 7256, code: 'TEST-2026-0005' }
     let putCartBody = null
+    let productListUrl = ''
     const productPuts = []
     setupFetch(
       adminTokenHandler,
@@ -255,7 +264,10 @@ describe('addCheckoutCartItem', () => {
           }
           return url.includes('7256') ? PRODUCT_2 : PRODUCT
         }
-        if (url.includes('/products')) return [PRODUCT, PRODUCT_2] // list: both in stock
+        if (url.includes('/products')) {
+          productListUrl = url
+          return [PRODUCT, PRODUCT_2] // list: both in stock
+        }
         if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_ITEM]
         if (url.includes('/carts/') && opts?.method === 'PUT') {
           putCartBody = opts.body
@@ -281,6 +293,53 @@ describe('addCheckoutCartItem', () => {
     // the newly selected product instead of refreshing every existing reservation.
     expect(productPuts).toHaveLength(1)
     expect(productPuts[0].url).toContain('/products/7256')
+    expect(productListUrl).toContain('id_nin=7255')
+    expect(productListUrl).toContain('_limit=10')
+  })
+
+  it('can return a minimal response without serializing the full cart', async () => {
+    const PRODUCT_2 = { ...PRODUCT, id: 7256, code: 'TEST-2026-0005' }
+    let productListFetches = 0
+    let productListUrl = ''
+    let productBulkSerializeFetches = 0
+    let categoryBulkSerializeFetches = 0
+
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/product-categories/109')) return CATEGORY
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_ITEM]
+        if (url.includes('/products?')) {
+          productListFetches++
+          productListUrl = url
+          if (url.includes('id_in=')) productBulkSerializeFetches++
+          return [PRODUCT_2]
+        }
+        if (url.includes('/product-categories?')) {
+          categoryBulkSerializeFetches++
+          return [CATEGORY]
+        }
+        if (url.includes('/carts/') && opts?.method === 'PUT') {
+          return {
+            ...CART_WITH_ITEM,
+            cartProducts: [
+              { id: 100, product: PRODUCT.id, priceInCart: 100, timeToCart: NOW },
+              { id: 101, product: PRODUCT_2.id, priceInCart: 100, timeToCart: NOW }
+            ],
+            cartUpdatedAt: opts.body.cartUpdatedAt
+          }
+        }
+      }
+    )
+
+    const result = await addCheckoutCartItem({ cartToken: 'guest-cart-token' }, { categoryId: 109, response: 'minimal' })
+
+    expect(result).toMatchObject({ ok: true, cartId: CART_WITH_ITEM.id, itemCount: 2 })
+    expect(productListFetches).toBe(1)
+    expect(productListUrl).toContain('id_nin=7255')
+    expect(productBulkSerializeFetches).toBe(0)
+    expect(categoryBulkSerializeFetches).toBe(0)
   })
 })
 
@@ -350,6 +409,7 @@ describe('removeCheckoutCartItem', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_TWO_ITEMS]
         if (url.includes('/products/7255') && !opts?.method) return { ...PRODUCT, reserved_to: USER_ID }
+        if (url.includes('/products?')) return [SECOND_PRODUCT]
         if (url.includes('/products/7256') && !opts?.method) return SECOND_PRODUCT
         if (url.includes('/products/') && opts?.method === 'PUT') {
           productPuts.push({ url, body: opts.body })
@@ -370,6 +430,36 @@ describe('removeCheckoutCartItem', () => {
       reservation_price: null,
       reservation_time: null
     })
+  })
+
+  it('can return a minimal response without serializing the remaining cart', async () => {
+    let productBulkSerializeFetches = 0
+    let categoryBulkSerializeFetches = 0
+
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_TWO_UNPOPULATED_ITEMS]
+        if (url.includes('/products?')) {
+          productBulkSerializeFetches++
+          return [SECOND_PRODUCT]
+        }
+        if (url.includes('/product-categories?')) {
+          categoryBulkSerializeFetches++
+          return [CATEGORY]
+        }
+        if (url.includes('/carts/') && opts?.method === 'PUT') {
+          return { ...CART_WITH_TWO_UNPOPULATED_ITEMS, cartProducts: opts.body.cartProducts, cartUpdatedAt: opts.body.cartUpdatedAt }
+        }
+      }
+    )
+
+    const result = await removeCheckoutCartItem({ cartToken: 'guest-cart-token' }, { productId: 7255, response: 'minimal' })
+
+    expect(result).toMatchObject({ ok: true, cartId: CART_WITH_TWO_UNPOPULATED_ITEMS.id, itemCount: 1 })
+    expect(productBulkSerializeFetches).toBe(0)
+    expect(categoryBulkSerializeFetches).toBe(0)
   })
 })
 
@@ -454,6 +544,51 @@ describe('touchCheckoutCartSession', () => {
     await touchCheckoutCartSession({ userId: USER_ID },'en')
     expect(touchedAt).toBeTruthy()
     expect(new Date(touchedAt).getTime()).toBeGreaterThanOrEqual(before)
+  })
+
+  it('serializes unpopulated cart products with one bulk product fetch and one deduped category fetch', async () => {
+    let productListFetches = 0
+    let categoryListFetches = 0
+    let individualProductFetches = 0
+    let individualCategoryFetches = 0
+
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_TWO_UNPOPULATED_ITEMS]
+        if (url.includes('/carts/') && opts?.method === 'PUT') {
+          return { ...CART_WITH_TWO_UNPOPULATED_ITEMS, cartUpdatedAt: opts.body.cartUpdatedAt }
+        }
+        if (url.includes('/products?')) {
+          productListFetches++
+          return [
+            { ...PRODUCT, product_category: CATEGORY.id },
+            { ...SECOND_PRODUCT, product_category: CATEGORY.id }
+          ]
+        }
+        if (url.includes('/product-categories?')) {
+          categoryListFetches++
+          return [CATEGORY]
+        }
+        if (/\/products\/\d+/.test(url)) {
+          individualProductFetches++
+          return url.includes(String(SECOND_PRODUCT.id)) ? SECOND_PRODUCT : PRODUCT
+        }
+        if (/\/product-categories\/\d+/.test(url)) {
+          individualCategoryFetches++
+          return CATEGORY
+        }
+      }
+    )
+
+    const result = await touchCheckoutCartSession({ userId: USER_ID }, 'en')
+
+    expect(result.items.map(item => item.productId)).toEqual([PRODUCT.id, SECOND_PRODUCT.id])
+    expect(productListFetches).toBe(1)
+    expect(categoryListFetches).toBe(1)
+    expect(individualProductFetches).toBe(0)
+    expect(individualCategoryFetches).toBe(0)
   })
 })
 
