@@ -1664,7 +1664,6 @@ export async function expireStaleCheckoutCarts() {
 // owner: { userId } | { cartToken } | null
 async function getCurrentCheckoutCart(owner, options = {}) {
   if (!owner) return null
-  await expireStaleCheckoutCarts()
   const token = await getStrapiAdminToken()
   const activeStatus = await getCartStatus(options.status || 'active')
   const params = new URLSearchParams()
@@ -1756,7 +1755,6 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
 }
 
 async function getAvailableCheckoutProducts(category, limit = 1, excludedProductIds = []) {
-  await expireStaleCheckoutCarts()
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_limit', String(Math.max(limit + excludedProductIds.length + 5, 10)))
@@ -1952,7 +1950,7 @@ export async function addCheckoutCartItem(owner, body = {}) {
   const price = getCheckoutProductCurrentPrice(category)
   if (price === undefined || price === null || Number.isNaN(Number(price))) return { code: 400, case: 'noCurrentPrice' }
 
-  return withCartLock(ownerLockKey(owner), async () => {
+  const result = await withCartLock(ownerLockKey(owner), async () => {
     // Re-read cart inside the lock so we see the committed state of any preceding op.
     const { cart, newToken } = await ensureCurrentCheckoutCart(owner, body)
 
@@ -2021,12 +2019,12 @@ export async function addCheckoutCartItem(owner, body = {}) {
       return { code: 409, case: error.message === 'reservationSaveFailed' ? 'reservationSaveFailed' : 'productUnavailable' }
     }
   })
+  return result
 }
 
 export async function removeCheckoutCartItem(owner, body = {}) {
   if (!owner) return { code: 401, case: 'unauthorized' }
-
-  return withCartLock(ownerLockKey(owner), async () => {
+  const result = await withCartLock(ownerLockKey(owner), async () => {
     // Re-read cart inside the lock so index/position reflects committed state.
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { code: 404, case: 'noCart' }
@@ -2079,10 +2077,11 @@ export async function removeCheckoutCartItem(owner, body = {}) {
     })
     return await serializeCheckoutCart(updated, body.locale || cart.locale || 'et')
   })
+  return result
 }
 
 export async function clearCheckoutCart(owner) {
-  return withCartLock(ownerLockKey(owner), async () => {
+  const result = await withCartLock(ownerLockKey(owner), async () => {
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { ok: true }
     const token = await getStrapiAdminToken()
@@ -2098,6 +2097,7 @@ export async function clearCheckoutCart(owner) {
     })
     return await serializeCheckoutCart(updated, cart.locale || 'et')
   })
+  return result
 }
 
 export async function touchCheckoutCartSession(owner, locale = 'et') {

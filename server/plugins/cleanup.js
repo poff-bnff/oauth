@@ -6,7 +6,7 @@ const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
 let cleanupIntervalId = null
 
 export default defineNitroPlugin(async (nitroApp) => {
-  const cleanupEnabled = process.env.NODE_ENV === 'production'
+  const cleanupEnabled = process.env.NODE_ENV !== 'test'
   let didRecover = false
 
   try {
