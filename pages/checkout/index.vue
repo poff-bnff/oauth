@@ -53,8 +53,18 @@ const brokenImages = reactive({})
 // the server's mutex (strapi.js) never receives overlapping writes for this tab.
 let cartOpQueue = Promise.resolve()
 const removingComponentIds = ref(new Set())
+const cartMutationInFlight = ref(false)
+const contextRefreshInFlight = ref(false)
+let contextRefreshPromise = null
 function queueCartMutation (fn) {
-  cartOpQueue = cartOpQueue.catch(() => {}).then(fn)
+  cartOpQueue = cartOpQueue.catch(() => {}).then(async () => {
+    cartMutationInFlight.value = true
+    try {
+      return await fn()
+    } finally {
+      cartMutationInFlight.value = false
+    }
+  })
   return cartOpQueue
 }
 
@@ -326,45 +336,54 @@ function applyCheckoutContext (nextContext, options = {}) {
 }
 
 async function refreshContext () {
-  loading.value = true
-  error.value = ''
-  sessionExpiredRefreshPending = false
-  try {
-    if (route.query.jwt) { token.value = route.query.jwt; tokenCookie.value = token.value }
+  if (contextRefreshPromise) return await contextRefreshPromise
 
-    if (transactionResult.value === 'success') {
-      try {
-        const saved = sessionStorage.getItem('poff_order_summary')
-        if (saved) orderSnapshot.value = JSON.parse(saved)
-      } catch { /* sessionStorage unavailable */ }
-      // Remove result + any other noise from the address bar so a page refresh
-      // doesn't replay the success view. Keep locale + shop_url.
-      try {
-        const clean = new URL(window.location.href)
-        clean.searchParams.delete('result')
-        clean.searchParams.delete('jwt')
-        window.history.replaceState({}, '', clean.toString())
-      } catch { /* SSR / no window */ }
-      return
-    }
+  contextRefreshPromise = (async () => {
+    loading.value = true
+    contextRefreshInFlight.value = true
+    error.value = ''
+    sessionExpiredRefreshPending = false
+    try {
+      if (route.query.jwt) { token.value = route.query.jwt; tokenCookie.value = token.value }
 
-    if (!token.value) {
-      await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: false })
-      return
+      if (transactionResult.value === 'success') {
+        try {
+          const saved = sessionStorage.getItem('poff_order_summary')
+          if (saved) orderSnapshot.value = JSON.parse(saved)
+        } catch { /* sessionStorage unavailable */ }
+        // Remove result + any other noise from the address bar so a page refresh
+        // doesn't replay the success view. Keep locale + shop_url.
+        try {
+          const clean = new URL(window.location.href)
+          clean.searchParams.delete('result')
+          clean.searchParams.delete('jwt')
+          window.history.replaceState({}, '', clean.toString())
+        } catch { /* SSR / no window */ }
+        return
+      }
+
+      if (!token.value) {
+        await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: false })
+        return
+      }
+      const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
+      applyCheckoutContext(nextContext, { openIncomplete: true })
+      if (!selectedBillingProfileId.value && profiles.value.length === 1) selectedBillingProfileId.value = profiles.value[0].id
+      if (transactionResult.value === 'cancelled') error.value = copy.value.paymentCancelledText
+    } catch (err) {
+      error.value = err?.data?.statusMessage || err?.message || 'Checkout failed to load'
+    } finally {
+      loading.value = false
+      contextRefreshInFlight.value = false
+      contextRefreshPromise = null
     }
-    const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
-    applyCheckoutContext(nextContext, { openIncomplete: true })
-    if (!selectedBillingProfileId.value && profiles.value.length === 1) selectedBillingProfileId.value = profiles.value[0].id
-    if (transactionResult.value === 'cancelled') error.value = copy.value.paymentCancelledText
-  } catch (err) {
-    error.value = err?.data?.statusMessage || err?.message || 'Checkout failed to load'
-  } finally {
-    loading.value = false
-  }
+  })()
+
+  return await contextRefreshPromise
 }
 
 async function syncCheckoutContext () {
-  if (!token.value || loading.value || touchingCartSession.value || sessionExpired.value) return
+  if (!token.value || loading.value || contextRefreshInFlight.value || cartMutationInFlight.value || touchingCartSession.value || sessionExpired.value) return
   try {
     const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
     applyCheckoutContext(nextContext)
@@ -373,6 +392,7 @@ async function syncCheckoutContext () {
 
 async function touchCartSession (force = false) {
   if (!token.value || touchingCartSession.value || !cart.value?.items?.length) return null
+  if (cartMutationInFlight.value || (!force && contextRefreshInFlight.value)) return null
   if (sessionRemainingSeconds.value <= 0) return null
   const now = Date.now()
   if (!force && now - lastCartTouchAt < 10000) return null
