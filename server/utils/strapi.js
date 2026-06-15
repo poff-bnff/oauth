@@ -1997,7 +1997,6 @@ export async function addCheckoutCartItem(owner, body = {}) {
           if (!reserved?.reserved_to) throw new Error('reservationSaveFailed')
           reservedProductIds.push(product.id)
         }
-        await refreshCheckoutCartReservations(cart, userId)
       }
       // Guests: no soft-hold — availability is re-checked at claim/checkout time.
 
