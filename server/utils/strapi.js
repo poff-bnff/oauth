@@ -964,6 +964,7 @@ export async function getStrapiAdminToken () {
 }
 
 async function refreshStrapiAdminToken () {
+  const _t0 = Date.now()
   const result = await $fetch(`${config.strapiUrl}/admin/login`, {
     method: 'POST',
     body: {
@@ -977,6 +978,7 @@ async function refreshStrapiAdminToken () {
   STRAPI_ADMIN_TOKEN.token = token
   // Read expiration from token and subtract 5 minutes
   STRAPI_ADMIN_TOKEN.expires = (jwt.decode(token).exp - 5 * 60) * 1e3
+  console.log(`[cart] adminToken REFRESH → ${Date.now() - _t0}ms`)
   return token
 }
 
@@ -1535,7 +1537,10 @@ async function getStatusCollectionItemByField(collection, field, status, token) 
 }
 
 async function getCartStatus(name) {
-  return await getOrCreateStatusCollectionItem('cart-statuses', name)
+  const _t0 = Date.now()
+  const result = await getOrCreateStatusCollectionItem('cart-statuses', name)
+  console.log(`[cart] getCartStatus(${name}) → ${Date.now() - _t0}ms`)
+  return result
 }
 
 async function getOrderStatus(name) {
@@ -1661,10 +1666,17 @@ export async function expireStaleCheckoutCarts() {
   return { checked: carts.length, expired: staleCarts.length }
 }
 
+// Safe owner label for logs: type + userId only (never logs tokens)
+function cartOwnerTag(owner) {
+  if (owner?.userId) return `user:${owner.userId}`
+  if (owner?.cartToken) return 'guest'
+  return 'none'
+}
+
 // owner: { userId } | { cartToken } | null
 async function getCurrentCheckoutCart(owner, options = {}) {
   if (!owner) return null
-  await expireStaleCheckoutCarts()
+  const _t0 = Date.now()
   const token = await getStrapiAdminToken()
   const activeStatus = await getCartStatus(options.status || 'active')
   const params = new URLSearchParams()
@@ -1685,8 +1697,10 @@ async function getCurrentCheckoutCart(owner, options = {}) {
   const cart = Array.isArray(carts) ? carts[0] : carts
   if (cart && checkoutCartExpired(cart)) {
     await expireCheckoutCart(cart)
+    console.log(`[cart] getCurrentCheckoutCart ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (expired)`)
     return null
   }
+  console.log(`[cart] getCurrentCheckoutCart ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (found:${cart ? 1 : 0})`)
   return cart
 }
 
@@ -1756,7 +1770,7 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
 }
 
 async function getAvailableCheckoutProducts(category, limit = 1, excludedProductIds = []) {
-  await expireStaleCheckoutCarts()
+  const _t0 = Date.now()
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_limit', String(Math.max(limit + excludedProductIds.length + 5, 10)))
@@ -1773,7 +1787,9 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
     headers: { Authorization: `Bearer ${token}` }
   })
   const excluded = new Set(excludedProductIds.map(id => String(id)))
-  return (Array.isArray(products) ? products : [products]).filter(product => product && !excluded.has(String(product.id))).slice(0, limit)
+  const result = (Array.isArray(products) ? products : [products]).filter(product => product && !excluded.has(String(product.id))).slice(0, limit)
+  console.log(`[cart] getAvailableCheckoutProducts → ${Date.now() - _t0}ms (found:${result.length})`)
+  return result
 }
 
 function checkoutCategoryTitle(category, locale = 'et') {
@@ -1837,15 +1853,22 @@ function normalizeCheckoutMethodGroup(paymentMethods = {}) {
 
 async function serializeCheckoutCart(cart, locale = 'et') {
   if (!cart) return null
+  const _t0 = Date.now()
   const products = cart.cartProducts || []
   const items = []
   const expiry = checkoutCartExpiry(cart)
+  let productFetches = 0
+  let categoryFetches = 0
 
   for (let index = 0; index < products.length; index++) {
     const row = products[index]
-    const product = row.product && typeof row.product === 'object' ? row.product : await getStrapiCollectionItem('products', row.product)
+    const productIsPopulated = row.product && typeof row.product === 'object'
+    if (!productIsPopulated) productFetches++
+    const product = productIsPopulated ? row.product : await getStrapiCollectionItem('products', row.product)
     if (!product) continue
-    const category = product.product_category && typeof product.product_category === 'object'
+    const categoryIsPopulated = product.product_category && typeof product.product_category === 'object'
+    if (!categoryIsPopulated) categoryFetches++
+    const category = categoryIsPopulated
       ? product.product_category
       : await getStrapiCollectionItem('product-categories', product.product_category)
     const price = Number(row.priceInCart || getCheckoutProductCurrentPrice(category) || 0)
@@ -1866,7 +1889,7 @@ async function serializeCheckoutCart(cart, locale = 'et') {
     })
   }
 
-  return {
+  const result = {
     id: cart.id,
     locale: cart.locale || locale,
     status: cart.cart_status?.status || cart.cart_status?.name || cart.cart_status || null,
@@ -1877,11 +1900,16 @@ async function serializeCheckoutCart(cart, locale = 'et') {
     total: items.reduce((sum, item) => sum + Number(item.price || 0), 0),
     items
   }
+  console.log(`[cart] serializeCheckoutCart → ${Date.now() - _t0}ms (items:${items.length}, productFetches:${productFetches}, categoryFetches:${categoryFetches})`)
+  return result
 }
 
 export async function getCheckoutCart(owner, locale = 'et') {
+  const _t0 = Date.now()
   const cart = await getCurrentCheckoutCart(owner)
-  return await serializeCheckoutCart(cart, locale)
+  const result = await serializeCheckoutCart(cart, locale)
+  console.log(`[cart] getCheckoutCart ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (items:${result?.items?.length ?? 0})`)
+  return result
 }
 
 // How many more products of a category this owner can still add to their cart
@@ -1908,8 +1936,12 @@ function checkoutCategoryCartLimit(category) {
 }
 
 export async function getCheckoutCategoryAvailability(owner, categoryId, codePrefix) {
+  const _t0 = Date.now()
   const category = await getProductCategoryByAnyId(categoryId || codePrefix, codePrefix)
-  if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
+  if (!category?.id) {
+    console.log(`[cart] getCheckoutCategoryAvailability ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (noCategory)`)
+    return { code: 400, case: 'noCategoryId', availableCount: 0 }
+  }
   const cart = owner ? await getCurrentCheckoutCart(owner) : null
   const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
   const products = await getAvailableCheckoutProducts(category, 50, existingProductIds)
@@ -1923,7 +1955,9 @@ export async function getCheckoutCategoryAvailability(owner, categoryId, codePre
   if (getCheckoutProductCurrentPrice(category) == null) reasons.push('noPrice')
   if (products.length <= 0) reasons.push('soldOut')
 
-  return { availableCount: products.length, cartLimit, inCart, reasons }
+  const availResult = { availableCount: products.length, cartLimit, inCart, reasons }
+  console.log(`[cart] getCheckoutCategoryAvailability ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (available:${availResult.availableCount})`)
+  return availResult
 }
 
 // Per-cart async mutex — serializes add/remove/clear within one Node process so that
@@ -1945,6 +1979,7 @@ function ownerLockKey(owner) {
 
 // owner: { userId } | { cartToken } | null (null = brand-new guest, cart will be created)
 export async function addCheckoutCartItem(owner, body = {}) {
+  const _t0 = Date.now()
   const quantity = Math.max(1, Math.min(20, Number(body.quantity || 1)))
   const category = await getProductCategoryByAnyId(body.categoryId || body.codePrefix, body.codePrefix)
   if (!category?.id) return { code: 400, case: 'noCategoryId' }
@@ -1952,7 +1987,7 @@ export async function addCheckoutCartItem(owner, body = {}) {
   const price = getCheckoutProductCurrentPrice(category)
   if (price === undefined || price === null || Number.isNaN(Number(price))) return { code: 400, case: 'noCurrentPrice' }
 
-  return withCartLock(ownerLockKey(owner), async () => {
+  const result = await withCartLock(ownerLockKey(owner), async () => {
     // Re-read cart inside the lock so we see the committed state of any preceding op.
     const { cart, newToken } = await ensureCurrentCheckoutCart(owner, body)
 
@@ -2021,12 +2056,14 @@ export async function addCheckoutCartItem(owner, body = {}) {
       return { code: 409, case: error.message === 'reservationSaveFailed' ? 'reservationSaveFailed' : 'productUnavailable' }
     }
   })
+  console.log(`[cart] addCheckoutCartItem ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (${result?.code ? `err:${result.code}/${result.case}` : `items:${result?.items?.length ?? 0}`})`)
+  return result
 }
 
 export async function removeCheckoutCartItem(owner, body = {}) {
   if (!owner) return { code: 401, case: 'unauthorized' }
-
-  return withCartLock(ownerLockKey(owner), async () => {
+  const _t0 = Date.now()
+  const result = await withCartLock(ownerLockKey(owner), async () => {
     // Re-read cart inside the lock so index/position reflects committed state.
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { code: 404, case: 'noCart' }
@@ -2079,10 +2116,13 @@ export async function removeCheckoutCartItem(owner, body = {}) {
     })
     return await serializeCheckoutCart(updated, body.locale || cart.locale || 'et')
   })
+  console.log(`[cart] removeCheckoutCartItem ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (${result?.code ? `err:${result.code}/${result.case}` : `items:${result?.items?.length ?? 0}`})`)
+  return result
 }
 
 export async function clearCheckoutCart(owner) {
-  return withCartLock(ownerLockKey(owner), async () => {
+  const _t0 = Date.now()
+  const result = await withCartLock(ownerLockKey(owner), async () => {
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { ok: true }
     const token = await getStrapiAdminToken()
@@ -2098,12 +2138,18 @@ export async function clearCheckoutCart(owner) {
     })
     return await serializeCheckoutCart(updated, cart.locale || 'et')
   })
+  console.log(`[cart] clearCheckoutCart ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms`)
+  return result
 }
 
 export async function touchCheckoutCartSession(owner, locale = 'et') {
+  const _t0 = Date.now()
   if (!owner) return { items: [], total: 0 }
   const cart = await getCurrentCheckoutCart(owner)
-  if (!cart) return { items: [], total: 0 }
+  if (!cart) {
+    console.log(`[cart] touchCheckoutCartSession ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (noCart)`)
+    return { items: [], total: 0 }
+  }
   const token = await getStrapiAdminToken()
   const now = new Date().toISOString()
 
@@ -2114,7 +2160,9 @@ export async function touchCheckoutCartSession(owner, locale = 'et') {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: { cartUpdatedAt: now }
   })
-  return await serializeCheckoutCart(updated, locale || cart.locale || 'et')
+  const touchResult = await serializeCheckoutCart(updated, locale || cart.locale || 'et')
+  console.log(`[cart] touchCheckoutCartSession ${cartOwnerTag(owner)} → ${Date.now() - _t0}ms (items:${touchResult?.items?.length ?? 0})`)
+  return touchResult
 }
 
 export async function getCheckoutContext(userId, locale = 'et') {

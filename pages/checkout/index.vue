@@ -541,6 +541,10 @@ function removeItem ({ item }) {
       await $fetch('/api/cart/items/remove', {
         method: 'POST',
         headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
+        // keepalive: survive a full-page navigation away (e.g. user goes back to shop
+        // while the spinner is showing). Server completes the remove; the fresh
+        // refreshContext() on the next checkout mount will reflect the result.
+        keepalive: true,
         body: { componentId, productId: item.productId }
       })
       await refreshContext()
