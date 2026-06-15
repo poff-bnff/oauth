@@ -680,9 +680,49 @@ watch(sessionRemainingSeconds, (seconds) => {
 
 <template>
   <div class="checkout-page">
-    <div v-if="loading" class="loading">
-      Loading checkout...
-    </div>
+    <main v-if="loading" class="checkout-wrap checkout-loading" aria-busy="true" aria-label="Loading checkout">
+      <span class="sr-only">Loading checkout</span>
+      <div class="loading-back skeleton-line skeleton-line-back" />
+      <div class="skeleton-line skeleton-kicker" />
+      <div class="skeleton-line skeleton-title" />
+      <div class="loading-session">
+        <div class="skeleton-icon" />
+        <div class="skeleton-line skeleton-session-copy" />
+        <div class="skeleton-line skeleton-session-time" />
+      </div>
+      <div class="checkout-grid">
+        <section class="checkout-main loading-main" aria-hidden="true">
+          <div class="loading-steps">
+            <span class="active" />
+            <span />
+            <span />
+          </div>
+          <div class="skeleton-line skeleton-step-kicker" />
+          <div class="skeleton-line skeleton-step-title" />
+          <div class="loading-content-card">
+            <div class="skeleton-line loading-content-line strong" />
+            <div class="skeleton-line loading-content-line" />
+            <div class="skeleton-line loading-content-line short" />
+          </div>
+        </section>
+        <aside class="order-summary loading-summary" aria-hidden="true">
+          <div class="skeleton-line skeleton-summary-heading" />
+          <div class="loading-summary-block">
+            <div class="skeleton-line skeleton-summary-block-line strong" />
+            <div class="skeleton-line skeleton-summary-block-line" />
+            <div class="skeleton-line skeleton-summary-block-line short" />
+          </div>
+          <div class="loading-summary-lines">
+            <div class="skeleton-line" />
+            <div class="skeleton-line" />
+          </div>
+          <div class="loading-summary-total">
+            <div class="skeleton-line" />
+            <div class="skeleton-line total" />
+          </div>
+        </aside>
+      </div>
+    </main>
     <main
       v-else
       class="checkout-wrap"
