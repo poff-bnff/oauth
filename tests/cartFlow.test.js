@@ -109,9 +109,24 @@ const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(
 const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
 const ADMIN_TOKEN_RESPONSE = { data: { token: ADMIN_JWT } }
 
+// Default claim handler: a Mode-A claim (pay-time confirm by productIds) succeeds for every
+// requested id. Mode-B claims (add-to-cart by category) are left to per-test handlers.
+// A test may set `claimOverride` to force a specific /products/claim result (e.g. "taken").
+let claimOverride = null
+function defaultClaimHandler(url, opts) {
+  if (!url.includes('/products/claim')) return undefined
+  if (claimOverride) return claimOverride(opts?.body || {})
+  const b = opts?.body || {}
+  if (Array.isArray(b.productIds)) {
+    return { mode: 'byId', got: b.productIds.length, claimed: b.productIds.map(id => ({ id, code: `C-${id}` })) }
+  }
+  return undefined
+}
+
 function setupFetch(...handlers) {
+  const all = [defaultClaimHandler, ...handlers]
   globalThis.$fetch = vi.fn().mockImplementation(async (url, opts) => {
-    for (const handler of handlers) {
+    for (const handler of all) {
       const result = handler(url, opts)
       if (result !== undefined) return result
     }
@@ -131,6 +146,7 @@ function adminTokenHandler(url) {
 beforeEach(() => {
   vi.setSystemTime(new Date(NOW))
   globalThis.$fetch = vi.fn()
+  claimOverride = null
 })
 afterEach(() => { vi.useRealTimers() })
 
@@ -176,8 +192,9 @@ describe('addCheckoutCartItem', () => {
     setupFetch(
       adminTokenHandler,
       (url) => {
+        if (url.includes('/products/claim')) return { claimed: [{ id: 7255, code: 'X' }] } // only 1 of 2
         if (url.includes('/product-categories')) return CATEGORY
-        if (url.includes('/products')) return [PRODUCT]
+        if (url.includes('/products')) return [PRODUCT] // release path (clearReservation) — catch-wrapped
         if (url.includes('/carts') && !url.includes('/carts/')) return []
         if (url.includes('/carts')) return EMPTY_CART
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
@@ -246,28 +263,17 @@ describe('addCheckoutCartItem', () => {
   })
 
   it('adds a different physical product when adding another of the same category', async () => {
-    // Cart holds 7255; stock has 7255 + 7256. Adding another must pick 7256.
+    // Cart holds 7255; the atomic claim hands out a different physical product (7256) —
+    // it never re-grabs 7255 (already reserved to this user).
     const PRODUCT_2 = { ...PRODUCT, id: 7256, code: 'TEST-2026-0005' }
     let putCartBody = null
-    let productListUrl = ''
-    const productPuts = []
+    let claimBody = null
     setupFetch(
       adminTokenHandler,
       (url, opts) => {
+        if (url.includes('/products/claim')) { claimBody = opts.body; return { mode: 'byCategory', got: 1, claimed: [{ id: 7256, code: 'TEST-2026-0005' }] } }
         if (url.includes('/product-categories')) return CATEGORY
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
-        // Single-product reservation: PUT returns a reserved record, GET returns the product
-        if (url.includes('/products/')) {
-          if (opts?.method === 'PUT') {
-            productPuts.push({ url, body: opts.body })
-            return { reserved_to: USER_ID }
-          }
-          return url.includes('7256') ? PRODUCT_2 : PRODUCT
-        }
-        if (url.includes('/products')) {
-          productListUrl = url
-          return [PRODUCT, PRODUCT_2] // list: both in stock
-        }
         if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_ITEM]
         if (url.includes('/carts/') && opts?.method === 'PUT') {
           putCartBody = opts.body
@@ -283,18 +289,13 @@ describe('addCheckoutCartItem', () => {
     )
     const result = await addCheckoutCartItem({ userId: USER_ID },{ categoryId: 109 })
 
-    // The PUT preserved the existing row (7255, once) and appended the new one (7256)
+    // The cart PUT preserved the existing row (7255, once) and appended the claimed one (7256)
     const writtenIds = putCartBody.cartProducts.map(r => r.product)
     expect(writtenIds).toContain(7256)
     expect(writtenIds.filter(id => id === 7255)).toHaveLength(1) // not duplicated
-    // Serialized cart returned to the client has both items
     expect(result.items.map(i => i.productId)).toEqual([7255, 7256])
-    // Existing cart items are already reserved; adding another should reserve only
-    // the newly selected product instead of refreshing every existing reservation.
-    expect(productPuts).toHaveLength(1)
-    expect(productPuts[0].url).toContain('/products/7256')
-    expect(productListUrl).toContain('id_nin=7255')
-    expect(productListUrl).toContain('_limit=10')
+    // The atomic claim was a Mode-B acquire for this category/user (the DB excludes 7255).
+    expect(claimBody).toMatchObject({ categoryId: 109, userId: USER_ID, quantity: 1 })
   })
 
   it('can return a minimal response without serializing the full cart', async () => {
@@ -750,6 +751,18 @@ describe('payCheckoutCart — happy path', () => {
     })
 
     expect(result).toEqual({ url: PAYMENT_METHOD.url, orderId: 9001 })
+  })
+
+  it('returns 409 productUnavailable (no payment taken) when the item was claimed by someone else', async () => {
+    // The atomic claim now reports the item as taken → pay fails gracefully BEFORE Maksekeskus.
+    const captured = {}
+    setupHappyPathFetch(captured)
+    claimOverride = () => ({ mode: 'byId', got: 0, claimed: [] })
+
+    const result = await payCheckoutCart(USER_ID, { paymentMethodId: PAYMENT_METHOD_ID, billingProfileId: BILLING_PROFILE_ID })
+
+    expect(result).toMatchObject({ code: 409, case: 'productUnavailable' })
+    expect(captured.mkBody).toBeUndefined() // never reached the payment transaction
   })
 
   it('posts an order with the cart total, billing profile, pending status, and component rows', async () => {
