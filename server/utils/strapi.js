@@ -1170,8 +1170,9 @@ export async function buyProduct (body) {
   const ownerResult = await resolveCheckoutOwner(userId, productCategory, body.owner || { mode: 'me' })
   if (ownerResult.error) return { code: 400, case: ownerResult.error, missing: ownerResult.missing }
 
-  const reserved = await reserveCheckoutProduct(product.id, userId, price)
-  if (!reserved?.reserved_to) return { code: 500, case: 'reservationSaveFailed' }
+  // Atomically claim this product for the user (free OR already theirs); graceful if just taken.
+  const claimed = await claimCheckoutProducts({ productIds: [product.id], userId, price })
+  if (!claimed.length) return { code: 409, case: 'productUnavailable' }
 
   const userEmail = buyerProfile.email || buyer.email
   let mkResponse
@@ -1377,29 +1378,8 @@ async function uploadCheckoutOwnerPhoto(photo, profileId, email) {
   return await uploadStrapiImage({ name: 'picture', filename, data: buffer }, 'user-profile', profileId)
 }
 
-async function reserveCheckoutProduct(productId, userId, price) {
-  const token = await getStrapiAdminToken()
-  const product = await $fetch(`${config.strapiUrl}/products/${productId}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  const reservedTo = product?.reserved_to?.id || product?.reserved_to || null
-  if (reservedTo && String(reservedTo) !== String(userId)) return null
-  if (product?.owner?.id || product?.owner) return null
-  if (Array.isArray(product?.transactions) && product.transactions.length) return null
-
-  return await $fetch(`${config.strapiUrl}/products/${productId}`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: {
-      reserved_to: userId,
-      reservation_price: price,
-      reservation_time: new Date().toISOString()
-    }
-  })
-}
+// (reserveCheckoutProduct removed — replaced by the atomic /products/claim endpoint via
+//  claimCheckoutProducts; the per-product read-then-PUT reserve is no longer used.)
 
 async function clearCheckoutProductReservation(productId, userId = null) {
   const token = await getStrapiAdminToken()
@@ -1779,6 +1759,24 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
   return Array.isArray(categories) ? categories[0] : categories
 }
 
+// Atomically claim (reserve) products via the Strapi /products/claim endpoint
+// (Postgres FOR UPDATE SKIP LOCKED) so concurrent buyers can't double-hold the same item.
+// Mode B (acquire): pass { category, quantity } → up to N available of the category.
+// Mode A (confirm): pass { productIds } → the specific ids if free OR already this user's.
+// Returns the rows the DB actually claimed: [{ id, code }].
+async function claimCheckoutProducts({ category, productIds, userId, quantity, price }) {
+  const token = await getStrapiAdminToken()
+  const body = (productIds && productIds.length)
+    ? { productIds, userId, reservationPrice: price }
+    : { categoryId: category.id, userId, quantity, reservationPrice: price }
+  const res = await $fetch(`${config.strapiUrl}/products/claim`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body
+  })
+  return res?.claimed || []
+}
+
 async function getAvailableCheckoutProducts(category, limit = 1, excludedProductIds = []) {
   const token = await getStrapiAdminToken()
   const excluded = new Set(excludedProductIds.map(id => String(id)))
@@ -2065,33 +2063,37 @@ export async function addCheckoutCartItem(owner, body = {}) {
       }
     }
 
-    const existingProductIds = (cart.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-    const products = await getAvailableCheckoutProducts(category, quantity, existingProductIds)
-    if (products.length < quantity) return { code: 404, case: 'noItems', available: products.length }
-
     const isGuest = !owner?.userId
     const userId = owner?.userId || null
 
+    // Acquire the products. Authenticated users atomically CLAIM (reserve) them so concurrent
+    // buyers can't double-hold the same item; guests just reference available ones (no hold —
+    // re-checked/claimed at checkout). The claim's reserved_to filter already excludes the
+    // user's own held products, so it won't re-grab what's already in their cart.
+    let acquired
+    if (!isGuest) {
+      acquired = await claimCheckoutProducts({ category, userId, quantity, price })
+    } else {
+      const existingProductIds = (cart.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
+      acquired = await getAvailableCheckoutProducts(category, quantity, existingProductIds)
+    }
+    if (acquired.length < quantity) {
+      // Release any partial hold we just took before reporting sold-out.
+      if (!isGuest) await Promise.all(acquired.map(p => clearCheckoutProductReservation(p.id, userId).catch(() => null)))
+      return { code: 404, case: 'noItems', available: acquired.length }
+    }
+
     const token = await getStrapiAdminToken()
     const now = new Date().toISOString()
-    const reservedProductIds = []
-    const newRows = products.map(product => ({
+    const reservedProductIds = isGuest ? [] : acquired.map(p => p.id)
+    const newRows = acquired.map(product => ({
       product: product.id,
       priceInCart: price,
       timeToCart: now
     }))
 
     try {
-      if (!isGuest) {
-        // Authenticated: soft-hold each product so other buyers see them as reserved.
-        for (const product of products) {
-          const reserved = await refreshCheckoutProductReservation(product.id, userId, price)
-          if (!reserved?.reserved_to) throw new Error('reservationSaveFailed')
-          reservedProductIds.push(product.id)
-        }
-      }
-      // Guests: no soft-hold — availability is re-checked at claim/checkout time.
-
+      // Products are already claimed (authenticated) or unheld (guest) — go straight to the cart write.
       const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -2331,8 +2333,9 @@ export async function payCheckoutCart(userId, body = {}) {
       const ownerResult = await resolveCheckoutOwner(userId, category, submitted.owner || { mode: 'me' })
       if (ownerResult.error) throw checkoutError({ code: 400, case: ownerResult.error, missing: ownerResult.missing, productId: cartItem.productId })
 
-      const reserved = await reserveCheckoutProduct(cartItem.productId, userId, cartItem.price)
-      if (!reserved?.reserved_to) throw checkoutError({ code: 409, case: 'productUnavailable', productId: cartItem.productId })
+      // Atomically confirm/claim the cart's specific product for this user (free OR already theirs).
+      const claimed = await claimCheckoutProducts({ productIds: [cartItem.productId], userId, price: cartItem.price })
+      if (!claimed.length) throw checkoutError({ code: 409, case: 'productUnavailable', productId: cartItem.productId })
       reservedProductIds.push(cartItem.productId)
 
       componentRows.push({
