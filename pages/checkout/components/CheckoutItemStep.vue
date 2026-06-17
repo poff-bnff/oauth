@@ -16,7 +16,7 @@ const props = defineProps({
   copy: { type: Object, required: true }
 })
 
-const emit = defineEmits(['update:openItemKey', 'continue', 'error', 'remove'])
+const emit = defineEmits(['update:openItemKey', 'continue', 'error', 'remove', 'progress'])
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -106,14 +106,17 @@ function toggleItem (item, index) {
 
 function setPickupLocation (item, index, locationId) {
   ensureItemForm(item, index).pickupLocationId = locationId
+  emit('progress')
 }
 
 function setOwnerMode (item, index, mode) {
   ensureItemForm(item, index).ownerMode = mode
+  emit('progress')
 }
 
 function toggleOwnerEmail (event, item, index) {
   ensureItemForm(item, index).sendEmail = !event.target.checked
+  emit('progress')
 }
 
 function fileToDataUrl (file) {

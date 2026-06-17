@@ -999,6 +999,7 @@ watch(sessionRemainingSeconds, (seconds) => {
               @error="error = $event"
               @continue="step = 2"
               @remove="removeItem"
+              @progress="saveCheckoutProgress"
             />
 
             <CheckoutInvoiceStep
