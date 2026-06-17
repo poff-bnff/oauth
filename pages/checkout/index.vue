@@ -7,6 +7,15 @@ import CheckoutInvoiceStep from './components/CheckoutInvoiceStep.vue'
 import CheckoutPaymentStep from './components/CheckoutPaymentStep.vue'
 import CheckoutProfileStep from './components/CheckoutProfileStep.vue'
 import CheckoutOrderSummary from './components/CheckoutOrderSummary.vue'
+import {
+  CHECKOUT_PROGRESS_KEY,
+  buildCheckoutProgressSnapshot,
+  cartSignature,
+  emptyCheckoutItemForm,
+  findCompatibleSavedForm,
+  itemKey,
+  matchCheckoutProgressForms
+} from './composables/useCheckoutProgress.js'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const route = useRoute()
@@ -205,25 +214,13 @@ function checkoutLoginRedirectUri () {
   }
 }
 
-function itemKey (item, index = 0) {
-  if (item.componentId != null) return `component:${item.componentId}`
-  return `product:${item.productId}-${item.index ?? index}`
-}
-
 function ensureItemForm (item, index = 0) {
   const key = itemKey(item, index)
   if (!itemForms[key]) {
-    itemForms[key] = {
-      pickupLocationId: '',
-      ownerMode: 'me',
-      firstName: '',
-      lastName: '',
-      email: '',
-      photo: null,
-      photoName: '',
-      photoError: '',
-      sendEmail: true
-    }
+    const previousForm = findCompatibleSavedForm(itemForms, item, index)
+    itemForms[key] = previousForm
+      ? { ...previousForm }
+      : emptyCheckoutItemForm()
   }
   return itemForms[key]
 }
@@ -240,38 +237,30 @@ function isItemComplete (item, index) {
   return true
 }
 
-function cartSignature (items = []) {
-  return items.map((item, index) => itemKey(item, index)).join('|')
-}
-
 // ── Checkout progress persistence (sessionStorage) ─────────────────────────────
 // Survives reload, browser back/forward, and the Maksekeskus round-trip so the user does
 // not restart at step 1. The gift photo is NOT persisted (a ~5 MB base64 image blows the
 // sessionStorage quota); on restore the gift item is incomplete until re-attached, which the
 // step-1 validation already blocks from continuing past it.
-const CHECKOUT_PROGRESS_KEY = 'poff_checkout_progress'
 const restoredWithoutPhoto = ref(false)
 let progressRestored = false
 let progressSaveTimer = null
 
 function saveCheckoutProgress () {
   try {
-    const forms = {}
-    for (const [k, f] of Object.entries(itemForms)) forms[k] = { ...f, photo: null, photoName: '', photoError: '' }
     const items = cart.value.items || []
-    sessionStorage.setItem(CHECKOUT_PROGRESS_KEY, JSON.stringify({
-      sig: cartSignature(items),
-      itemKeys: items.map((item, index) => itemKey(item, index)),
+    sessionStorage.setItem(CHECKOUT_PROGRESS_KEY, JSON.stringify(buildCheckoutProgressSnapshot({
+      items,
+      itemForms,
       step: step.value,
       openItemKey: openItemKey.value,
-      itemForms: forms,
-      invoiceForm: { ...invoiceForm },
+      invoiceForm,
       selectedBillingProfileId: selectedBillingProfileId.value,
       invoiceView: invoiceView.value,
       invoiceFormType: invoiceFormType.value,
       invoiceFor: invoiceFor.value,
       saveAsInvoiceProfile: saveAsInvoiceProfile.value
-    }))
+    })))
   } catch { /* quota / unavailable — best effort */ }
 }
 
@@ -286,17 +275,17 @@ function restoreCheckoutProgress (signature) {
     const raw = sessionStorage.getItem(CHECKOUT_PROGRESS_KEY)
     if (!raw) return
     const saved = JSON.parse(raw)
-    const currentKeys = new Set((cart.value.items || []).map((item, index) => itemKey(item, index)))
     const savedForms = saved.itemForms || {}
-    const matchingKeys = Object.keys(savedForms).filter(key => currentKeys.has(key))
-    if (saved.sig !== signature && !matchingKeys.length) {
+    const currentItems = cart.value.items || []
+    const currentKeys = new Set(currentItems.map((item, index) => itemKey(item, index)))
+    const matchedForms = matchCheckoutProgressForms(savedForms, currentItems)
+    if (saved.sig !== signature && !matchedForms.length) {
       sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY)
       return
     }
 
     let giftNeedsPhoto = false
-    for (const k of matchingKeys) {
-      const f = savedForms[k] || {}
+    for (const [k, f] of matchedForms) {
       itemForms[k] = {
         pickupLocationId: '', ownerMode: 'me', firstName: '', lastName: '', email: '',
         sendEmail: true, ...f, photo: null, photoName: '', photoError: ''
@@ -419,6 +408,10 @@ function applyCheckoutContext (nextContext, options = {}) {
     progressRestored = true
     restoreCheckoutProgress(nextSignature)
   }
+
+  // Cross-tab cart edits can change the cart without changing any form field.
+  // Persist the new cart signature and prune removed rows so reload restores the same state.
+  if (cartChanged) scheduleProgressSave()
 }
 
 async function refreshContext () {

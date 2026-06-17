@@ -4,6 +4,8 @@
   this component mutates them directly (same reactive instance as the parent).
 -->
 <script setup>
+import { emptyCheckoutItemForm, itemKey } from '../composables/useCheckoutProgress.js'
+
 const props = defineProps({
   cart: { type: Object, required: true },
   itemForms: { type: Object, required: true }, // reactive — direct mutation is intentional
@@ -18,10 +20,6 @@ const emit = defineEmits(['update:openItemKey', 'continue', 'error', 'remove'])
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
-function itemKey (item, index = 0) {
-  return `${item.productId}-${item.index ?? index}`
-}
-
 function hasConfigurableDetails (item) {
   return Boolean(item.pickupLocations?.length || item.transferable)
 }
@@ -29,17 +27,7 @@ function hasConfigurableDetails (item) {
 function ensureItemForm (item, index = 0) {
   const key = itemKey(item, index)
   if (!props.itemForms[key]) {
-    props.itemForms[key] = {
-      pickupLocationId: '',
-      ownerMode: 'me',
-      firstName: '',
-      lastName: '',
-      email: '',
-      photo: null,
-      photoName: '',
-      photoError: '',
-      sendEmail: true
-    }
+    props.itemForms[key] = emptyCheckoutItemForm()
   }
   return props.itemForms[key]
 }
