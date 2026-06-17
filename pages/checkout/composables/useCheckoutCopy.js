@@ -29,6 +29,11 @@ export function useCheckoutCopy (locale) {
         : et
           ? `${n} toodet müüdi läbi ja eemaldati ostukorvist.`
           : `${n} item(s) sold out and were removed from your cart.`,
+      progressRestoredPhoto: ru
+        ? 'Ваш прогресс сохранён, кроме загруженного фото — прикрепите фото заново, чтобы продолжить с того места, где остановились.'
+        : et
+          ? 'Sinu edenemine on salvestatud, v.a üleslaaditud foto — palun lisa foto uuesti, et jätkata sealt, kuhu pooleli jäid.'
+          : 'Your progress was saved except the uploaded photo — please re-attach the photo to continue from where you stopped.',
       choosePickup: ru ? 'Выберите место получения' : et ? 'Vali kättesaamise koht' : 'Choose pickup location',
       productOwner: ru ? 'Владелец товара' : et ? 'Toote omanik' : 'Product owner',
       forMe: ru ? 'Для меня' : et ? 'Mulle' : 'For me',
