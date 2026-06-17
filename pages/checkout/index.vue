@@ -14,6 +14,8 @@ const runtime = useRuntimeConfig()
 const tokenCookie = useCookie('checkout_token')
 const token = ref(route.query.jwt || tokenCookie.value || '')
 const locale = ref(route.query.locale || 'en')
+// Set by the guest→login claim redirect when some guest cart lines sold out and were dropped.
+const removedNotice = ref(Number(route.query.removed) || 0)
 const authHeaders = computed(() => ({ Authorization: `Bearer ${token.value}` }))
 
 // ── Copy (i18n) ───────────────────────────────────────────────────────────────
@@ -241,6 +243,73 @@ function cartSignature (items = []) {
   return items.map((item, index) => `${item.productId || item.categoryId || 'item'}:${item.index ?? index}`).join('|')
 }
 
+// ── Checkout progress persistence (sessionStorage) ─────────────────────────────
+// Survives reload, browser back/forward, and the Maksekeskus round-trip so the user does
+// not restart at step 1. The gift photo is NOT persisted (a ~5 MB base64 image blows the
+// sessionStorage quota); on restore the gift item is incomplete until re-attached, which the
+// step-1 validation already blocks from continuing past it.
+const CHECKOUT_PROGRESS_KEY = 'poff_checkout_progress'
+const restoredWithoutPhoto = ref(false)
+let progressRestored = false
+let progressSaveTimer = null
+
+function saveCheckoutProgress () {
+  try {
+    const forms = {}
+    for (const [k, f] of Object.entries(itemForms)) forms[k] = { ...f, photo: null, photoName: '', photoError: '' }
+    sessionStorage.setItem(CHECKOUT_PROGRESS_KEY, JSON.stringify({
+      sig: cartSignature(cart.value.items || []),
+      step: step.value,
+      openItemKey: openItemKey.value,
+      itemForms: forms,
+      invoiceForm: { ...invoiceForm },
+      selectedBillingProfileId: selectedBillingProfileId.value,
+      invoiceView: invoiceView.value,
+      invoiceFormType: invoiceFormType.value,
+      invoiceFor: invoiceFor.value,
+      saveAsInvoiceProfile: saveAsInvoiceProfile.value
+    }))
+  } catch { /* quota / unavailable — best effort */ }
+}
+
+function scheduleProgressSave () {
+  if (!progressRestored) return // don't persist before the initial restore has run
+  clearTimeout(progressSaveTimer)
+  progressSaveTimer = setTimeout(saveCheckoutProgress, 400)
+}
+
+function restoreCheckoutProgress (signature) {
+  try {
+    const raw = sessionStorage.getItem(CHECKOUT_PROGRESS_KEY)
+    if (!raw) return
+    const saved = JSON.parse(raw)
+    if (saved.sig !== signature) { sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY); return } // different cart
+
+    let giftNeedsPhoto = false
+    for (const [k, f] of Object.entries(saved.itemForms || {})) {
+      itemForms[k] = {
+        pickupLocationId: '', ownerMode: 'me', firstName: '', lastName: '', email: '',
+        sendEmail: true, ...f, photo: null, photoName: '', photoError: ''
+      }
+      if (f.ownerMode === 'gift') giftNeedsPhoto = true
+    }
+    Object.assign(invoiceForm, saved.invoiceForm || {})
+    if (saved.selectedBillingProfileId != null) selectedBillingProfileId.value = saved.selectedBillingProfileId
+    if (saved.invoiceView) invoiceView.value = saved.invoiceView
+    if (saved.invoiceFormType) invoiceFormType.value = saved.invoiceFormType
+    if (saved.invoiceFor) invoiceFor.value = saved.invoiceFor
+    if (typeof saved.saveAsInvoiceProfile === 'boolean') saveAsInvoiceProfile.value = saved.saveAsInvoiceProfile
+    if (saved.openItemKey) openItemKey.value = saved.openItemKey
+    // Clamp to the highest currently-valid step (a missing gift photo keeps maxStep at 1).
+    step.value = Math.min(Number(saved.step) || step.value, maxStep.value)
+    restoredWithoutPhoto.value = giftNeedsPhoto
+  } catch { /* corrupt — ignore */ }
+}
+
+function clearCheckoutProgress () {
+  try { sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY) } catch { /* ignore */ }
+}
+
 function fillInvoiceFormFromProfile (profile) {
   const address = profile?.address || {}
   Object.assign(invoiceForm, {
@@ -333,6 +402,13 @@ function applyCheckoutContext (nextContext, options = {}) {
   if (hasProfileStep.value && !profileDone.value && step.value >= 1) {
     step.value = 0
   }
+
+  // First time the cart is loaded, restore any saved checkout progress (step + entered
+  // details) so a reload / back-forward / payment return doesn't drop the user back to step 1.
+  if (!progressRestored) {
+    progressRestored = true
+    restoreCheckoutProgress(nextSignature)
+  }
 }
 
 async function refreshContext () {
@@ -347,6 +423,7 @@ async function refreshContext () {
       if (route.query.jwt) { token.value = route.query.jwt; tokenCookie.value = token.value }
 
       if (transactionResult.value === 'success') {
+        clearCheckoutProgress() // order placed — don't restore stale progress next time
         try {
           const saved = sessionStorage.getItem('poff_order_summary')
           if (saved) orderSnapshot.value = JSON.parse(saved)
@@ -673,6 +750,10 @@ onBeforeUnmount(() => {
 
 const completedItemCount = computed(() => (cart.value.items || []).filter((item, i) => isItemComplete(item, i)).length)
 watch(completedItemCount, openNextIncompleteItem)
+// Persist checkout progress (debounced) so it survives reload / back-forward / payment return.
+watch([step, openItemKey, selectedBillingProfileId, invoiceView, invoiceFormType, invoiceFor, saveAsInvoiceProfile], scheduleProgressSave)
+watch(itemForms, scheduleProgressSave, { deep: true })
+watch(invoiceForm, scheduleProgressSave, { deep: true })
 watch(sessionRemainingSeconds, (seconds) => {
   if (seconds > 30) sessionWarningDismissed.value = false
 })
@@ -746,6 +827,38 @@ watch(sessionRemainingSeconds, (seconds) => {
           :display="sessionDisplay"
           :copy="copy"
         />
+
+        <div
+          v-if="removedNotice > 0"
+          role="status"
+          style="background:#fff4e5;border:1px solid #ffd9a0;color:#7a4a00;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px"
+        >
+          <span>{{ copy.itemsRemoved(removedNotice) }}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            style="background:none;border:none;font-size:18px;line-height:1;cursor:pointer;color:inherit"
+            @click="removedNotice = 0"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div
+          v-if="restoredWithoutPhoto"
+          role="status"
+          style="background:#e8f1ff;border:1px solid #b9d4ff;color:#1f4e8a;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px"
+        >
+          <span>{{ copy.progressRestoredPhoto }}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            style="background:none;border:none;font-size:18px;line-height:1;cursor:pointer;color:inherit"
+            @click="restoredWithoutPhoto = false"
+          >
+            &times;
+          </button>
+        </div>
       </template>
 
       <template v-if="transactionResult === 'success'">

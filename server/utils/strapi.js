@@ -2858,18 +2858,8 @@ export async function getUniqSlug(slug, contentTypeUID, field) {
 
 // ── Guest cart claim (WS4) ────────────────────────────────────────────────────
 
-async function isProductAvailableForUser(productId, userId) {
-  const token = await getStrapiAdminToken()
-  const product = await $fetch(`${config.strapiUrl}/products/${productId}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  }).catch(() => null)
-  if (!product) return false
-  if (product.owner?.id || product.owner) return false
-  if (Array.isArray(product.transactions) && product.transactions.length) return false
-  const reservedTo = product.reserved_to?.id || product.reserved_to
-  if (reservedTo && String(reservedTo) !== String(userId)) return false
-  return true
-}
+// (isProductAvailableForUser removed — claimGuestCart now binds guest lines via the atomic
+//  claim-by-category, which checks availability and reserves in one step.)
 
 async function deleteGuestCart(cartId) {
   const token = await getStrapiAdminToken()
@@ -2881,6 +2871,33 @@ async function deleteGuestCart(cartId) {
 
 // Idempotent: safe to call twice (second call is a no-op once the token is cleared).
 // droppedItems: products that were in the guest cart but no longer available.
+// Resolve a (possibly un-populated) cart line's product category.
+async function resolveCartLineCategory(item) {
+  let product = item.product
+  if (!product || typeof product !== 'object') {
+    const pid = item.product?.id || item.product
+    if (!pid) return null
+    product = await getStrapiCollectionItem('products', pid).catch(() => null)
+  }
+  const raw = product?.product_category
+  if (raw && typeof raw === 'object') return raw
+  if (raw) return await getStrapiCollectionItem('product-categories', raw).catch(() => null)
+  return null
+}
+
+// At login, bind a guest cart line to an ACTUAL available product of its category via the
+// atomic claim. Guests never hold a specific product, so we claim by category — the user keeps
+// the item as long as the category has any stock (not just the specific instance they saw), and
+// each line gets a distinct product. Returns { productId, price } or null if the category is empty.
+async function claimGuestLine(item, userId) {
+  const category = await resolveCartLineCategory(item)
+  if (!category?.id) return null
+  const price = getCheckoutProductCurrentPrice(category) ?? item.priceInCart
+  const claimed = await claimCheckoutProducts({ category, userId, quantity: 1, price })
+  if (!claimed.length) return null
+  return { productId: claimed[0].id, price }
+}
+
 export async function claimGuestCart(userId, cartToken) {
   if (!userId || !cartToken) return { claimed: false, droppedItems: [] }
 
@@ -2903,16 +2920,10 @@ export async function claimGuestCart(userId, cartToken) {
     // No existing user cart — convert the guest cart in-place.
     const validRows = []
     for (const item of guestProducts) {
-      const productId = item.product?.id || item.product
-      const price = item.priceInCart
-
-      const available = await isProductAvailableForUser(productId, userId)
-      if (!available) { droppedItems.push({ productId, reason: 'unavailable' }); continue }
-
-      const reserved = await refreshCheckoutProductReservation(productId, userId, price)
-      if (!reserved?.reserved_to) { droppedItems.push({ productId, reason: 'reservationFailed' }); continue }
-
-      validRows.push({ id: item.id, product: productId, priceInCart: price, timeToCart: item.timeToCart })
+      // Bind this guest line to an actual available product of its category (atomic claim).
+      const bound = await claimGuestLine(item, userId)
+      if (!bound) { droppedItems.push({ productId: item.product?.id || item.product, reason: 'soldOut' }); continue }
+      validRows.push({ id: item.id, product: bound.productId, priceInCart: bound.price, timeToCart: item.timeToCart })
     }
 
     await $fetch(`${config.strapiUrl}/carts/${guestCart.id}`, {
@@ -2926,32 +2937,14 @@ export async function claimGuestCart(userId, cartToken) {
       }
     })
   } else {
-    // Merge guest products into the existing user cart; skip duplicates.
-    const existingProductIds = new Set(
-      (userCart.cartProducts || []).map(item => String(item.product?.id || item.product))
-    )
-
+    // Merge guest lines into the existing user cart by claiming a distinct available product
+    // of each line's category. The claim's reserved_to filter already excludes the user's own
+    // held cart products, so we never double-add; lines drop only if the category is sold out.
     const addedRows = []
     for (const item of guestProducts) {
-      const productId = item.product?.id || item.product
-      if (existingProductIds.has(String(productId))) continue
-
-      // Re-price to current if the category is available on the product object.
-      const rawCategory = typeof item.product === 'object' ? item.product.product_category : null
-      const category = rawCategory && typeof rawCategory === 'object'
-        ? rawCategory
-        : rawCategory ? await getStrapiCollectionItem('product-categories', rawCategory) : null
-      const price = category
-        ? (getCheckoutProductCurrentPrice(category) ?? item.priceInCart)
-        : item.priceInCart
-
-      const available = await isProductAvailableForUser(productId, userId)
-      if (!available) { droppedItems.push({ productId, reason: 'unavailable' }); continue }
-
-      const reserved = await refreshCheckoutProductReservation(productId, userId, price)
-      if (!reserved?.reserved_to) { droppedItems.push({ productId, reason: 'reservationFailed' }); continue }
-
-      addedRows.push({ product: productId, priceInCart: price, timeToCart: now })
+      const bound = await claimGuestLine(item, userId)
+      if (!bound) { droppedItems.push({ productId: item.product?.id || item.product, reason: 'soldOut' }); continue }
+      addedRows.push({ product: bound.productId, priceInCart: bound.price, timeToCart: now })
     }
 
     if (addedRows.length) {
