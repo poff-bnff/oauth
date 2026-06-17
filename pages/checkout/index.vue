@@ -206,7 +206,8 @@ function checkoutLoginRedirectUri () {
 }
 
 function itemKey (item, index = 0) {
-  return `${item.productId}-${item.index ?? index}`
+  if (item.componentId != null) return `component:${item.componentId}`
+  return `product:${item.productId}-${item.index ?? index}`
 }
 
 function ensureItemForm (item, index = 0) {
@@ -240,7 +241,7 @@ function isItemComplete (item, index) {
 }
 
 function cartSignature (items = []) {
-  return items.map((item, index) => `${item.productId || item.categoryId || 'item'}:${item.index ?? index}`).join('|')
+  return items.map((item, index) => itemKey(item, index)).join('|')
 }
 
 // ── Checkout progress persistence (sessionStorage) ─────────────────────────────
@@ -257,8 +258,10 @@ function saveCheckoutProgress () {
   try {
     const forms = {}
     for (const [k, f] of Object.entries(itemForms)) forms[k] = { ...f, photo: null, photoName: '', photoError: '' }
+    const items = cart.value.items || []
     sessionStorage.setItem(CHECKOUT_PROGRESS_KEY, JSON.stringify({
-      sig: cartSignature(cart.value.items || []),
+      sig: cartSignature(items),
+      itemKeys: items.map((item, index) => itemKey(item, index)),
       step: step.value,
       openItemKey: openItemKey.value,
       itemForms: forms,
@@ -283,10 +286,17 @@ function restoreCheckoutProgress (signature) {
     const raw = sessionStorage.getItem(CHECKOUT_PROGRESS_KEY)
     if (!raw) return
     const saved = JSON.parse(raw)
-    if (saved.sig !== signature) { sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY); return } // different cart
+    const currentKeys = new Set((cart.value.items || []).map((item, index) => itemKey(item, index)))
+    const savedForms = saved.itemForms || {}
+    const matchingKeys = Object.keys(savedForms).filter(key => currentKeys.has(key))
+    if (saved.sig !== signature && !matchingKeys.length) {
+      sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY)
+      return
+    }
 
     let giftNeedsPhoto = false
-    for (const [k, f] of Object.entries(saved.itemForms || {})) {
+    for (const k of matchingKeys) {
+      const f = savedForms[k] || {}
       itemForms[k] = {
         pickupLocationId: '', ownerMode: 'me', firstName: '', lastName: '', email: '',
         sendEmail: true, ...f, photo: null, photoName: '', photoError: ''
@@ -299,7 +309,7 @@ function restoreCheckoutProgress (signature) {
     if (saved.invoiceFormType) invoiceFormType.value = saved.invoiceFormType
     if (saved.invoiceFor) invoiceFor.value = saved.invoiceFor
     if (typeof saved.saveAsInvoiceProfile === 'boolean') saveAsInvoiceProfile.value = saved.saveAsInvoiceProfile
-    if (saved.openItemKey) openItemKey.value = saved.openItemKey
+    if (saved.openItemKey && currentKeys.has(saved.openItemKey)) openItemKey.value = saved.openItemKey
     // Clamp to the highest currently-valid step (a missing gift photo keeps maxStep at 1).
     step.value = Math.min(Number(saved.step) || step.value, maxStep.value)
     restoredWithoutPhoto.value = giftNeedsPhoto
