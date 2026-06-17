@@ -14,6 +14,8 @@ const runtime = useRuntimeConfig()
 const tokenCookie = useCookie('checkout_token')
 const token = ref(route.query.jwt || tokenCookie.value || '')
 const locale = ref(route.query.locale || 'en')
+// Set by the guest→login claim redirect when some guest cart lines sold out and were dropped.
+const removedNotice = ref(Number(route.query.removed) || 0)
 const authHeaders = computed(() => ({ Authorization: `Bearer ${token.value}` }))
 
 // ── Copy (i18n) ───────────────────────────────────────────────────────────────
@@ -746,6 +748,22 @@ watch(sessionRemainingSeconds, (seconds) => {
           :display="sessionDisplay"
           :copy="copy"
         />
+
+        <div
+          v-if="removedNotice > 0"
+          role="status"
+          style="background:#fff4e5;border:1px solid #ffd9a0;color:#7a4a00;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px"
+        >
+          <span>{{ copy.itemsRemoved(removedNotice) }}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            style="background:none;border:none;font-size:18px;line-height:1;cursor:pointer;color:inherit"
+            @click="removedNotice = 0"
+          >
+            &times;
+          </button>
+        </div>
       </template>
 
       <template v-if="transactionResult === 'success'">

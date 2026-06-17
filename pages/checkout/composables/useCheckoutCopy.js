@@ -24,6 +24,11 @@ export function useCheckoutCopy (locale) {
       back: ru ? 'Назад' : et ? 'Tagasi' : 'Back',
       pay: ru ? 'Оплатить' : et ? 'Maksa' : 'Pay',
       remove: ru ? 'Удалить' : et ? 'Eemalda' : 'Remove',
+      itemsRemoved: (n) => ru
+        ? `${n} товар(ов) были распроданы и удалены из корзины.`
+        : et
+          ? `${n} toodet müüdi läbi ja eemaldati ostukorvist.`
+          : `${n} item(s) sold out and were removed from your cart.`,
       choosePickup: ru ? 'Выберите место получения' : et ? 'Vali kättesaamise koht' : 'Choose pickup location',
       productOwner: ru ? 'Владелец товара' : et ? 'Toote omanik' : 'Product owner',
       forMe: ru ? 'Для меня' : et ? 'Mulle' : 'For me',

@@ -124,10 +124,8 @@ describe('claimGuestCart — convert (no user cart)', () => {
         if (url.includes('/carts') && url.includes('cartToken')) return [GUEST_CART]
         // Second getCurrentCheckoutCart call: no user cart
         if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return []
-        // product availability check (GET — no method)
-        if (url.includes(`/products/${PRODUCT.id}`) && !opts?.method) return PRODUCT
-        // product reservation refresh (PUT)
-        if (url.includes(`/products/${PRODUCT.id}`) && opts?.method === 'PUT') return { ...PRODUCT, reserved_to: USER_ID }
+        // atomic claim by category → returns the bound product
+        if (url.includes('/products/claim') && opts?.method === 'POST') return { claimed: [{ id: PRODUCT.id, code: PRODUCT.code }] }
         // cart update (convert in-place)
         if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'PUT') {
           putBody = opts.body
@@ -145,16 +143,37 @@ describe('claimGuestCart — convert (no user cart)', () => {
     expect(putBody?.cartToken).toBeNull()
   })
 
-  it('drops unavailable product into droppedItems and still converts the cart', async () => {
-    const soldProduct = { ...PRODUCT, owner: 99 }  // already sold
-    const guestCartWithSold = { ...GUEST_CART, cartProducts: [{ id: 800, product: soldProduct, priceInCart: 50, timeToCart: NOW }] }
+  it('binds a guest line to a DIFFERENT product when the one it referenced was taken (category still has stock)', async () => {
+    // Guest cart referenced product 9001, but it was robbed while browsing; the category still
+    // has product 9009 free, so the line survives and is bound to 9009 (your security model).
+    let putBody = null
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && url.includes('cartToken')) return [GUEST_CART] // references 9001
+        if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return []
+        if (url.includes('/products/claim') && opts?.method === 'POST') return { claimed: [{ id: 9009, code: 'CLAIM-2026-0009' }] }
+        if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'PUT') { putBody = opts.body; return { ...GUEST_CART, users_permissions_user: { id: USER_ID }, cartToken: null } }
+        if (url.includes('/carts')) return [{ ...GUEST_CART, users_permissions_user: { id: USER_ID }, cartToken: null }]
+        if (url.includes('/product-categories/')) return CATEGORY
+      }
+    )
+    const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
+    expect(result.claimed).toBe(true)
+    expect(result.droppedItems).toEqual([])
+    expect(putBody.cartProducts.map(r => r.product)).toEqual([9009]) // bound to the actually-claimed product
+  })
+
+  it('drops a line into droppedItems when its category is sold out, and still converts the cart', async () => {
+    const guestCartWithSold = { ...GUEST_CART, cartProducts: [{ id: 800, product: PRODUCT, priceInCart: 50, timeToCart: NOW }] }
     setupFetch(
       adminTokenHandler,
       (url, opts) => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         if (url.includes('/carts') && url.includes('cartToken')) return [guestCartWithSold]
         if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return []
-        if (url.includes(`/products/${soldProduct.id}`) && !opts?.method) return soldProduct
+        if (url.includes('/products/claim')) return { claimed: [] } // category sold out → nothing to bind
         if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'PUT') return { ...guestCartWithSold, users_permissions_user: { id: USER_ID }, cartToken: null }
         if (url.includes('/carts')) return [{ ...guestCartWithSold, users_permissions_user: { id: USER_ID }, cartToken: null }]
         if (url.includes('/product-categories/')) return CATEGORY
@@ -162,7 +181,7 @@ describe('claimGuestCart — convert (no user cart)', () => {
     )
     const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
     expect(result.claimed).toBe(true)
-    expect(result.droppedItems).toEqual([{ productId: soldProduct.id, reason: 'unavailable' }])
+    expect(result.droppedItems).toEqual([{ productId: PRODUCT.id, reason: 'soldOut' }])
   })
 })
 
@@ -178,8 +197,7 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         if (url.includes('/carts') && url.includes('cartToken')) return [GUEST_CART]
         if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return [USER_CART]
-        if (url.includes(`/products/${PRODUCT.id}`) && !opts?.method) return PRODUCT
-        if (url.includes(`/products/${PRODUCT.id}`) && opts?.method === 'PUT') return { ...PRODUCT, reserved_to: USER_ID }
+        if (url.includes('/products/claim') && opts?.method === 'POST') return { claimed: [{ id: PRODUCT.id, code: PRODUCT.code }] }
         if (url.includes(`/carts/${USER_CART.id}`) && opts?.method === 'PUT') {
           userCartPutBody = opts.body; return USER_CART
         }
@@ -198,8 +216,9 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
     expect(addedIds).toContain(PRODUCT.id)
   })
 
-  it('does not add duplicate products that already exist in user cart', async () => {
-    // User cart already has product 9001 — same as guest cart
+  it('drops a guest line (no add) when its category has no remaining stock', async () => {
+    // User already holds the only product of the category → the claim returns nothing, so the
+    // guest line is dropped instead of adding a phantom duplicate (no user-cart write).
     const userCartWithSameProduct = {
       ...USER_CART,
       cartProducts: [{ id: 801, product: PRODUCT, priceInCart: 50, timeToCart: NOW }]
@@ -211,6 +230,7 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         if (url.includes('/carts') && url.includes('cartToken')) return [GUEST_CART]
         if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return [userCartWithSameProduct]
+        if (url.includes('/products/claim')) return { claimed: [] } // category exhausted
         if (url.includes(`/carts/${USER_CART.id}`) && opts?.method === 'PUT') { userCartPutCalled = true; return userCartWithSameProduct }
         if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'DELETE') return {}
         if (url.includes('/carts') && !url.includes('/carts/')) return [userCartWithSameProduct]
@@ -219,7 +239,7 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
     )
     const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
     expect(result.claimed).toBe(true)
-    // No new items to add → user cart PUT should NOT be called
+    expect(result.droppedItems).toEqual([{ productId: PRODUCT.id, reason: 'soldOut' }])
     expect(userCartPutCalled).toBe(false)
   })
 })
