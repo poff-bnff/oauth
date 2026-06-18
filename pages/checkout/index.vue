@@ -615,6 +615,9 @@ async function saveSelectedProfile (options = {}) {
 }
 
 function returnToInvoiceList () {
+  // No saved profiles → there is no list to return to. "Back" from the form leaves to the items
+  // step instead of showing the empty "0 profiles" list (which the BUG 3 guard would replace anyway).
+  if (!profiles.value.length) { step.value = 1; return }
   invoiceView.value = 'list'
   selectedBillingProfileId.value = null
   invoiceFor.value = 'me'
@@ -758,6 +761,17 @@ onBeforeUnmount(() => {
 
 const completedItemCount = computed(() => (cart.value.items || []).filter((item, i) => isItemComplete(item, i)).length)
 watch(completedItemCount, openNextIncompleteItem)
+// BUG 3: a user with no saved billing profiles should ALWAYS see the pre-filled personal "for me"
+// form — never the empty "0 saved profiles" list. This guard re-opens the create form (pre-filled
+// from the user's profile) whenever the invoice step would otherwise fall back to the list for a
+// 0-profile "me" user, covering initial entry and the me/someone toggle. Users with ≥1 profile,
+// mid-edit users, and "someone else" are untouched.
+watch([step, invoiceFor, invoiceView, () => profiles.value.length, selectedBillingProfileId], () => {
+  if (step.value === 2 && invoiceFor.value === 'me' && profiles.value.length === 0 &&
+      invoiceView.value === 'list' && !selectedBillingProfileId.value) {
+    startInvoiceForm('personal', 'me')
+  }
+})
 // Persist checkout progress (debounced) so it survives reload / back-forward / payment return.
 watch([step, openItemKey, selectedBillingProfileId, invoiceView, invoiceFormType, invoiceFor, saveAsInvoiceProfile], scheduleProgressSave)
 watch(itemForms, scheduleProgressSave, { deep: true })
