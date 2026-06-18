@@ -105,6 +105,7 @@ export function useCheckoutCopy (locale) {
       stepLabel: ru ? 'ШАГ' : et ? 'SAMM' : 'STEP',
       complete: ru ? 'выполнено' : et ? 'valmis' : 'complete',
       chooseLocation: ru ? 'Выберите место' : et ? 'Vali asukoht' : 'choose location',
+      chooseOwner: ru ? 'Выберите владельца' : et ? 'Vali omanik' : 'choose owner',
       me: ru ? 'Я' : et ? 'Mina' : 'Me',
       order: ru ? 'Заказ' : et ? 'Tellimus' : 'Order',
       subtotal: ru ? 'Промежуточный итог' : et ? 'Vahesumma' : 'Subtotal',

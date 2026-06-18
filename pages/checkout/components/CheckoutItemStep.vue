@@ -44,7 +44,12 @@ function isGiftOwnerComplete (form) {
 function isItemComplete (item, index) {
   const form = ensureItemForm(item, index)
   if (item.pickupLocations?.length && !form.pickupLocationId) return false
-  if (item.transferable && form.ownerMode === 'gift') return isGiftOwnerComplete(form)
+  if (item.transferable) {
+    // Owner must be explicitly chosen ('me' or 'gift') — no default — so picking only a
+    // pickup location doesn't complete the item and auto-advance past the owner choice.
+    if (form.ownerMode !== 'me' && form.ownerMode !== 'gift') return false
+    if (form.ownerMode === 'gift') return isGiftOwnerComplete(form)
+  }
   return true
 }
 
@@ -91,9 +96,21 @@ function pickupSummary (item, index) {
 function ownerSummary (item, index) {
   if (!item.transferable) return props.copy.me
   const form = ensureItemForm(item, index)
-  if (form.ownerMode !== 'gift') return props.copy.me
-  if (isGiftOwnerComplete(form)) return `Gift to ${form.firstName.trim()}`
-  return 'recipient details needed'
+  if (form.ownerMode === 'me') return props.copy.me
+  if (form.ownerMode === 'gift') {
+    return isGiftOwnerComplete(form) ? `Gift to ${form.firstName.trim()}` : 'recipient details needed'
+  }
+  return props.copy.chooseOwner // owner not chosen yet
+}
+
+// True while a transferable item still needs the owner sorted out: nothing picked, or
+// "gift" picked but recipient details incomplete. Drives the "missing" highlight.
+function ownerNeedsChoice (item, index) {
+  if (!item.transferable) return false
+  const form = ensureItemForm(item, index)
+  if (form.ownerMode === 'me') return false
+  if (form.ownerMode === 'gift') return !isGiftOwnerComplete(form)
+  return true
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -173,6 +190,11 @@ function validateAndContinue () {
       emit('update:openItemKey', itemKey(item, index))
       return
     }
+    if (item.transferable && form.ownerMode !== 'me' && form.ownerMode !== 'gift') {
+      emit('error', props.copy.chooseOwner)
+      emit('update:openItemKey', itemKey(item, index))
+      return
+    }
     if (item.transferable && form.ownerMode === 'gift' && !isGiftOwnerComplete(form)) {
       emit('error', props.copy.giftFieldsRequired)
       emit('update:openItemKey', itemKey(item, index))
@@ -213,7 +235,7 @@ function validateAndContinue () {
             <strong>{{ item.title }}</strong>
             <small>
               {{ copy.pickup }}: <span :class="{ missing: item.pickupLocations?.length && !ensureItemForm(item, index).pickupLocationId }">{{ pickupSummary(item, index) }}</span>
-              <span v-if="item.transferable"> · {{ copy.owner }}: <span :class="{ missing: ensureItemForm(item, index).ownerMode === 'gift' && !isGiftOwnerComplete(ensureItemForm(item, index)) }">{{ ownerSummary(item, index) }}</span></span>
+              <span v-if="item.transferable"> · {{ copy.owner }}: <span :class="{ missing: ownerNeedsChoice(item, index) }">{{ ownerSummary(item, index) }}</span></span>
             </small>
           </div>
           <span class="item-caret" aria-hidden="true" />

@@ -524,6 +524,15 @@
   background: #f5a623;
   font-weight: 700;
 }
+/* Owner choice ("For me" / "As a gift") ships with neither selected. Keep the chosen (orange)
+   look exactly as the base .segmented, but for the UNCHOSEN state add a divider between the two
+   halves (so it doesn't read as one button) and a subtle hover tint. */
+.owner-segmented button { transition: background .15s ease, color .15s ease; }
+.owner-segmented button + button { border-left: 1px solid rgba(0,0,0,.14); }
+.owner-segmented button:not(.active):hover {
+  background: rgba(245,166,35,.12);
+  color: #111820;
+}
 
 /* ── Forms (qualified to avoid global leakage) ──────────── */
 .form-grid {

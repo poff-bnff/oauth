@@ -16,7 +16,7 @@ export function cartSignature (items = []) {
 export function emptyCheckoutItemForm () {
   return {
     pickupLocationId: '',
-    ownerMode: 'me',
+    ownerMode: '', // '' = not yet chosen; for transferable items the user must explicitly pick 'me' or 'gift'
     firstName: '',
     lastName: '',
     email: '',

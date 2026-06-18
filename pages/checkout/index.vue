@@ -233,7 +233,12 @@ function isGiftOwnerComplete (form) {
 function isItemComplete (item, index) {
   const form = ensureItemForm(item, index)
   if (item.pickupLocations?.length && !form.pickupLocationId) return false
-  if (item.transferable && form.ownerMode === 'gift') return isGiftOwnerComplete(form)
+  if (item.transferable) {
+    // Owner must be explicitly chosen ('me' or 'gift') — no default — so picking only a
+    // pickup location doesn't mark the item complete and bounce the user to the next product.
+    if (form.ownerMode !== 'me' && form.ownerMode !== 'gift') return false
+    if (form.ownerMode === 'gift') return isGiftOwnerComplete(form)
+  }
   return true
 }
 
@@ -287,7 +292,7 @@ function restoreCheckoutProgress (signature) {
     let giftNeedsPhoto = false
     for (const [k, f] of matchedForms) {
       itemForms[k] = {
-        pickupLocationId: '', ownerMode: 'me', firstName: '', lastName: '', email: '',
+        pickupLocationId: '', ownerMode: '', firstName: '', lastName: '', email: '',
         sendEmail: true, ...f, photo: null, photoName: '', photoError: ''
       }
       if (f.ownerMode === 'gift') giftNeedsPhoto = true
