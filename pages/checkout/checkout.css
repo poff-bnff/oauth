@@ -9,6 +9,39 @@
   padding: 64px;
   text-align: center;
 }
+/* Empty-cart state: centered, self-contained (no title/session bar) with a "Go to shop" CTA. */
+.cart-empty {
+  max-width: 520px;
+  margin: 64px auto 72px;
+  padding: 8px 24px;
+  text-align: center;
+}
+.cart-empty .page-kicker {
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.cart-empty-title {
+  margin: 0 0 14px;
+  color: #1f1f1f;
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -.6px;
+  line-height: 1.1;
+}
+.cart-empty-text {
+  margin: 0 0 30px;
+  color: rgba(0,0,0,.6);
+  font-size: 16px;
+  line-height: 1.55;
+}
+/* "Go to shop" uses the shared .primary button styling (same as Continue); this only handles
+   inline-flex centering of the label + arrow and drops the link underline. */
+.cart-empty-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
 .sr-only {
   position: absolute;
   width: 1px;

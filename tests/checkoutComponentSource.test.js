@@ -10,6 +10,7 @@ const checkoutItemStepSource = read('../pages/checkout/components/CheckoutItemSt
 const indexSource = read('../pages/checkout/index.vue')
 const invoiceStepSource = read('../pages/checkout/components/CheckoutInvoiceStep.vue')
 const progressSource = read('../pages/checkout/composables/useCheckoutProgress.js')
+const copySource = read('../pages/checkout/composables/useCheckoutCopy.js')
 
 describe('checkout item step source', () => {
   test('uses shared checkout progress item keys', () => {
@@ -58,6 +59,23 @@ describe('BUG 4 — save-as-profile default off + native toggle', () => {
   test('the checkbox label no longer uses @click.prevent (native toggle, not a Vue round-trip)', () => {
     expect(invoiceStepSource).not.toContain('@click.prevent')
     expect(invoiceStepSource).toContain("@change=\"$emit('update:saveAsInvoiceProfile', $event.target.checked)\"")
+  })
+})
+
+// BUG 8 — empty cart shows a centered "Go to shop" card, with the header + session timer hidden.
+describe('BUG 8 — empty-cart state', () => {
+  test('the header (title + session banner) is gated on a non-empty cart', () => {
+    expect(indexSource).toContain("v-if=\"transactionResult !== 'success' && cart.items.length\"")
+  })
+  test('an empty cart renders the centered card with a Go to shop CTA using the shared button style', () => {
+    expect(indexSource).toContain('class="cart-empty"')
+    expect(indexSource).toContain('class="primary cart-empty-go"') // same .primary styling as Continue
+    expect(indexSource).toContain('copy.goToShop')
+    expect(indexSource).toContain('copy.emptyHint')
+  })
+  test('the copy defines goToShop and emptyHint', () => {
+    expect(copySource).toContain('goToShop:')
+    expect(copySource).toContain('emptyHint:')
   })
 })
 

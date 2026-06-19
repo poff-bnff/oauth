@@ -854,7 +854,8 @@ watch(sessionRemainingSeconds, (seconds) => {
       @keydown="handleCheckoutActivity"
     >
       <a class="back-shop" :href="shopBackUrl">&larr; {{ copy.backToShop }}</a>
-      <template v-if="transactionResult !== 'success'">
+      <!-- Header (title + session timer + notices) only while there's a cart; an empty cart gets the centered empty state below. -->
+      <template v-if="transactionResult !== 'success' && cart.items.length">
         <p class="page-kicker">
           Checkout
         </p>
@@ -989,8 +990,17 @@ watch(sessionRemainingSeconds, (seconds) => {
         <div v-if="error" class="error">
           {{ error }}
         </div>
-        <div v-if="!cart.items.length" class="empty">
-          {{ copy.empty }}
+        <div v-if="!cart.items.length" class="cart-empty">
+          <p class="page-kicker">
+            Checkout
+          </p>
+          <h2 class="cart-empty-title">
+            {{ copy.empty }}
+          </h2>
+          <p class="cart-empty-text">
+            {{ copy.emptyHint }}
+          </p>
+          <a class="primary cart-empty-go" :href="shopBackUrl">{{ copy.goToShop }} &rarr;</a>
         </div>
 
         <div v-if="cart.items.length" class="checkout-grid">

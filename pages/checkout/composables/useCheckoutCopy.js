@@ -88,6 +88,8 @@ export function useCheckoutCopy (locale) {
       total: ru ? 'Итого' : et ? 'Kokku' : 'Total',
       terms: ru ? 'Я прочитал(а) и согласен(на) с условиями интернет-магазина' : et ? 'Olen lugenud internetipoe tingimusi ja nõustun nendega' : 'I have read and agree with terms of use of internet shop',
       empty: ru ? 'Корзина пуста' : et ? 'Ostukorv on tühi' : 'Your cart is empty',
+      emptyHint: ru ? 'Добавьте товары в магазине, и они появятся здесь автоматически.' : et ? 'Lisa tooteid poes ja need ilmuvad siia automaatselt.' : 'Add items in the shop and they will appear here automatically.',
+      goToShop: ru ? 'Перейти в магазин' : et ? 'Mine poodi' : 'Go to shop',
       completeOrder: ru ? 'Завершите заказ' : et ? 'Lõpeta tellimus' : 'Complete your order',
       backToShop: ru ? 'Назад в магазин' : et ? 'Tagasi poodi' : 'Back to shop',
       holdCart: ru ? 'Мы держим вашу корзину 30 минут бездействия.' : et ? 'Hoiame sinu ostukorvi 30 minutit tegevusetust.' : 'We hold your cart for 30 minutes of inactivity.',
