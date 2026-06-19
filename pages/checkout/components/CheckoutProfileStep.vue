@@ -1,4 +1,6 @@
 <script setup>
+import { isCheckoutProfileComplete } from '../composables/useCheckoutProgress.js'
+
 const props = defineProps({
   copy: { type: Object, required: true },
   authHeaders: { type: Object, required: true },
@@ -20,6 +22,9 @@ const form = reactive({
 })
 
 const hasPicture = computed(() => !!(props.profile?.picture))
+// Gate "Save & continue" on a fully valid form (name + valid email + photo), the same way the
+// item step gates Continue — so the user can't submit an incomplete profile.
+const isProfileComplete = computed(() => isCheckoutProfileComplete(form, hasPicture.value))
 
 function fileToDataUrl (file) {
   return new Promise((resolve, reject) => {
@@ -145,7 +150,7 @@ async function save () {
     </p>
 
     <div class="actions">
-      <button class="primary" type="button" :disabled="saving" @click="save">
+      <button class="primary" type="button" :disabled="saving || !isProfileComplete" @click="save">
         {{ saving ? copy.savingProfile : copy.saveAndContinue }} →
       </button>
     </div>

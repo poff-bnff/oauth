@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   emptyCheckoutItemForm,
   isGiftOwnerComplete,
-  isCheckoutItemComplete
+  isCheckoutItemComplete,
+  isCheckoutProfileComplete
 } from '../pages/checkout/composables/useCheckoutProgress.js'
 
 // BUG 1: the owner toggle ("For me" / "As a gift") ships with NEITHER option selected, so a
@@ -68,5 +69,33 @@ describe('isCheckoutItemComplete', () => {
     const item = { transferable: true }
     expect(isCheckoutItemComplete(item, { ...giftForm(), photo: null })).toBe(false)
     expect(isCheckoutItemComplete(item, giftForm())).toBe(true)
+  })
+})
+
+// Guest-login profile step: "Save & continue" is gated on a complete, valid profile.
+describe('isCheckoutProfileComplete', () => {
+  const profile = (over = {}) => ({
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    email: 'ada@example.com',
+    photo: { name: 'p.jpg', data: 'data:image/jpeg;base64,xxx' },
+    ...over
+  })
+
+  it('is complete with name, valid email and a freshly chosen photo', () => {
+    expect(isCheckoutProfileComplete(profile(), false)).toBe(true)
+  })
+  it('is complete when a photo is already on file (hasPicture), even without a new one', () => {
+    expect(isCheckoutProfileComplete(profile({ photo: null }), true)).toBe(true)
+  })
+  it('is incomplete without any photo and no photo on file', () => {
+    expect(isCheckoutProfileComplete(profile({ photo: null }), false)).toBe(false)
+  })
+  it('is incomplete with an invalid email', () => {
+    expect(isCheckoutProfileComplete(profile({ email: 'nope' }), false)).toBe(false)
+  })
+  it('is incomplete with a missing name', () => {
+    expect(isCheckoutProfileComplete(profile({ firstName: '  ' }), false)).toBe(false)
+    expect(isCheckoutProfileComplete(profile({ lastName: '' }), false)).toBe(false)
   })
 })

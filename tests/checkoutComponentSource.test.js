@@ -11,6 +11,7 @@ const indexSource = read('../pages/checkout/index.vue')
 const invoiceStepSource = read('../pages/checkout/components/CheckoutInvoiceStep.vue')
 const progressSource = read('../pages/checkout/composables/useCheckoutProgress.js')
 const copySource = read('../pages/checkout/composables/useCheckoutCopy.js')
+const profileStepSource = read('../pages/checkout/components/CheckoutProfileStep.vue')
 
 describe('checkout item step source', () => {
   test('uses shared checkout progress item keys', () => {
@@ -59,6 +60,17 @@ describe('BUG 4 — save-as-profile default off + native toggle', () => {
   test('the checkbox label no longer uses @click.prevent (native toggle, not a Vue round-trip)', () => {
     expect(invoiceStepSource).not.toContain('@click.prevent')
     expect(invoiceStepSource).toContain("@change=\"$emit('update:saveAsInvoiceProfile', $event.target.checked)\"")
+  })
+})
+
+// Guest-login profile step — "Save & continue" disabled until the profile form is complete/valid.
+describe('profile step — save button gated on completeness', () => {
+  test('uses the shared isCheckoutProfileComplete predicate', () => {
+    expect(progressSource).toContain('export function isCheckoutProfileComplete')
+    expect(profileStepSource).toContain('isCheckoutProfileComplete')
+  })
+  test('the save button is disabled until the form is complete', () => {
+    expect(profileStepSource).toContain(':disabled="saving || !isProfileComplete"')
   })
 })
 

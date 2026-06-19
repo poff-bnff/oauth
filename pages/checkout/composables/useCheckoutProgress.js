@@ -50,6 +50,19 @@ export function isCheckoutItemComplete (item = {}, form = {}) {
   return true
 }
 
+// The checkout profile step (shown to a user with an incomplete profile) is complete once name +
+// a valid email are filled and a photo is present — either a freshly chosen one OR one already on
+// file (hasPicture). Used to gate the "Save & continue" button, the same way the item step gates
+// Continue on isCheckoutItemComplete.
+export function isCheckoutProfileComplete (form = {}, hasPicture = false) {
+  return !!(
+    (form.firstName || '').trim() &&
+    (form.lastName || '').trim() &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((form.email || '').trim()) &&
+    (form.photo || hasPicture)
+  )
+}
+
 export function findCompatibleSavedForm (source, item, index = 0) {
   if (!source || !item) return null
   const key = itemKey(item, index)
