@@ -1746,7 +1746,7 @@ function isNumericId(value) {
   return /^\d+$/.test(String(value || ''))
 }
 
-async function getProductCategoryByAnyId(categoryId, codePrefix) {
+async function fetchProductCategoryByAnyId(categoryId, codePrefix) {
   const token = await getStrapiAdminToken()
   if (isNumericId(categoryId)) return await getStrapiCollectionItem('product-categories', categoryId)
 
@@ -1757,6 +1757,28 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
     headers: { Authorization: `Bearer ${token}` }
   })
   return Array.isArray(categories) ? categories[0] : categories
+}
+
+// STEP 4c: cache the (heavy, fully-populated) product category briefly. It is identical for every
+// user on a product page and changes rarely, and the availability/add paths re-fetch it on every
+// call — the load harness showed that fetch (not the count) dominates the per-request cost. Only the
+// slow-changing category config is cached (price/sales periods, cartLimit, pickup locations); stock
+// is NOT cached — the availability COUNT stays per-request fresh. The short TTL bounds staleness at
+// sales/price-period boundaries to a few seconds.
+const _categoryCache = new Map()
+const CATEGORY_CACHE_TTL_MS = 30_000
+
+export function __clearCheckoutCaches() {
+  _categoryCache.clear()
+}
+
+async function getProductCategoryByAnyId(categoryId, codePrefix) {
+  const key = `${categoryId ?? ''}|${codePrefix ?? ''}`
+  const hit = _categoryCache.get(key)
+  if (hit && hit.expires > Date.now()) return hit.value
+  const value = await fetchProductCategoryByAnyId(categoryId, codePrefix)
+  if (value?.id) _categoryCache.set(key, { value, expires: Date.now() + CATEGORY_CACHE_TTL_MS })
+  return value
 }
 
 // Atomically claim (reserve) products via the Strapi /products/claim endpoint
@@ -1986,12 +2008,40 @@ function checkoutCategoryCartLimit(category) {
   return category?.cartLimit != null && category.cartLimit !== '' ? Number(category.cartLimit) : null
 }
 
+// Cheap available-stock count for the availability check (STEP 4): a single Postgres COUNT via
+// Strapi's /products/count instead of hydrating up to ~50 fully-populated product rows (each of
+// which drags relation population — the N+1 storm). Same filters as getAvailableCheckoutProducts.
+// Falls back to a tiny existence fetch if /count isn't available.
+async function getAvailableCheckoutProductCount(category, excludedProductIds = []) {
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('code_null', 'false')
+  params.append('reserved_to_null', 'true')
+  params.append('owner_null', 'true')
+  params.append('product_category_null', 'false')
+  params.append('transactions_null', 'true')
+  params.append('active', 'true')
+  if (category?.id) params.append('product_category', category.id)
+  else if (category?.codePrefix) params.append('product_category.codePrefix', category.codePrefix)
+  excludedProductIds.forEach(id => params.append('id_nin', id))
+  try {
+    const count = await $fetch(`${config.strapiUrl}/products/count?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return Number(count) || 0
+  } catch (error) {
+    // Older/edge setups without /count: existence is enough for the soldOut reason.
+    const products = await getAvailableCheckoutProducts(category, 1, excludedProductIds)
+    return products.length
+  }
+}
+
 export async function getCheckoutCategoryAvailability(owner, categoryId, codePrefix) {
   const category = await getProductCategoryByAnyId(categoryId || codePrefix, codePrefix)
   if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
   const cart = owner ? await getCurrentCheckoutCart(owner) : null
   const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-  const products = await getAvailableCheckoutProducts(category, 50, existingProductIds)
+  const availableCount = await getAvailableCheckoutProductCount(category, existingProductIds)
   const cartLimit = checkoutCategoryCartLimit(category)
   const inCart = cartLimit != null ? await countCheckoutCartCategoryItems(cart, category.id) : 0
 
@@ -2000,9 +2050,9 @@ export async function getCheckoutCategoryAvailability(owner, categoryId, codePre
   const reasons = []
   if (!isCategoryOnSale(category)) reasons.push('notOnSale')
   if (getCheckoutProductCurrentPrice(category) == null) reasons.push('noPrice')
-  if (products.length <= 0) reasons.push('soldOut')
+  if (availableCount <= 0) reasons.push('soldOut')
 
-  return { availableCount: products.length, cartLimit, inCart, reasons }
+  return { availableCount, cartLimit, inCart, reasons }
 }
 
 // Per-cart async mutex — serializes add/remove/clear within one Node process so that

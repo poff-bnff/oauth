@@ -1,5 +1,5 @@
 import { ref, computed, watch, reactive } from 'vue'
-import { vi } from 'vitest'
+import { vi, beforeEach } from 'vitest'
 
 // Vue reactivity globals (Nuxt auto-imports)
 globalThis.ref = ref
@@ -28,3 +28,14 @@ globalThis.createError = ({ statusCode, statusMessage, data } = {}) => {
   err.data = data
   return err
 }
+
+// Reset module-level checkout caches (e.g. the STEP 4c product-category cache) before every test so a
+// cached value can't leak across tests that mock the same category id with different responses.
+// Dynamic import so strapi.js (which reads useRuntimeConfig at load) is only evaluated after the
+// globals above are set.
+beforeEach(async () => {
+  try {
+    const mod = await import('../server/utils/strapi.js')
+    mod.__clearCheckoutCaches?.()
+  } catch { /* test doesn't touch strapi utils */ }
+})

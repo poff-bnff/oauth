@@ -591,6 +591,16 @@ function startInvoiceForm (type, target = invoiceFor.value) {
   invoiceFormSnapshot.value = ''
 }
 
+// BUG 5 / STEP 4: after saving a billing profile, only the profile list changed — re-fetch just
+// that (same filter as the context) instead of a full refreshContext() that also re-hits the
+// Maksekeskus API for payment methods and re-loads the user + cart.
+async function refreshBusinessProfiles () {
+  try {
+    const profiles = await $fetch('/api/business-profiles', { headers: authHeaders.value })
+    if (context.value) context.value = { ...context.value, businessProfiles: Array.isArray(profiles) ? profiles : [] }
+  } catch { /* keep the existing list on failure */ }
+}
+
 async function saveInvoiceProfile (options = {}) {
   savingInvoiceProfile.value = true
   const body = invoiceProfileBody()
@@ -602,7 +612,7 @@ async function saveInvoiceProfile (options = {}) {
     })
     selectedBillingProfileId.value = created.id
     invoiceView.value = 'selected'
-    await refreshContext()
+    await refreshBusinessProfiles()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {
     error.value = err?.data?.statusMessage || err?.message || 'Could not save invoice profile'
@@ -622,7 +632,7 @@ async function saveSelectedProfile (options = {}) {
       headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
       body
     })
-    await refreshContext()
+    await refreshBusinessProfiles()
     snapshotInvoiceForm()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {

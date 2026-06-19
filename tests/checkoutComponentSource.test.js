@@ -74,6 +74,18 @@ describe('profile step — save button gated on completeness', () => {
   })
 })
 
+// STEP 4 / BUG 5 — saving an invoice profile does a light profile-only refresh, not a full
+// refreshContext() that re-hits Maksekeskus for payment methods.
+describe('STEP 4 / BUG 5 — light profile-save refresh', () => {
+  test('a refreshBusinessProfiles helper fetches only the profiles', () => {
+    expect(indexSource).toContain('async function refreshBusinessProfiles')
+    expect(indexSource).toMatch(/refreshBusinessProfiles[\s\S]*\$fetch\('\/api\/business-profiles'/)
+  })
+  test('both save paths use the light refresh (refreshBusinessProfiles appears 3×: def + 2 calls)', () => {
+    expect(indexSource.match(/refreshBusinessProfiles/g)?.length).toBeGreaterThanOrEqual(3)
+  })
+})
+
 // BUG 8 — empty cart shows a centered "Go to shop" card, with the header + session timer hidden.
 describe('BUG 8 — empty-cart state', () => {
   test('the header (title + session banner) is gated on a non-empty cart', () => {
