@@ -4,7 +4,8 @@
   this component mutates them directly (same reactive instance as the parent).
 -->
 <script setup>
-import { emptyCheckoutItemForm, itemKey } from '../composables/useCheckoutProgress.js'
+import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete } from '../composables/useCheckoutProgress.js'
+import { savePhoto, deletePhoto } from '../composables/useCheckoutPhotoStore.js'
 
 const props = defineProps({
   cart: { type: Object, required: true },
@@ -32,25 +33,8 @@ function ensureItemForm (item, index = 0) {
   return props.itemForms[key]
 }
 
-function isGiftOwnerComplete (form) {
-  return !!(
-    form.firstName.trim() &&
-    form.lastName.trim() &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim()) &&
-    form.photo
-  )
-}
-
 function isItemComplete (item, index) {
-  const form = ensureItemForm(item, index)
-  if (item.pickupLocations?.length && !form.pickupLocationId) return false
-  if (item.transferable) {
-    // Owner must be explicitly chosen ('me' or 'gift') — no default — so picking only a
-    // pickup location doesn't complete the item and auto-advance past the owner choice.
-    if (form.ownerMode !== 'me' && form.ownerMode !== 'gift') return false
-    if (form.ownerMode === 'gift') return isGiftOwnerComplete(form)
-  }
-  return true
+  return isCheckoutItemComplete(item, ensureItemForm(item, index))
 }
 
 function isItemOpen (item, index) {
@@ -160,12 +144,14 @@ async function handleOwnerPhoto (event, item, index) {
   const file = input.files?.[0]
   if (!file) return
   const form = ensureItemForm(item, index)
+  const key = itemKey(item, index)
 
   const reject = (message) => {
     form.photo = null
     form.photoName = ''
     form.photoError = message
     input.value = ''
+    deletePhoto(key) // drop any previously-stashed photo for this line
   }
 
   if (!file.type.startsWith('image/')) return reject(props.copy.photoNotImage)
@@ -180,6 +166,8 @@ async function handleOwnerPhoto (event, item, index) {
   form.photoError = ''
   form.photoName = file.name
   form.photo = { name: file.name, data: dataUrl }
+  // Stash in IndexedDB (BUG 6) so a reload / payment round-trip doesn't lose it. Best-effort.
+  await savePhoto(key, { name: file.name, data: dataUrl })
 }
 
 function validateAndContinue () {

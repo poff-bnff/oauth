@@ -27,6 +27,29 @@ export function emptyCheckoutItemForm () {
   }
 }
 
+// A gift recipient is fully specified once name + a valid email + a photo are present.
+export function isGiftOwnerComplete (form = {}) {
+  return !!(
+    (form.firstName || '').trim() &&
+    (form.lastName || '').trim() &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((form.email || '').trim()) &&
+    form.photo
+  )
+}
+
+// A cart line is "complete" (ready to continue past step 1) when its pickup location is chosen
+// (if any) and, for transferable items, the owner is EXPLICITLY chosen ('me' or 'gift' — no
+// default) with gift recipient details filled when gifting. Shared by index.vue and
+// CheckoutItemStep.vue so the two never drift out of sync.
+export function isCheckoutItemComplete (item = {}, form = {}) {
+  if (item.pickupLocations?.length && !form.pickupLocationId) return false
+  if (item.transferable) {
+    if (form.ownerMode !== 'me' && form.ownerMode !== 'gift') return false
+    if (form.ownerMode === 'gift') return isGiftOwnerComplete(form)
+  }
+  return true
+}
+
 export function findCompatibleSavedForm (source, item, index = 0) {
   if (!source || !item) return null
   const key = itemKey(item, index)

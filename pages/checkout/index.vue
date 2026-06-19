@@ -14,8 +14,10 @@ import {
   emptyCheckoutItemForm,
   findCompatibleSavedForm,
   itemKey,
+  isCheckoutItemComplete,
   matchCheckoutProgressForms
 } from './composables/useCheckoutProgress.js'
+import { getPhoto, deletePhoto, clearAllPhotos, prunePhotosExcept } from './composables/useCheckoutPhotoStore.js'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const route = useRoute()
@@ -225,31 +227,21 @@ function ensureItemForm (item, index = 0) {
   return itemForms[key]
 }
 
-function isGiftOwnerComplete (form) {
-  return !!(form.firstName.trim() && form.lastName.trim() &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim()) && form.photo)
-}
-
 function isItemComplete (item, index) {
-  const form = ensureItemForm(item, index)
-  if (item.pickupLocations?.length && !form.pickupLocationId) return false
-  if (item.transferable) {
-    // Owner must be explicitly chosen ('me' or 'gift') — no default — so picking only a
-    // pickup location doesn't mark the item complete and bounce the user to the next product.
-    if (form.ownerMode !== 'me' && form.ownerMode !== 'gift') return false
-    if (form.ownerMode === 'gift') return isGiftOwnerComplete(form)
-  }
-  return true
+  return isCheckoutItemComplete(item, ensureItemForm(item, index))
 }
 
-// ── Checkout progress persistence (sessionStorage) ─────────────────────────────
-// Survives reload, browser back/forward, and the Maksekeskus round-trip so the user does
-// not restart at step 1. The gift photo is NOT persisted (a ~5 MB base64 image blows the
-// sessionStorage quota); on restore the gift item is incomplete until re-attached, which the
-// step-1 validation already blocks from continuing past it.
+// ── Checkout progress persistence ──────────────────────────────────────────────
+// Survives reload, browser back/forward, and the Maksekeskus round-trip so the user does not
+// restart at step 1. The small form/step state lives in sessionStorage; the heavy gift photo
+// (~5 MB base64, which would blow the sessionStorage quota) lives separately in IndexedDB
+// (useCheckoutPhotoStore) and is rehydrated on restore. If a gift photo can't be recovered
+// (e.g. private mode), restoredWithoutPhoto shows the "re-attach" banner and step-1 validation
+// blocks continuing past the incomplete item.
 const restoredWithoutPhoto = ref(false)
 let progressRestored = false
 let progressSaveTimer = null
+let pendingPhotoRestore = null // promise for the async IndexedDB photo rehydration (awaited once, on first load)
 
 function saveCheckoutProgress () {
   try {
@@ -275,27 +267,31 @@ function scheduleProgressSave () {
   progressSaveTimer = setTimeout(saveCheckoutProgress, 400)
 }
 
-function restoreCheckoutProgress (signature) {
+// Returns a promise that resolves once the (async) IndexedDB photo rehydration has finished, so the
+// caller can await it before clearing `loading` and avoid a step-clamp flicker on gift checkouts.
+async function restoreCheckoutProgress (signature) {
+  let savedStep = null
+  const giftKeys = []
+  let currentKeys = null
   try {
     const raw = sessionStorage.getItem(CHECKOUT_PROGRESS_KEY)
     if (!raw) return
     const saved = JSON.parse(raw)
     const savedForms = saved.itemForms || {}
     const currentItems = cart.value.items || []
-    const currentKeys = new Set(currentItems.map((item, index) => itemKey(item, index)))
+    currentKeys = new Set(currentItems.map((item, index) => itemKey(item, index)))
     const matchedForms = matchCheckoutProgressForms(savedForms, currentItems)
     if (saved.sig !== signature && !matchedForms.length) {
       sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY)
       return
     }
 
-    let giftNeedsPhoto = false
     for (const [k, f] of matchedForms) {
       itemForms[k] = {
         pickupLocationId: '', ownerMode: '', firstName: '', lastName: '', email: '',
         sendEmail: true, ...f, photo: null, photoName: '', photoError: ''
       }
-      if (f.ownerMode === 'gift') giftNeedsPhoto = true
+      if (f.ownerMode === 'gift') giftKeys.push(k)
     }
     Object.assign(invoiceForm, saved.invoiceForm || {})
     if (saved.selectedBillingProfileId != null) selectedBillingProfileId.value = saved.selectedBillingProfileId
@@ -304,13 +300,31 @@ function restoreCheckoutProgress (signature) {
     if (saved.invoiceFor) invoiceFor.value = saved.invoiceFor
     if (typeof saved.saveAsInvoiceProfile === 'boolean') saveAsInvoiceProfile.value = saved.saveAsInvoiceProfile
     if (saved.openItemKey && currentKeys.has(saved.openItemKey)) openItemKey.value = saved.openItemKey
-    // Clamp to the highest currently-valid step (a missing gift photo keeps maxStep at 1).
-    step.value = Math.min(Number(saved.step) || step.value, maxStep.value)
-    restoredWithoutPhoto.value = giftNeedsPhoto
+    savedStep = Number(saved.step) || step.value
+    // Initial clamp: photos aren't loaded yet, so gift items are still incomplete (maxStep may be 1).
+    step.value = Math.min(savedStep, maxStep.value)
+    restoredWithoutPhoto.value = giftKeys.length > 0
   } catch { /* corrupt — ignore */ }
+
+  // Rehydrate gift photos from IndexedDB (best-effort), then re-evaluate completeness + step.
+  try {
+    if (giftKeys.length) {
+      await Promise.all(giftKeys.map(async (k) => {
+        const stored = await getPhoto(k)
+        if (stored?.data && itemForms[k]) {
+          itemForms[k].photo = { name: stored.name || '', data: stored.data }
+          itemForms[k].photoName = stored.name || ''
+        }
+      }))
+      restoredWithoutPhoto.value = giftKeys.some(k => itemForms[k] && !itemForms[k].photo)
+      if (savedStep != null) step.value = Math.min(savedStep, maxStep.value) // re-clamp now that gift items may be complete
+    }
+    if (currentKeys) prunePhotosExcept([...currentKeys]) // drop photos for lines no longer in the cart
+  } catch { /* best effort */ }
 }
 
 function clearCheckoutProgress () {
+  clearAllPhotos() // drop stashed gift photos too (order placed / progress invalidated)
   try { sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY) } catch { /* ignore */ }
 }
 
@@ -411,7 +425,9 @@ function applyCheckoutContext (nextContext, options = {}) {
   // details) so a reload / back-forward / payment return doesn't drop the user back to step 1.
   if (!progressRestored) {
     progressRestored = true
-    restoreCheckoutProgress(nextSignature)
+    // Synchronous part (forms/step) runs immediately; the returned promise resolves once the
+    // async IndexedDB photo rehydration is done. refreshContext awaits it before clearing `loading`.
+    pendingPhotoRestore = restoreCheckoutProgress(nextSignature)
   }
 
   // Cross-tab cart edits can change the cart without changing any form field.
@@ -453,6 +469,9 @@ async function refreshContext () {
       }
       const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
       applyCheckoutContext(nextContext, { openIncomplete: true })
+      // Wait for the one-time IndexedDB gift-photo rehydration so checkout renders at the correct
+      // step (not briefly clamped to 1) with the photo already restored. Best-effort; never blocks.
+      if (pendingPhotoRestore) { try { await pendingPhotoRestore } catch { /* ignore */ } finally { pendingPhotoRestore = null } }
       if (!selectedBillingProfileId.value && profiles.value.length === 1) selectedBillingProfileId.value = profiles.value[0].id
       if (transactionResult.value === 'cancelled') error.value = copy.value.paymentCancelledText
     } catch (err) {
@@ -668,6 +687,7 @@ function removeItem ({ item }) {
         keepalive: true,
         body: { componentId, productId: item.productId }
       })
+      deletePhoto(itemKey(item)) // drop the removed line's stashed gift photo
       await refreshContext()
     } catch (err) {
       error.value = err?.data?.statusMessage || err?.message || 'Could not remove item'
