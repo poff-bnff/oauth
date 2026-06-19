@@ -53,7 +53,7 @@ const invoiceView = ref('list')
 const invoiceFormType = ref('personal')
 const invoiceFor = ref('me')
 const savingInvoiceProfile = ref(false)
-const saveAsInvoiceProfile = ref(true)
+const saveAsInvoiceProfile = ref(false)
 const invoiceFormSnapshot = ref('')
 const openItemKey = ref(null)
 const itemForms = reactive({})
@@ -541,8 +541,7 @@ function selectInvoiceFor (value) {
   error.value = ''
   if (value === 'someone') {
     selectedBillingProfileId.value = null
-    startInvoiceForm('personal', 'someone') // resets saveAsInvoiceProfile → true
-    saveAsInvoiceProfile.value = false // override: someone-else profile must NOT auto-save
+    startInvoiceForm('personal', 'someone') // create flow defaults saveAsInvoiceProfile → false
     return
   }
   invoiceView.value = selectedBillingProfileId.value ? 'selected' : 'list'
@@ -554,7 +553,7 @@ function startInvoiceForm (type, target = invoiceFor.value) {
   invoiceFormType.value = type
   invoiceView.value = 'create'
   selectedBillingProfileId.value = null
-  saveAsInvoiceProfile.value = true
+  saveAsInvoiceProfile.value = false // BUG 4: new invoice profiles are NOT saved for reuse unless the user opts in
   const profile = context.value?.profile || {}
   Object.assign(invoiceForm, {
     firstName: target === 'me' ? profile.firstName || '' : '',
