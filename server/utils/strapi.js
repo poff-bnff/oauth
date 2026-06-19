@@ -2220,10 +2220,37 @@ export async function touchCheckoutCartSession(owner, locale = 'et') {
   return await serializeCheckoutCart(updated, locale || cart.locale || 'et')
 }
 
+// BUG 7: recover a cart stranded in 'checkout_started' by an ABANDONED payment — the user closed the
+// gateway / hit browser back, so Maksekeskus never called our cancel callback to revert the cart, and
+// the active-cart lookup then finds nothing (empty checkout). Flip the most recent checkout_started
+// cart back to 'active'. Strictly scoped to 'checkout_started', so a 'converted' (paid) cart is NEVER
+// resurrected; a clean gateway-cancel already reverts via the callback, so this only fires for true
+// abandonment. getCurrentCheckoutCart already expires a stranded cart that is past its timeout (and
+// releases its holds), so only a recent, recoverable cart reaches the reactivation. Returns the raw
+// reactivated cart, or null when there is nothing to recover.
+export async function reactivateStrandedCheckoutCart(userId) {
+  if (!userId) return null
+  const stranded = await getCurrentCheckoutCart({ userId }, { status: 'checkout_started' })
+  if (!stranded || !(stranded.cartProducts || []).length) return null
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus('active')
+  return await $fetch(`${config.strapiUrl}/carts/${stranded.id}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: { cart_status: activeStatus.id, cartUpdatedAt: new Date().toISOString() }
+  }).catch(() => null)
+}
+
 export async function getCheckoutContext(userId, locale = 'et') {
   if (!userId) return { code: 401, case: 'unauthorized' }
   const user = await getStrapiUser(userId)
-  const cart = await getCheckoutCart({ userId }, locale)
+  let cart = await getCheckoutCart({ userId }, locale)
+  // No active cart? A payment may have been abandoned mid-flight, stranding the cart in
+  // 'checkout_started'. Reactivate it so the user lands back on their cart, not an empty page.
+  if (!cart?.items?.length) {
+    const recovered = await reactivateStrandedCheckoutCart(userId)
+    if (recovered) cart = await serializeCheckoutCart(recovered, locale)
+  }
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_where[user]', userId)
