@@ -1819,7 +1819,9 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   const excluded = new Set(excludedProductIds.map(id => String(id)))
   const buildParams = (queryLimit) => {
     const params = new URLSearchParams()
-    params.append('_limit', String(Math.max(queryLimit, 10)))
+    // Fetch only what we need (queryLimit already includes a +5 safety buffer for the client-side
+    // excluded filter); don't pad to a floor of 10 fully-populated rows just to use 1.
+    params.append('_limit', String(queryLimit))
     params.append('code_null', 'false')
     params.append('reserved_to_null', 'true')
     params.append('owner_null', 'true')
@@ -1850,6 +1852,36 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   }
 
   return await fetchProducts(buildParams(limit + excludedProductIds.length + 5))
+}
+
+// Lightweight read of available product ids via the /products/claim PEEK mode (raw SELECT, no
+// relation population, no hold) — the heaviest call in the guest add was fetching fully-populated
+// product rows just to use the id. Returns [{ id, code }]. Throws if the peek mode isn't available.
+async function peekAvailableCheckoutProductIds(category, quantity = 1, excludedProductIds = []) {
+  const token = await getStrapiAdminToken()
+  const body = { peek: true, quantity, excludeIds: excludedProductIds }
+  if (category?.id) body.categoryId = category.id
+  else if (category?.codePrefix) body.codePrefix = category.codePrefix
+  const res = await $fetch(`${config.strapiUrl}/products/claim`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body
+  })
+  // Strict fast-path: only trust a proper peek response; anything else (old Strapi without the peek
+  // mode, or an unexpected shape) throws so the caller falls back to getAvailableCheckoutProducts.
+  if (!res || !Array.isArray(res.peeked)) throw new Error('peekUnsupported')
+  const excluded = new Set(excludedProductIds.map(id => String(id)))
+  return res.peeked.filter(p => p && !excluded.has(String(p.id))).slice(0, quantity)
+}
+
+// Guest acquire: guests don't reserve, so a light peek of available ids is enough. Falls back to the
+// heavier full-product fetch if the Strapi peek mode isn't deployed yet (deploy-order safe).
+async function acquireGuestCheckoutProducts(category, quantity, excludedProductIds) {
+  try {
+    return await peekAvailableCheckoutProductIds(category, quantity, excludedProductIds)
+  } catch {
+    return await getAvailableCheckoutProducts(category, quantity, excludedProductIds)
+  }
 }
 
 function checkoutCategoryTitle(category, locale = 'et') {
@@ -2143,7 +2175,7 @@ export async function addCheckoutCartItem(owner, body = {}) {
       acquired = await claimCheckoutProducts({ category, userId, quantity, price })
     } else {
       const existingProductIds = (cart.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-      acquired = await getAvailableCheckoutProducts(category, quantity, existingProductIds)
+      acquired = await acquireGuestCheckoutProducts(category, quantity, existingProductIds)
     }
     if (acquired.length < quantity) {
       // Release any partial hold we just took before reporting sold-out.
