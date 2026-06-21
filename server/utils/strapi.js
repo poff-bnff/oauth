@@ -954,13 +954,18 @@ export async function getStrapiToken () {
   }
 }
 
+let _adminTokenRefresh = null
 export async function getStrapiAdminToken () {
   // If a cached token exists, and it's not expired, return it
   if (STRAPI_ADMIN_TOKEN.token && STRAPI_ADMIN_TOKEN.expires > Date.now()) {
     return STRAPI_ADMIN_TOKEN.token
-  } else {
-    return await refreshStrapiAdminToken()
   }
+  // Single-flight: concurrent callers (e.g. getCheckoutContext's parallel fetches) share one
+  // /admin/login instead of each triggering their own.
+  if (!_adminTokenRefresh) {
+    _adminTokenRefresh = refreshStrapiAdminToken().finally(() => { _adminTokenRefresh = null })
+  }
+  return await _adminTokenRefresh
 }
 
 async function refreshStrapiAdminToken () {
@@ -1054,9 +1059,15 @@ export async function getStrapiFilm (id) {
   return await $fetch(`${config.strapiUrl}/films/${id}`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
+// The available payment-method catalog (banks/cards) is the same for every user and changes rarely,
+// but getCheckoutContext was calling Maksekeskus for it on every checkout load + 15s sync — the
+// slowest single call on that path. Cache it briefly.
+let _paymentMethodsCache = null // { value, expires }
+const PAYMENT_METHODS_TTL_MS = 5 * 60_000
+
 export async function getPaymentMethods (id) {
-  console.log('getPaymentMethods', id) // eslint-disable-line no-console
   if (id) await getStrapiCollectionItem('product-categories', id)
+  if (_paymentMethodsCache && _paymentMethodsCache.expires > Date.now()) return _paymentMethodsCache.value
 
   const host = String(config.maksekeskusHost || 'https://api.test.maksekeskus.ee').replace(/\/$/, '')
   const mkUrl = host.startsWith('http') ? `${host}/v1/shop/configuration` : `https://${host}/v1/shop/configuration`
@@ -1068,12 +1079,14 @@ export async function getPaymentMethods (id) {
     }
   })
 
-  return {
+  const value = {
     banklinks: normalizeMaksekeskusMethods(mkResponse.payment_methods?.banklinks || []),
     cards: normalizeMaksekeskusMethods(mkResponse.payment_methods?.cards || []),
     other: normalizeMaksekeskusMethods(mkResponse.payment_methods?.other || []),
     payLater: normalizeMaksekeskusMethods(mkResponse.payment_methods?.payLater || [])
   }
+  _paymentMethodsCache = { value, expires: Date.now() + PAYMENT_METHODS_TTL_MS }
+  return value
 }
 
 // Known display names for Maksekeskus payment method identifiers.
@@ -1771,6 +1784,7 @@ const CATEGORY_CACHE_TTL_MS = 30_000
 export function __clearCheckoutCaches() {
   _categoryCache.clear()
   _lastReservationRefresh.clear()
+  _paymentMethodsCache = null
 }
 
 async function getProductCategoryByAnyId(categoryId, codePrefix) {
@@ -2042,9 +2056,12 @@ export async function getCheckoutCategoryAvailability(owner, categoryId, codePre
   if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
   const cart = owner ? await getCurrentCheckoutCart(owner) : null
   const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-  const availableCount = await getAvailableCheckoutProductCount(category, existingProductIds)
   const cartLimit = checkoutCategoryCartLimit(category)
-  const inCart = cartLimit != null ? await countCheckoutCartCategoryItems(cart, category.id) : 0
+  // Available stock count and the in-cart count are independent — run them together.
+  const [availableCount, inCart] = await Promise.all([
+    getAvailableCheckoutProductCount(category, existingProductIds),
+    cartLimit != null ? countCheckoutCartCategoryItems(cart, category.id) : Promise.resolve(0)
+  ])
 
   // Reasons the product can't be added right now. Frontend shows the specific
   // message when there's exactly one, otherwise a generic "unavailable".
@@ -2314,24 +2331,35 @@ export async function reactivateStrandedCheckoutCart(userId) {
   }).catch(() => null)
 }
 
-export async function getCheckoutContext(userId, locale = 'et') {
-  if (!userId) return { code: 401, case: 'unauthorized' }
-  const user = await getStrapiUser(userId)
-  let cart = await getCheckoutCart({ userId }, locale)
-  // No active cart? A payment may have been abandoned mid-flight, stranding the cart in
-  // 'checkout_started'. Reactivate it so the user lands back on their cart, not an empty page.
-  if (!cart?.items?.length) {
-    const recovered = await reactivateStrandedCheckoutCart(userId)
-    if (recovered) cart = await serializeCheckoutCart(recovered, locale)
-  }
+async function getOwnBusinessProfiles(userId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_where[user]', userId)
   params.append('_where[saved_for_reuse_ne]', false)
-  const businessProfiles = await $fetch(`${config.strapiUrl}/business-profiles?${params.toString()}`, {
+  return await $fetch(`${config.strapiUrl}/business-profiles?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  const paymentMethods = await getPaymentMethods()
+}
+
+export async function getCheckoutContext(userId, locale = 'et') {
+  if (!userId) return { code: 401, case: 'unauthorized' }
+  // These four are independent — fetch them in parallel so one checkout-context load costs the
+  // slowest of (user, cart, business-profiles, the external Maksekeskus catalog), not their sum.
+  const [user, initialCart, businessProfiles, paymentMethods] = await Promise.all([
+    getStrapiUser(userId),
+    getCheckoutCart({ userId }, locale),
+    getOwnBusinessProfiles(userId),
+    getPaymentMethods()
+  ])
+
+  // No active cart? A payment may have been abandoned mid-flight, stranding the cart in
+  // 'checkout_started'. Reactivate it so the user lands back on their cart, not an empty page.
+  let cart = initialCart
+  if (!cart?.items?.length) {
+    const recovered = await reactivateStrandedCheckoutCart(userId)
+    if (recovered) cart = await serializeCheckoutCart(recovered, locale)
+  }
+
   return {
     user,
     profile: user?.user_profile || null,
@@ -2426,7 +2454,11 @@ export async function payCheckoutCart(userId, body = {}) {
   try {
     for (const cartItem of cartData.items) {
       const submitted = itemPayload.find(item => String(item.productId) === String(cartItem.productId) || Number(item.index) === Number(cartItem.index)) || {}
-      const category = await getStrapiCollectionItem('product-categories', cartItem.categoryId)
+      // Cached resolver: dedups repeated same-category fetches across a multi-item cart. Safe here —
+      // only stable config (pickup_locations, transferable) is read; the charged price comes from
+      // cartItem.price (priceInCart), not the category. Stays consistent with the add path, which
+      // also reads the cached category.
+      const category = await getProductCategoryByAnyId(cartItem.categoryId)
       const deliveryLocationId = validateCheckoutDeliveryLocation(category.pickup_locations || [], submitted.pickupLocationId)
       if (deliveryLocationId === false) throw checkoutError({ code: 400, case: submitted.pickupLocationId ? 'invalidDeliveryLocation' : 'noDeliveryLocation', productId: cartItem.productId })
 
