@@ -1770,6 +1770,7 @@ const CATEGORY_CACHE_TTL_MS = 30_000
 
 export function __clearCheckoutCaches() {
   _categoryCache.clear()
+  _lastReservationRefresh.clear()
 }
 
 async function getProductCategoryByAnyId(categoryId, codePrefix) {
@@ -2255,6 +2256,27 @@ export async function clearCheckoutCart(owner) {
   return result
 }
 
+// STEP 1: a held product's reservation_time must stay fresh while its cart is alive, otherwise the
+// atomic claim's stale-reclaim (reservation_time < now - 30 min) lets another buyer steal a product
+// that's still in a logged-in user's active cart. The cart "touch" already refreshes the cart's
+// 30-min window; this refreshes the products' window too — throttled to ~5 min (well inside the
+// 30-min window) and via a SINGLE atomic claim by productIds (re-stamps reservation_time for the
+// user's still-held products), so it's one call, not 2N per-product read+writes.
+const _lastReservationRefresh = new Map() // cartId -> ms timestamp
+const RESERVATION_REFRESH_INTERVAL_MS = 5 * 60_000
+
+async function refreshHeldCartReservations(owner, cart) {
+  if (!owner?.userId || !cart?.id) return // guests hold nothing
+  const last = _lastReservationRefresh.get(cart.id) || 0
+  if (Date.now() - last < RESERVATION_REFRESH_INTERVAL_MS) return
+  _lastReservationRefresh.set(cart.id, Date.now())
+  const rows = cart.cartProducts || []
+  const productIds = rows.map(item => item.product?.id || item.product).filter(Boolean)
+  if (!productIds.length) return
+  // Re-claim the user's own held products (the claim only touches free-or-theirs rows, so no oversell).
+  await claimCheckoutProducts({ productIds, userId: owner.userId, price: rows[0]?.priceInCart ?? null }).catch(() => null)
+}
+
 export async function touchCheckoutCartSession(owner, locale = 'et') {
   if (!owner) return { items: [], total: 0 }
   const cart = await getCurrentCheckoutCart(owner)
@@ -2267,6 +2289,7 @@ export async function touchCheckoutCartSession(owner, locale = 'et') {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: { cartUpdatedAt: now }
   })
+  await refreshHeldCartReservations(owner, updated)
   return await serializeCheckoutCart(updated, locale || cart.locale || 'et')
 }
 

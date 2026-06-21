@@ -591,6 +591,28 @@ describe('touchCheckoutCartSession', () => {
     expect(individualProductFetches).toBe(0)
     expect(individualCategoryFetches).toBe(0)
   })
+
+  it('refreshes the held reservations via an atomic claim on touch, then throttles (STEP 1)', async () => {
+    let claimBody = null
+    claimOverride = (body) => { claimBody = body; return { claimed: [{ id: PRODUCT.id, code: 'C' }] } }
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_ITEM]
+        if (url.includes('/carts/') && opts?.method === 'PUT') return CART_WITH_ITEM
+      }
+    )
+
+    await touchCheckoutCartSession({ userId: USER_ID }, 'en')
+    expect(claimBody?.productIds).toContain(PRODUCT.id) // re-stamps the user's held product
+    expect(claimBody?.userId).toBe(USER_ID)
+
+    // A second touch within the ~5-min throttle window must NOT re-claim.
+    claimBody = null
+    await touchCheckoutCartSession({ userId: USER_ID }, 'en')
+    expect(claimBody).toBeNull()
+  })
 })
 
 // ─── Pay checkout cart ────────────────────────────────────────────────────────
