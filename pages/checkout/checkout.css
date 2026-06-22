@@ -9,7 +9,6 @@
   padding: 64px;
   text-align: center;
 }
-/* Empty-cart state: centered, self-contained (no title/session bar) with a "Go to shop" CTA. */
 .cart-empty {
   max-width: 520px;
   margin: 64px auto 72px;
@@ -34,8 +33,6 @@
   font-size: 16px;
   line-height: 1.55;
 }
-/* "Go to shop" uses the shared .primary button styling (same as Continue); this only handles
-   inline-flex centering of the label + arrow and drops the link underline. */
 .cart-empty-go {
   display: inline-flex;
   align-items: center;

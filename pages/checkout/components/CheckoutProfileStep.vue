@@ -22,8 +22,6 @@ const form = reactive({
 })
 
 const hasPicture = computed(() => !!(props.profile?.picture))
-// Gate "Save & continue" on a fully valid form (name + valid email + photo), the same way the
-// item step gates Continue — so the user can't submit an incomplete profile.
 const isProfileComplete = computed(() => isCheckoutProfileComplete(form, hasPicture.value))
 
 function fileToDataUrl (file) {

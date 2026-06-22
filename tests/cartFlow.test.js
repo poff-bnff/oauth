@@ -106,7 +106,7 @@ const COMPLETE_BUYER_PROFILE = {
 // A real-looking JWT with exp set to 1 hour from NOW so the cache doesn't block re-fetching.
 // Header.Payload.Signature — only payload needs to be valid base64 JSON.
 const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })).toString('base64url')
-const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
+const ADMIN_JWT = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')}.${ADMIN_JWT_PAYLOAD}.sig`
 const ADMIN_TOKEN_RESPONSE = { data: { token: ADMIN_JWT } }
 
 // Default claim handler: a Mode-A claim (pay-time confirm by productIds) succeeds for every
@@ -605,10 +605,9 @@ describe('touchCheckoutCartSession', () => {
     )
 
     await touchCheckoutCartSession({ userId: USER_ID }, 'en')
-    expect(claimBody?.productIds).toContain(PRODUCT.id) // re-stamps the user's held product
+    expect(claimBody?.productIds).toContain(PRODUCT.id)
     expect(claimBody?.userId).toBe(USER_ID)
 
-    // A second touch within the ~5-min throttle window must NOT re-claim.
     claimBody = null
     await touchCheckoutCartSession({ userId: USER_ID }, 'en')
     expect(claimBody).toBeNull()

@@ -34,7 +34,7 @@ const PRODUCT_A = { id: 8001, code: 'GUEST-2026-0001', active: true, product_cat
 const PRODUCT_B = { id: 8002, code: 'GUEST-2026-0002', active: true, product_category: CATEGORY, reserved_to: null, sold_to: null }
 
 const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })).toString('base64url')
-const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
+const ADMIN_JWT = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')}.${ADMIN_JWT_PAYLOAD}.sig`
 
 function setupFetch(...handlers) {
   globalThis.$fetch = vi.fn().mockImplementation(async (url, opts) => {
@@ -255,7 +255,6 @@ describe('sales period gate', () => {
   })
 })
 
-// Guests acquire a product via the lightweight /products/claim PEEK (no full-product fetch).
 describe('guest product acquisition via peek', () => {
   it('uses the peek endpoint and does NOT fall back to the heavy product fetch', async () => {
     const cartWithProduct = {
@@ -284,8 +283,8 @@ describe('guest product acquisition via peek', () => {
 
     const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 200 })
 
-    expect(peekBody).toMatchObject({ peek: true, categoryId: 200 }) // peek was used
-    expect(heavyFetchCalled).toBe(false) // no fallback to the fully-populated product fetch
+    expect(peekBody).toMatchObject({ peek: true, categoryId: 200 })
+    expect(heavyFetchCalled).toBe(false)
     expect(result.items?.map(i => i.productId)).toContain(PRODUCT_A.id)
   })
 
@@ -302,7 +301,6 @@ describe('guest product acquisition via peek', () => {
       (url, opts) => {
         if (url.includes('/product-categories')) return CATEGORY
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
-        // Old Strapi: no peek branch → response without a `peeked` array → caller must fall back.
         if (url.includes('/products/claim') && opts?.method === 'POST') return { error: 'userId required' }
         if (url.includes('/products') && !url.includes('/products/')) { heavyFetchCalled = true; return [PRODUCT_A] }
         if (url.includes('/carts') && opts?.method === 'POST') return emptyCart
@@ -313,7 +311,7 @@ describe('guest product acquisition via peek', () => {
 
     const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 200 })
 
-    expect(heavyFetchCalled).toBe(true) // fell back to the full fetch
+    expect(heavyFetchCalled).toBe(true)
     expect(result.items?.map(i => i.productId)).toContain(PRODUCT_A.id)
   })
 })

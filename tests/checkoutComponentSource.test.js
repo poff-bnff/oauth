@@ -21,7 +21,6 @@ describe('checkout item step source', () => {
   })
 })
 
-// BUG 1 — explicit owner choice; completion logic is shared (not duplicated) so the two views can't drift.
 describe('BUG 1 — explicit owner choice', () => {
   test('emptyCheckoutItemForm defaults ownerMode to empty', () => {
     expect(progressSource).toMatch(/ownerMode:\s*''/)
@@ -38,7 +37,6 @@ describe('BUG 1 — explicit owner choice', () => {
   })
 })
 
-// BUG 3 — no-profile users always get the prefilled "for me" form, never the empty list.
 describe('BUG 3 — prefilled invoice form for users with no billing profiles', () => {
   test('a guard re-opens the prefilled create form for a 0-profile "me" user', () => {
     expect(indexSource).toContain('watch([step, invoiceFor, invoiceView, () => profiles.value.length, selectedBillingProfileId]')
@@ -49,13 +47,12 @@ describe('BUG 3 — prefilled invoice form for users with no billing profiles', 
   })
 })
 
-// BUG 4 — "save as profile" is off by default for new profiles and the checkbox toggles natively.
 describe('BUG 4 — save-as-profile default off + native toggle', () => {
   test('saveAsInvoiceProfile defaults to false', () => {
     expect(indexSource).toContain('const saveAsInvoiceProfile = ref(false)')
   })
   test('the create flow (startInvoiceForm) leaves it off', () => {
-    expect(indexSource).toMatch(/saveAsInvoiceProfile\.value = false[^\n]*BUG 4/)
+    expect(indexSource).toMatch(/saveAsInvoiceProfile\.value = false/)
   })
   test('the checkbox label no longer uses @click.prevent (native toggle, not a Vue round-trip)', () => {
     expect(invoiceStepSource).not.toContain('@click.prevent')
@@ -63,7 +60,6 @@ describe('BUG 4 — save-as-profile default off + native toggle', () => {
   })
 })
 
-// Guest-login profile step — "Save & continue" disabled until the profile form is complete/valid.
 describe('profile step — save button gated on completeness', () => {
   test('uses the shared isCheckoutProfileComplete predicate', () => {
     expect(progressSource).toContain('export function isCheckoutProfileComplete')
@@ -74,8 +70,6 @@ describe('profile step — save button gated on completeness', () => {
   })
 })
 
-// STEP 4 / BUG 5 — saving an invoice profile does a light profile-only refresh, not a full
-// refreshContext() that re-hits Maksekeskus for payment methods.
 describe('STEP 4 / BUG 5 — light profile-save refresh', () => {
   test('a refreshBusinessProfiles helper fetches only the profiles', () => {
     expect(indexSource).toContain('async function refreshBusinessProfiles')
@@ -86,14 +80,13 @@ describe('STEP 4 / BUG 5 — light profile-save refresh', () => {
   })
 })
 
-// BUG 8 — empty cart shows a centered "Go to shop" card, with the header + session timer hidden.
 describe('BUG 8 — empty-cart state', () => {
   test('the header (title + session banner) is gated on a non-empty cart', () => {
     expect(indexSource).toContain("v-if=\"transactionResult !== 'success' && cart.items.length\"")
   })
   test('an empty cart renders the centered card with a Go to shop CTA using the shared button style', () => {
     expect(indexSource).toContain('class="cart-empty"')
-    expect(indexSource).toContain('class="primary cart-empty-go"') // same .primary styling as Continue
+    expect(indexSource).toContain('class="primary cart-empty-go"')
     expect(indexSource).toContain('copy.goToShop')
     expect(indexSource).toContain('copy.emptyHint')
   })
@@ -103,7 +96,6 @@ describe('BUG 8 — empty-cart state', () => {
   })
 })
 
-// BUG 6 — gift photos persisted in IndexedDB; wiring present on save/restore/cleanup paths.
 describe('BUG 6 — gift photo IndexedDB wiring', () => {
   test('the item step stashes and clears photos', () => {
     expect(checkoutItemStepSource).toContain("from '../composables/useCheckoutPhotoStore.js'")

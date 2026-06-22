@@ -7,7 +7,6 @@ const config = useRuntimeConfig()
 
 const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
 
-
 const STRAPI_TOKEN = {
   token: null,
   expires: null
@@ -232,7 +231,6 @@ export async function loadFionaBadges (user) {
 
   return user
 }
-
 
 // --- ROLE VALIDATION LOGIC ---
 
@@ -960,8 +958,6 @@ export async function getStrapiAdminToken () {
   if (STRAPI_ADMIN_TOKEN.token && STRAPI_ADMIN_TOKEN.expires > Date.now()) {
     return STRAPI_ADMIN_TOKEN.token
   }
-  // Single-flight: concurrent callers (e.g. getCheckoutContext's parallel fetches) share one
-  // /admin/login instead of each triggering their own.
   if (!_adminTokenRefresh) {
     _adminTokenRefresh = refreshStrapiAdminToken().finally(() => { _adminTokenRefresh = null })
   }
@@ -1059,10 +1055,7 @@ export async function getStrapiFilm (id) {
   return await $fetch(`${config.strapiUrl}/films/${id}`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
-// The available payment-method catalog (banks/cards) is the same for every user and changes rarely,
-// but getCheckoutContext was calling Maksekeskus for it on every checkout load + 15s sync — the
-// slowest single call on that path. Cache it briefly.
-let _paymentMethodsCache = null // { value, expires }
+let _paymentMethodsCache = null
 const PAYMENT_METHODS_TTL_MS = 5 * 60_000
 
 export async function getPaymentMethods (id) {
@@ -1772,12 +1765,6 @@ async function fetchProductCategoryByAnyId(categoryId, codePrefix) {
   return Array.isArray(categories) ? categories[0] : categories
 }
 
-// STEP 4c: cache the (heavy, fully-populated) product category briefly. It is identical for every
-// user on a product page and changes rarely, and the availability/add paths re-fetch it on every
-// call — the load harness showed that fetch (not the count) dominates the per-request cost. Only the
-// slow-changing category config is cached (price/sales periods, cartLimit, pickup locations); stock
-// is NOT cached — the availability COUNT stays per-request fresh. The short TTL bounds staleness at
-// sales/price-period boundaries to a few seconds.
 const _categoryCache = new Map()
 const CATEGORY_CACHE_TTL_MS = 30_000
 
@@ -1819,8 +1806,6 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   const excluded = new Set(excludedProductIds.map(id => String(id)))
   const buildParams = (queryLimit) => {
     const params = new URLSearchParams()
-    // Fetch only what we need (queryLimit already includes a +5 safety buffer for the client-side
-    // excluded filter); don't pad to a floor of 10 fully-populated rows just to use 1.
     params.append('_limit', String(queryLimit))
     params.append('code_null', 'false')
     params.append('reserved_to_null', 'true')
@@ -1854,9 +1839,6 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   return await fetchProducts(buildParams(limit + excludedProductIds.length + 5))
 }
 
-// Lightweight read of available product ids via the /products/claim PEEK mode (raw SELECT, no
-// relation population, no hold) — the heaviest call in the guest add was fetching fully-populated
-// product rows just to use the id. Returns [{ id, code }]. Throws if the peek mode isn't available.
 async function peekAvailableCheckoutProductIds(category, quantity = 1, excludedProductIds = []) {
   const token = await getStrapiAdminToken()
   const body = { peek: true, quantity, excludeIds: excludedProductIds }
@@ -1867,15 +1849,11 @@ async function peekAvailableCheckoutProductIds(category, quantity = 1, excludedP
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body
   })
-  // Strict fast-path: only trust a proper peek response; anything else (old Strapi without the peek
-  // mode, or an unexpected shape) throws so the caller falls back to getAvailableCheckoutProducts.
   if (!res || !Array.isArray(res.peeked)) throw new Error('peekUnsupported')
   const excluded = new Set(excludedProductIds.map(id => String(id)))
   return res.peeked.filter(p => p && !excluded.has(String(p.id))).slice(0, quantity)
 }
 
-// Guest acquire: guests don't reserve, so a light peek of available ids is enough. Falls back to the
-// heavier full-product fetch if the Strapi peek mode isn't deployed yet (deploy-order safe).
 async function acquireGuestCheckoutProducts(category, quantity, excludedProductIds) {
   try {
     return await peekAvailableCheckoutProductIds(category, quantity, excludedProductIds)
@@ -2055,10 +2033,6 @@ function checkoutCategoryCartLimit(category) {
   return category?.cartLimit != null && category.cartLimit !== '' ? Number(category.cartLimit) : null
 }
 
-// Cheap available-stock count for the availability check (STEP 4): a single Postgres COUNT via
-// Strapi's /products/count instead of hydrating up to ~50 fully-populated product rows (each of
-// which drags relation population — the N+1 storm). Same filters as getAvailableCheckoutProducts.
-// Falls back to a tiny existence fetch if /count isn't available.
 async function getAvailableCheckoutProductCount(category, excludedProductIds = []) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
@@ -2077,7 +2051,6 @@ async function getAvailableCheckoutProductCount(category, excludedProductIds = [
     })
     return Number(count) || 0
   } catch (error) {
-    // Older/edge setups without /count: existence is enough for the soldOut reason.
     const products = await getAvailableCheckoutProducts(category, 1, excludedProductIds)
     return products.length
   }
@@ -2089,7 +2062,6 @@ export async function getCheckoutCategoryAvailability(owner, categoryId, codePre
   const cart = owner ? await getCurrentCheckoutCart(owner) : null
   const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
   const cartLimit = checkoutCategoryCartLimit(category)
-  // Available stock count and the in-cart count are independent — run them together.
   const [availableCount, inCart] = await Promise.all([
     getAvailableCheckoutProductCount(category, existingProductIds),
     cartLimit != null ? countCheckoutCartCategoryItems(cart, category.id) : Promise.resolve(0)
@@ -2305,24 +2277,17 @@ export async function clearCheckoutCart(owner) {
   return result
 }
 
-// STEP 1: a held product's reservation_time must stay fresh while its cart is alive, otherwise the
-// atomic claim's stale-reclaim (reservation_time < now - 30 min) lets another buyer steal a product
-// that's still in a logged-in user's active cart. The cart "touch" already refreshes the cart's
-// 30-min window; this refreshes the products' window too — throttled to ~5 min (well inside the
-// 30-min window) and via a SINGLE atomic claim by productIds (re-stamps reservation_time for the
-// user's still-held products), so it's one call, not 2N per-product read+writes.
-const _lastReservationRefresh = new Map() // cartId -> ms timestamp
+const _lastReservationRefresh = new Map()
 const RESERVATION_REFRESH_INTERVAL_MS = 5 * 60_000
 
 async function refreshHeldCartReservations(owner, cart) {
-  if (!owner?.userId || !cart?.id) return // guests hold nothing
+  if (!owner?.userId || !cart?.id) return
   const last = _lastReservationRefresh.get(cart.id) || 0
   if (Date.now() - last < RESERVATION_REFRESH_INTERVAL_MS) return
   _lastReservationRefresh.set(cart.id, Date.now())
   const rows = cart.cartProducts || []
   const productIds = rows.map(item => item.product?.id || item.product).filter(Boolean)
   if (!productIds.length) return
-  // Re-claim the user's own held products (the claim only touches free-or-theirs rows, so no oversell).
   await claimCheckoutProducts({ productIds, userId: owner.userId, price: rows[0]?.priceInCart ?? null }).catch(() => null)
 }
 
@@ -2342,14 +2307,6 @@ export async function touchCheckoutCartSession(owner, locale = 'et') {
   return await serializeCheckoutCart(updated, locale || cart.locale || 'et')
 }
 
-// BUG 7: recover a cart stranded in 'checkout_started' by an ABANDONED payment — the user closed the
-// gateway / hit browser back, so Maksekeskus never called our cancel callback to revert the cart, and
-// the active-cart lookup then finds nothing (empty checkout). Flip the most recent checkout_started
-// cart back to 'active'. Strictly scoped to 'checkout_started', so a 'converted' (paid) cart is NEVER
-// resurrected; a clean gateway-cancel already reverts via the callback, so this only fires for true
-// abandonment. getCurrentCheckoutCart already expires a stranded cart that is past its timeout (and
-// releases its holds), so only a recent, recoverable cart reaches the reactivation. Returns the raw
-// reactivated cart, or null when there is nothing to recover.
 export async function reactivateStrandedCheckoutCart(userId) {
   if (!userId) return null
   const stranded = await getCurrentCheckoutCart({ userId }, { status: 'checkout_started' })
@@ -2375,8 +2332,6 @@ async function getOwnBusinessProfiles(userId) {
 
 export async function getCheckoutContext(userId, locale = 'et') {
   if (!userId) return { code: 401, case: 'unauthorized' }
-  // These four are independent — fetch them in parallel so one checkout-context load costs the
-  // slowest of (user, cart, business-profiles, the external Maksekeskus catalog), not their sum.
   const [user, initialCart, businessProfiles, paymentMethods] = await Promise.all([
     getStrapiUser(userId),
     getCheckoutCart({ userId }, locale),
@@ -2384,8 +2339,6 @@ export async function getCheckoutContext(userId, locale = 'et') {
     getPaymentMethods()
   ])
 
-  // No active cart? A payment may have been abandoned mid-flight, stranding the cart in
-  // 'checkout_started'. Reactivate it so the user lands back on their cart, not an empty page.
   let cart = initialCart
   if (!cart?.items?.length) {
     const recovered = await reactivateStrandedCheckoutCart(userId)
@@ -2486,10 +2439,6 @@ export async function payCheckoutCart(userId, body = {}) {
   try {
     for (const cartItem of cartData.items) {
       const submitted = itemPayload.find(item => String(item.productId) === String(cartItem.productId) || Number(item.index) === Number(cartItem.index)) || {}
-      // Cached resolver: dedups repeated same-category fetches across a multi-item cart. Safe here —
-      // only stable config (pickup_locations, transferable) is read; the charged price comes from
-      // cartItem.price (priceInCart), not the category. Stays consistent with the add path, which
-      // also reads the cached category.
       const category = await getProductCategoryByAnyId(cartItem.categoryId)
       const deliveryLocationId = validateCheckoutDeliveryLocation(category.pickup_locations || [], submitted.pickupLocationId)
       if (deliveryLocationId === false) throw checkoutError({ code: 400, case: submitted.pickupLocationId ? 'invalidDeliveryLocation' : 'noDeliveryLocation', productId: cartItem.productId })
@@ -2808,8 +2757,6 @@ export async function getStrapiCollections(ids, apiEndpoint) {
   return collections
 }
 
-
-
 export async function getStrapiOrganisationByField(field, name) {
   if (!name) return null
   const token = await getStrapiToken()
@@ -2973,7 +2920,6 @@ export async function putStrapiCollection (collectionName, collectionData) {
   return result
 }
 
-
 export async function getUniqSlug(slug, contentTypeUID, field) {
   //  grep -r -P "^path: " . | grep -v _fetchdir | grep source | awk -F': ' '{print "\""$2"\","}' | uniq
   const reserverdSlugs = [
@@ -3101,15 +3047,11 @@ export async function claimGuestCart(userId, cartToken) {
       }
     })
   } else {
-    // Merge guest lines into the existing user cart by claiming a distinct available product of each
-    // line's category. Re-enforce the per-category cartLimit and the global cap here too — the
-    // front-door add checks them, and this merge is a side door that must not skip them. Seed running
-    // counts from the existing cart; drop lines that would exceed a limit (surfaced as droppedItems).
     const lineCategories = []
     for (const item of guestProducts) lineCategories.push({ item, category: await resolveCartLineCategory(item) })
 
-    const catLimit = new Map()   // categoryId -> cartLimit (null = unlimited)
-    const runningCat = new Map() // categoryId -> count already in / added to the cart
+    const catLimit = new Map()
+    const runningCat = new Map()
     for (const catId of new Set(lineCategories.map(lc => lc.category?.id).filter(Boolean))) {
       const cat = lineCategories.find(lc => lc.category?.id === catId).category
       catLimit.set(catId, checkoutCategoryCartLimit(cat))

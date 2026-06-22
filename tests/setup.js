@@ -29,10 +29,6 @@ globalThis.createError = ({ statusCode, statusMessage, data } = {}) => {
   return err
 }
 
-// Reset module-level checkout caches (e.g. the STEP 4c product-category cache) before every test so a
-// cached value can't leak across tests that mock the same category id with different responses.
-// Dynamic import so strapi.js (which reads useRuntimeConfig at load) is only evaluated after the
-// globals above are set.
 beforeEach(async () => {
   try {
     const mod = await import('../server/utils/strapi.js')

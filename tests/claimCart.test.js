@@ -13,7 +13,7 @@ const USER_ID = 42
 const GUEST_TOKEN = 'claim-test-token'
 
 const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })).toString('base64url')
-const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
+const ADMIN_JWT = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')}.${ADMIN_JWT_PAYLOAD}.sig`
 
 const CATEGORY = {
   id: 300,
@@ -244,8 +244,6 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
   })
 
   it('drops a guest line on merge when it would exceed the category cartLimit', async () => {
-    // User cart already holds 1 of a cartLimit=1 category; the guest line of the same category must
-    // be dropped on merge (the side door must re-enforce the front-door limit), without even claiming.
     const LIMITED = { ...CATEGORY, cartLimit: 1 }
     const guestProductLimited = { ...PRODUCT, id: 9050, product_category: LIMITED }
     const guestCartLimited = { ...GUEST_CART, cartProducts: [{ id: 850, product: guestProductLimited, priceInCart: 50, timeToCart: NOW }] }
@@ -268,7 +266,7 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
     const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
     expect(result.claimed).toBe(true)
     expect(result.droppedItems).toContainEqual({ productId: 9050, reason: 'cartLimit' })
-    expect(claimCalled).toBe(false)      // limit checked BEFORE claiming
-    expect(userCartPutCalled).toBe(false) // nothing added → no cart write
+    expect(claimCalled).toBe(false)
+    expect(userCartPutCalled).toBe(false)
   })
 })

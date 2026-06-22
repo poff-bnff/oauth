@@ -84,11 +84,9 @@ function ownerSummary (item, index) {
   if (form.ownerMode === 'gift') {
     return isGiftOwnerComplete(form) ? `Gift to ${form.firstName.trim()}` : 'recipient details needed'
   }
-  return props.copy.chooseOwner // owner not chosen yet
+  return props.copy.chooseOwner
 }
 
-// True while a transferable item still needs the owner sorted out: nothing picked, or
-// "gift" picked but recipient details incomplete. Drives the "missing" highlight.
 function ownerNeedsChoice (item, index) {
   if (!item.transferable) return false
   const form = ensureItemForm(item, index)
@@ -151,7 +149,7 @@ async function handleOwnerPhoto (event, item, index) {
     form.photoName = ''
     form.photoError = message
     input.value = ''
-    deletePhoto(key) // drop any previously-stashed photo for this line
+    deletePhoto(key)
   }
 
   if (!file.type.startsWith('image/')) return reject(props.copy.photoNotImage)
@@ -166,7 +164,6 @@ async function handleOwnerPhoto (event, item, index) {
   form.photoError = ''
   form.photoName = file.name
   form.photo = { name: file.name, data: dataUrl }
-  // Stash in IndexedDB (BUG 6) so a reload / payment round-trip doesn't lose it. Best-effort.
   await savePhoto(key, { name: file.name, data: dataUrl })
 }
 

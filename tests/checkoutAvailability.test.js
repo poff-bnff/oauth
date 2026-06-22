@@ -1,15 +1,11 @@
-/**
- * STEP 4 (perf) — getCheckoutCategoryAvailability uses a cheap /products/count instead of
- * hydrating up to ~50 product rows, while keeping the same response shape.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { getCheckoutCategoryAvailability } from '../server/utils/strapi.js'
 
 const NOW = '2026-06-02T12:00:00.000Z'
 const PERIOD = { startDateTime: '2026-01-01T00:00:00.000Z', endDateTime: '2027-01-01T00:00:00.000Z' }
 
-const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })).toString('base64url')
-const ADMIN_TOKEN_RESPONSE = { data: { token: `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig` } }
+const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url')
+const ADMIN_TOKEN_RESPONSE = { data: { token: `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })}.notarealsignature` } }
 
 const CATEGORY = {
   id: 109,
@@ -32,7 +28,7 @@ function setup ({ count }) {
 }
 
 beforeEach(() => {
-  vi.setSystemTime(new Date(NOW)) // keep the category's sales/price period active
+  vi.setSystemTime(new Date(NOW))
   globalThis.$fetch = vi.fn()
 })
 afterEach(() => { vi.useRealTimers() })
@@ -44,7 +40,6 @@ describe('getCheckoutCategoryAvailability (STEP 4)', () => {
 
     expect(result).toEqual({ availableCount: 5, cartLimit: null, inCart: 0, reasons: [] })
     expect(calls.some(u => u.includes('/products/count'))).toBe(true)
-    // It must NOT hydrate a product list (the old up-to-50-row fetch).
     expect(calls.some(u => /\/products\?/.test(u) && u.includes('_limit'))).toBe(false)
   })
 
@@ -61,7 +56,7 @@ describe('getCheckoutCategoryAvailability (STEP 4)', () => {
     await getCheckoutCategoryAvailability(null, 109)
     await getCheckoutCategoryAvailability(null, 109)
 
-    expect(calls.filter(u => u.includes('/product-categories/')).length).toBe(1) // fetched once, then cached
-    expect(calls.filter(u => u.includes('/products/count')).length).toBe(2)      // re-counted every call
+    expect(calls.filter(u => u.includes('/product-categories/')).length).toBe(1)
+    expect(calls.filter(u => u.includes('/products/count')).length).toBe(2)
   })
 })

@@ -1,4 +1,4 @@
-import 'fake-indexeddb/auto' // registers a global indexedDB before the store is used
+import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   savePhoto,
@@ -7,9 +7,6 @@ import {
   clearAllPhotos,
   prunePhotosExcept
 } from '../pages/checkout/composables/useCheckoutPhotoStore.js'
-
-// BUG 6: gift photos are stashed in IndexedDB (client-only, no server/DB load) so they survive a
-// page reload / the payment round-trip. All ops are best-effort and must never throw.
 
 const photo = (n) => ({ name: `${n}.jpg`, data: `data:image/jpeg;base64,${n}` })
 

@@ -16,7 +16,7 @@ export function cartSignature (items = []) {
 export function emptyCheckoutItemForm () {
   return {
     pickupLocationId: '',
-    ownerMode: '', // '' = not yet chosen; for transferable items the user must explicitly pick 'me' or 'gift'
+    ownerMode: '',
     firstName: '',
     lastName: '',
     email: '',
@@ -27,7 +27,6 @@ export function emptyCheckoutItemForm () {
   }
 }
 
-// A gift recipient is fully specified once name + a valid email + a photo are present.
 export function isGiftOwnerComplete (form = {}) {
   return !!(
     (form.firstName || '').trim() &&
@@ -37,10 +36,6 @@ export function isGiftOwnerComplete (form = {}) {
   )
 }
 
-// A cart line is "complete" (ready to continue past step 1) when its pickup location is chosen
-// (if any) and, for transferable items, the owner is EXPLICITLY chosen ('me' or 'gift' — no
-// default) with gift recipient details filled when gifting. Shared by index.vue and
-// CheckoutItemStep.vue so the two never drift out of sync.
 export function isCheckoutItemComplete (item = {}, form = {}) {
   if (item.pickupLocations?.length && !form.pickupLocationId) return false
   if (item.transferable) {
@@ -50,10 +45,6 @@ export function isCheckoutItemComplete (item = {}, form = {}) {
   return true
 }
 
-// The checkout profile step (shown to a user with an incomplete profile) is complete once name +
-// a valid email are filled and a photo is present — either a freshly chosen one OR one already on
-// file (hasPicture). Used to gate the "Save & continue" button, the same way the item step gates
-// Continue on isCheckoutItemComplete.
 export function isCheckoutProfileComplete (form = {}, hasPicture = false) {
   return !!(
     (form.firstName || '').trim() &&

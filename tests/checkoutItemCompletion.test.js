@@ -6,10 +6,6 @@ import {
   isCheckoutProfileComplete
 } from '../pages/checkout/composables/useCheckoutProgress.js'
 
-// BUG 1: the owner toggle ("For me" / "As a gift") ships with NEITHER option selected, so a
-// transferable item is incomplete until the user explicitly picks one — choosing only a pickup
-// location must not complete it and auto-advance past the owner choice.
-
 const giftForm = (over = {}) => ({
   ...emptyCheckoutItemForm(),
   ownerMode: 'gift',
@@ -54,13 +50,13 @@ describe('isCheckoutItemComplete', () => {
 
   it('a transferable item is INCOMPLETE until the owner is explicitly chosen (BUG 1)', () => {
     const item = { transferable: true }
-    expect(isCheckoutItemComplete(item, emptyCheckoutItemForm())).toBe(false) // ownerMode === ''
+    expect(isCheckoutItemComplete(item, emptyCheckoutItemForm())).toBe(false)
     expect(isCheckoutItemComplete(item, { ...emptyCheckoutItemForm(), ownerMode: 'me' })).toBe(true)
   })
 
   it('choosing only the pickup location does not complete a transferable item (BUG 1 core)', () => {
     const item = { transferable: true, pickupLocations: [{ id: 1 }] }
-    const onlyPickup = { ...emptyCheckoutItemForm(), pickupLocationId: 1 } // ownerMode still ''
+    const onlyPickup = { ...emptyCheckoutItemForm(), pickupLocationId: 1 }
     expect(isCheckoutItemComplete(item, onlyPickup)).toBe(false)
     expect(isCheckoutItemComplete(item, { ...onlyPickup, ownerMode: 'me' })).toBe(true)
   })
@@ -72,7 +68,6 @@ describe('isCheckoutItemComplete', () => {
   })
 })
 
-// Guest-login profile step: "Save & continue" is gated on a complete, valid profile.
 describe('isCheckoutProfileComplete', () => {
   const profile = (over = {}) => ({
     firstName: 'Ada',

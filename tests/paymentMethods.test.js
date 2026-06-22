@@ -1,7 +1,3 @@
-/**
- * STEP 4d — the payment-method catalog is cached so getCheckoutContext doesn't hit the external
- * Maksekeskus API on every checkout load / 15s sync. (Cache is reset between tests in setup.js.)
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getPaymentMethods } from '../server/utils/strapi.js'
 
@@ -25,7 +21,7 @@ describe('getPaymentMethods caching', () => {
     const first = await getPaymentMethods()
     const second = await getPaymentMethods()
 
-    expect(mkCalls).toBe(1) // external API hit once, not per call
+    expect(mkCalls).toBe(1)
     expect(second).toEqual(first)
     expect(first.banklinks.length).toBe(1)
   })

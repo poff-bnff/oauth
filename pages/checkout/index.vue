@@ -231,17 +231,10 @@ function isItemComplete (item, index) {
   return isCheckoutItemComplete(item, ensureItemForm(item, index))
 }
 
-// ── Checkout progress persistence ──────────────────────────────────────────────
-// Survives reload, browser back/forward, and the Maksekeskus round-trip so the user does not
-// restart at step 1. The small form/step state lives in sessionStorage; the heavy gift photo
-// (~5 MB base64, which would blow the sessionStorage quota) lives separately in IndexedDB
-// (useCheckoutPhotoStore) and is rehydrated on restore. If a gift photo can't be recovered
-// (e.g. private mode), restoredWithoutPhoto shows the "re-attach" banner and step-1 validation
-// blocks continuing past the incomplete item.
 const restoredWithoutPhoto = ref(false)
 let progressRestored = false
 let progressSaveTimer = null
-let pendingPhotoRestore = null // promise for the async IndexedDB photo rehydration (awaited once, on first load)
+let pendingPhotoRestore = null
 
 function saveCheckoutProgress () {
   try {
@@ -267,8 +260,6 @@ function scheduleProgressSave () {
   progressSaveTimer = setTimeout(saveCheckoutProgress, 400)
 }
 
-// Returns a promise that resolves once the (async) IndexedDB photo rehydration has finished, so the
-// caller can await it before clearing `loading` and avoid a step-clamp flicker on gift checkouts.
 async function restoreCheckoutProgress (signature) {
   let savedStep = null
   const giftKeys = []
@@ -301,12 +292,10 @@ async function restoreCheckoutProgress (signature) {
     if (typeof saved.saveAsInvoiceProfile === 'boolean') saveAsInvoiceProfile.value = saved.saveAsInvoiceProfile
     if (saved.openItemKey && currentKeys.has(saved.openItemKey)) openItemKey.value = saved.openItemKey
     savedStep = Number(saved.step) || step.value
-    // Initial clamp: photos aren't loaded yet, so gift items are still incomplete (maxStep may be 1).
     step.value = Math.min(savedStep, maxStep.value)
     restoredWithoutPhoto.value = giftKeys.length > 0
   } catch { /* corrupt — ignore */ }
 
-  // Rehydrate gift photos from IndexedDB (best-effort), then re-evaluate completeness + step.
   try {
     if (giftKeys.length) {
       await Promise.all(giftKeys.map(async (k) => {
@@ -317,14 +306,14 @@ async function restoreCheckoutProgress (signature) {
         }
       }))
       restoredWithoutPhoto.value = giftKeys.some(k => itemForms[k] && !itemForms[k].photo)
-      if (savedStep != null) step.value = Math.min(savedStep, maxStep.value) // re-clamp now that gift items may be complete
+      if (savedStep != null) step.value = Math.min(savedStep, maxStep.value)
     }
-    if (currentKeys) prunePhotosExcept([...currentKeys]) // drop photos for lines no longer in the cart
+    if (currentKeys) prunePhotosExcept([...currentKeys])
   } catch { /* best effort */ }
 }
 
 function clearCheckoutProgress () {
-  clearAllPhotos() // drop stashed gift photos too (order placed / progress invalidated)
+  clearAllPhotos()
   try { sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY) } catch { /* ignore */ }
 }
 
@@ -425,8 +414,6 @@ function applyCheckoutContext (nextContext, options = {}) {
   // details) so a reload / back-forward / payment return doesn't drop the user back to step 1.
   if (!progressRestored) {
     progressRestored = true
-    // Synchronous part (forms/step) runs immediately; the returned promise resolves once the
-    // async IndexedDB photo rehydration is done. refreshContext awaits it before clearing `loading`.
     pendingPhotoRestore = restoreCheckoutProgress(nextSignature)
   }
 
@@ -469,8 +456,6 @@ async function refreshContext () {
       }
       const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
       applyCheckoutContext(nextContext, { openIncomplete: true })
-      // Wait for the one-time IndexedDB gift-photo rehydration so checkout renders at the correct
-      // step (not briefly clamped to 1) with the photo already restored. Best-effort; never blocks.
       if (pendingPhotoRestore) { try { await pendingPhotoRestore } catch { /* ignore */ } finally { pendingPhotoRestore = null } }
       if (!selectedBillingProfileId.value && profiles.value.length === 1) selectedBillingProfileId.value = profiles.value[0].id
       if (transactionResult.value === 'cancelled') error.value = copy.value.paymentCancelledText
@@ -560,7 +545,7 @@ function selectInvoiceFor (value) {
   error.value = ''
   if (value === 'someone') {
     selectedBillingProfileId.value = null
-    startInvoiceForm('personal', 'someone') // create flow defaults saveAsInvoiceProfile → false
+    startInvoiceForm('personal', 'someone')
     return
   }
   invoiceView.value = selectedBillingProfileId.value ? 'selected' : 'list'
@@ -572,7 +557,7 @@ function startInvoiceForm (type, target = invoiceFor.value) {
   invoiceFormType.value = type
   invoiceView.value = 'create'
   selectedBillingProfileId.value = null
-  saveAsInvoiceProfile.value = false // BUG 4: new invoice profiles are NOT saved for reuse unless the user opts in
+  saveAsInvoiceProfile.value = false
   const profile = context.value?.profile || {}
   Object.assign(invoiceForm, {
     firstName: target === 'me' ? profile.firstName || '' : '',
@@ -591,9 +576,6 @@ function startInvoiceForm (type, target = invoiceFor.value) {
   invoiceFormSnapshot.value = ''
 }
 
-// BUG 5 / STEP 4: after saving a billing profile, only the profile list changed — re-fetch just
-// that (same filter as the context) instead of a full refreshContext() that also re-hits the
-// Maksekeskus API for payment methods and re-loads the user + cart.
 async function refreshBusinessProfiles () {
   try {
     const profiles = await $fetch('/api/business-profiles', { headers: authHeaders.value })
@@ -643,8 +625,6 @@ async function saveSelectedProfile (options = {}) {
 }
 
 function returnToInvoiceList () {
-  // No saved profiles → there is no list to return to. "Back" from the form leaves to the items
-  // step instead of showing the empty "0 profiles" list (which the BUG 3 guard would replace anyway).
   if (!profiles.value.length) { step.value = 1; return }
   invoiceView.value = 'list'
   selectedBillingProfileId.value = null
@@ -697,7 +677,7 @@ function removeItem ({ item }) {
         keepalive: true,
         body: { componentId, productId: item.productId }
       })
-      deletePhoto(itemKey(item)) // drop the removed line's stashed gift photo
+      deletePhoto(itemKey(item))
       await refreshContext()
     } catch (err) {
       error.value = err?.data?.statusMessage || err?.message || 'Could not remove item'
@@ -790,11 +770,6 @@ onBeforeUnmount(() => {
 
 const completedItemCount = computed(() => (cart.value.items || []).filter((item, i) => isItemComplete(item, i)).length)
 watch(completedItemCount, openNextIncompleteItem)
-// BUG 3: a user with no saved billing profiles should ALWAYS see the pre-filled personal "for me"
-// form — never the empty "0 saved profiles" list. This guard re-opens the create form (pre-filled
-// from the user's profile) whenever the invoice step would otherwise fall back to the list for a
-// 0-profile "me" user, covering initial entry and the me/someone toggle. Users with ≥1 profile,
-// mid-edit users, and "someone else" are untouched.
 watch([step, invoiceFor, invoiceView, () => profiles.value.length, selectedBillingProfileId], () => {
   if (step.value === 2 && invoiceFor.value === 'me' && profiles.value.length === 0 &&
       invoiceView.value === 'list' && !selectedBillingProfileId.value) {
@@ -864,7 +839,6 @@ watch(sessionRemainingSeconds, (seconds) => {
       @keydown="handleCheckoutActivity"
     >
       <a class="back-shop" :href="shopBackUrl">&larr; {{ copy.backToShop }}</a>
-      <!-- Header (title + session timer + notices) only while there's a cart; an empty cart gets the centered empty state below. -->
       <template v-if="transactionResult !== 'success' && cart.items.length">
         <p class="page-kicker">
           Checkout
