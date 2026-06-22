@@ -16,7 +16,7 @@ const GUEST_TOKEN = 'conc-test-token'
 const ADMIN_JWT_PAYLOAD = Buffer.from(
   JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })
 ).toString('base64url')
-const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
+const ADMIN_JWT = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')}.${ADMIN_JWT_PAYLOAD}.sig`
 
 const ACTIVE_PRICE_PERIOD = {
   startDateTime: '2026-01-01T00:00:00.000Z',

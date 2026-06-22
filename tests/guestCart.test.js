@@ -34,7 +34,7 @@ const PRODUCT_A = { id: 8001, code: 'GUEST-2026-0001', active: true, product_cat
 const PRODUCT_B = { id: 8002, code: 'GUEST-2026-0002', active: true, product_category: CATEGORY, reserved_to: null, sold_to: null }
 
 const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })).toString('base64url')
-const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
+const ADMIN_JWT = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')}.${ADMIN_JWT_PAYLOAD}.sig`
 
 function setupFetch(...handlers) {
   globalThis.$fetch = vi.fn().mockImplementation(async (url, opts) => {
@@ -252,5 +252,66 @@ describe('sales period gate', () => {
     setupFetch(adminTokenHandler, (url) => { if (url.includes('/product-categories')) return expired })
     const result = await addCheckoutCartItem(null, { categoryId: 200 })
     expect(result).toMatchObject({ code: 400, case: 'notOnSale' })
+  })
+})
+
+describe('guest product acquisition via peek', () => {
+  it('uses the peek endpoint and does NOT fall back to the heavy product fetch', async () => {
+    const cartWithProduct = {
+      id: 520, cartProducts: [{ id: 920, product: PRODUCT_A, priceInCart: 75, timeToCart: NOW }],
+      cartUpdatedAt: NOW, cartTimeout: null, cartToken: GUEST_TOKEN,
+      cart_status: { id: 1, status: 'active' }, users_permissions_user: null, locale: 'et'
+    }
+    const emptyCart = { ...cartWithProduct, cartProducts: [] }
+    let peekBody = null
+    let heavyFetchCalled = false
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/product-categories')) return CATEGORY
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/products/claim') && opts?.method === 'POST') {
+          peekBody = opts.body
+          return { mode: 'peek', got: 1, peeked: [{ id: PRODUCT_A.id, code: PRODUCT_A.code }] }
+        }
+        if (url.includes('/products') && !url.includes('/products/')) { heavyFetchCalled = true; return [PRODUCT_A] }
+        if (url.includes('/carts') && opts?.method === 'POST') return emptyCart
+        if (url.includes('/carts/') && opts?.method === 'PUT') return cartWithProduct
+        if (url.includes('/carts')) return []
+      }
+    )
+
+    const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 200 })
+
+    expect(peekBody).toMatchObject({ peek: true, categoryId: 200 })
+    expect(heavyFetchCalled).toBe(false)
+    expect(result.items?.map(i => i.productId)).toContain(PRODUCT_A.id)
+  })
+
+  it('falls back to the full product fetch when the peek mode is unavailable (old Strapi)', async () => {
+    const cartWithProduct = {
+      id: 521, cartProducts: [{ id: 921, product: PRODUCT_A, priceInCart: 75, timeToCart: NOW }],
+      cartUpdatedAt: NOW, cartTimeout: null, cartToken: GUEST_TOKEN,
+      cart_status: { id: 1, status: 'active' }, users_permissions_user: null, locale: 'et'
+    }
+    const emptyCart = { ...cartWithProduct, cartProducts: [] }
+    let heavyFetchCalled = false
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/product-categories')) return CATEGORY
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/products/claim') && opts?.method === 'POST') return { error: 'userId required' }
+        if (url.includes('/products') && !url.includes('/products/')) { heavyFetchCalled = true; return [PRODUCT_A] }
+        if (url.includes('/carts') && opts?.method === 'POST') return emptyCart
+        if (url.includes('/carts/') && opts?.method === 'PUT') return cartWithProduct
+        if (url.includes('/carts')) return []
+      }
+    )
+
+    const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 200 })
+
+    expect(heavyFetchCalled).toBe(true)
+    expect(result.items?.map(i => i.productId)).toContain(PRODUCT_A.id)
   })
 })

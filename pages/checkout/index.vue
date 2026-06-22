@@ -14,8 +14,10 @@ import {
   emptyCheckoutItemForm,
   findCompatibleSavedForm,
   itemKey,
+  isCheckoutItemComplete,
   matchCheckoutProgressForms
 } from './composables/useCheckoutProgress.js'
+import { getPhoto, deletePhoto, clearAllPhotos, prunePhotosExcept } from './composables/useCheckoutPhotoStore.js'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const route = useRoute()
@@ -53,7 +55,7 @@ const invoiceView = ref('list')
 const invoiceFormType = ref('personal')
 const invoiceFor = ref('me')
 const savingInvoiceProfile = ref(false)
-const saveAsInvoiceProfile = ref(true)
+const saveAsInvoiceProfile = ref(false)
 const invoiceFormSnapshot = ref('')
 const openItemKey = ref(null)
 const itemForms = reactive({})
@@ -225,26 +227,14 @@ function ensureItemForm (item, index = 0) {
   return itemForms[key]
 }
 
-function isGiftOwnerComplete (form) {
-  return !!(form.firstName.trim() && form.lastName.trim() &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim()) && form.photo)
-}
-
 function isItemComplete (item, index) {
-  const form = ensureItemForm(item, index)
-  if (item.pickupLocations?.length && !form.pickupLocationId) return false
-  if (item.transferable && form.ownerMode === 'gift') return isGiftOwnerComplete(form)
-  return true
+  return isCheckoutItemComplete(item, ensureItemForm(item, index))
 }
 
-// ── Checkout progress persistence (sessionStorage) ─────────────────────────────
-// Survives reload, browser back/forward, and the Maksekeskus round-trip so the user does
-// not restart at step 1. The gift photo is NOT persisted (a ~5 MB base64 image blows the
-// sessionStorage quota); on restore the gift item is incomplete until re-attached, which the
-// step-1 validation already blocks from continuing past it.
 const restoredWithoutPhoto = ref(false)
 let progressRestored = false
 let progressSaveTimer = null
+let pendingPhotoRestore = null
 
 function saveCheckoutProgress () {
   try {
@@ -270,27 +260,29 @@ function scheduleProgressSave () {
   progressSaveTimer = setTimeout(saveCheckoutProgress, 400)
 }
 
-function restoreCheckoutProgress (signature) {
+async function restoreCheckoutProgress (signature) {
+  let savedStep = null
+  const giftKeys = []
+  let currentKeys = null
   try {
     const raw = sessionStorage.getItem(CHECKOUT_PROGRESS_KEY)
     if (!raw) return
     const saved = JSON.parse(raw)
     const savedForms = saved.itemForms || {}
     const currentItems = cart.value.items || []
-    const currentKeys = new Set(currentItems.map((item, index) => itemKey(item, index)))
+    currentKeys = new Set(currentItems.map((item, index) => itemKey(item, index)))
     const matchedForms = matchCheckoutProgressForms(savedForms, currentItems)
     if (saved.sig !== signature && !matchedForms.length) {
       sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY)
       return
     }
 
-    let giftNeedsPhoto = false
     for (const [k, f] of matchedForms) {
       itemForms[k] = {
-        pickupLocationId: '', ownerMode: 'me', firstName: '', lastName: '', email: '',
+        pickupLocationId: '', ownerMode: '', firstName: '', lastName: '', email: '',
         sendEmail: true, ...f, photo: null, photoName: '', photoError: ''
       }
-      if (f.ownerMode === 'gift') giftNeedsPhoto = true
+      if (f.ownerMode === 'gift') giftKeys.push(k)
     }
     Object.assign(invoiceForm, saved.invoiceForm || {})
     if (saved.selectedBillingProfileId != null) selectedBillingProfileId.value = saved.selectedBillingProfileId
@@ -299,13 +291,29 @@ function restoreCheckoutProgress (signature) {
     if (saved.invoiceFor) invoiceFor.value = saved.invoiceFor
     if (typeof saved.saveAsInvoiceProfile === 'boolean') saveAsInvoiceProfile.value = saved.saveAsInvoiceProfile
     if (saved.openItemKey && currentKeys.has(saved.openItemKey)) openItemKey.value = saved.openItemKey
-    // Clamp to the highest currently-valid step (a missing gift photo keeps maxStep at 1).
-    step.value = Math.min(Number(saved.step) || step.value, maxStep.value)
-    restoredWithoutPhoto.value = giftNeedsPhoto
+    savedStep = Number(saved.step) || step.value
+    step.value = Math.min(savedStep, maxStep.value)
+    restoredWithoutPhoto.value = giftKeys.length > 0
   } catch { /* corrupt — ignore */ }
+
+  try {
+    if (giftKeys.length) {
+      await Promise.all(giftKeys.map(async (k) => {
+        const stored = await getPhoto(k)
+        if (stored?.data && itemForms[k]) {
+          itemForms[k].photo = { name: stored.name || '', data: stored.data }
+          itemForms[k].photoName = stored.name || ''
+        }
+      }))
+      restoredWithoutPhoto.value = giftKeys.some(k => itemForms[k] && !itemForms[k].photo)
+      if (savedStep != null) step.value = Math.min(savedStep, maxStep.value)
+    }
+    if (currentKeys) prunePhotosExcept([...currentKeys])
+  } catch { /* best effort */ }
 }
 
 function clearCheckoutProgress () {
+  clearAllPhotos()
   try { sessionStorage.removeItem(CHECKOUT_PROGRESS_KEY) } catch { /* ignore */ }
 }
 
@@ -406,7 +414,7 @@ function applyCheckoutContext (nextContext, options = {}) {
   // details) so a reload / back-forward / payment return doesn't drop the user back to step 1.
   if (!progressRestored) {
     progressRestored = true
-    restoreCheckoutProgress(nextSignature)
+    pendingPhotoRestore = restoreCheckoutProgress(nextSignature)
   }
 
   // Cross-tab cart edits can change the cart without changing any form field.
@@ -448,6 +456,7 @@ async function refreshContext () {
       }
       const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
       applyCheckoutContext(nextContext, { openIncomplete: true })
+      if (pendingPhotoRestore) { try { await pendingPhotoRestore } catch { /* ignore */ } finally { pendingPhotoRestore = null } }
       if (!selectedBillingProfileId.value && profiles.value.length === 1) selectedBillingProfileId.value = profiles.value[0].id
       if (transactionResult.value === 'cancelled') error.value = copy.value.paymentCancelledText
     } catch (err) {
@@ -536,8 +545,7 @@ function selectInvoiceFor (value) {
   error.value = ''
   if (value === 'someone') {
     selectedBillingProfileId.value = null
-    startInvoiceForm('personal', 'someone') // resets saveAsInvoiceProfile → true
-    saveAsInvoiceProfile.value = false // override: someone-else profile must NOT auto-save
+    startInvoiceForm('personal', 'someone')
     return
   }
   invoiceView.value = selectedBillingProfileId.value ? 'selected' : 'list'
@@ -549,7 +557,7 @@ function startInvoiceForm (type, target = invoiceFor.value) {
   invoiceFormType.value = type
   invoiceView.value = 'create'
   selectedBillingProfileId.value = null
-  saveAsInvoiceProfile.value = true
+  saveAsInvoiceProfile.value = false
   const profile = context.value?.profile || {}
   Object.assign(invoiceForm, {
     firstName: target === 'me' ? profile.firstName || '' : '',
@@ -568,6 +576,13 @@ function startInvoiceForm (type, target = invoiceFor.value) {
   invoiceFormSnapshot.value = ''
 }
 
+async function refreshBusinessProfiles () {
+  try {
+    const profiles = await $fetch('/api/business-profiles', { headers: authHeaders.value })
+    if (context.value) context.value = { ...context.value, businessProfiles: Array.isArray(profiles) ? profiles : [] }
+  } catch { /* keep the existing list on failure */ }
+}
+
 async function saveInvoiceProfile (options = {}) {
   savingInvoiceProfile.value = true
   const body = invoiceProfileBody()
@@ -579,7 +594,7 @@ async function saveInvoiceProfile (options = {}) {
     })
     selectedBillingProfileId.value = created.id
     invoiceView.value = 'selected'
-    await refreshContext()
+    await refreshBusinessProfiles()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {
     error.value = err?.data?.statusMessage || err?.message || 'Could not save invoice profile'
@@ -599,7 +614,7 @@ async function saveSelectedProfile (options = {}) {
       headers: { ...authHeaders.value, 'Content-Type': 'application/json' },
       body
     })
-    await refreshContext()
+    await refreshBusinessProfiles()
     snapshotInvoiceForm()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {
@@ -610,6 +625,7 @@ async function saveSelectedProfile (options = {}) {
 }
 
 function returnToInvoiceList () {
+  if (!profiles.value.length) { step.value = 1; return }
   invoiceView.value = 'list'
   selectedBillingProfileId.value = null
   invoiceFor.value = 'me'
@@ -661,6 +677,7 @@ function removeItem ({ item }) {
         keepalive: true,
         body: { componentId, productId: item.productId }
       })
+      deletePhoto(itemKey(item))
       await refreshContext()
     } catch (err) {
       error.value = err?.data?.statusMessage || err?.message || 'Could not remove item'
@@ -753,6 +770,12 @@ onBeforeUnmount(() => {
 
 const completedItemCount = computed(() => (cart.value.items || []).filter((item, i) => isItemComplete(item, i)).length)
 watch(completedItemCount, openNextIncompleteItem)
+watch([step, invoiceFor, invoiceView, () => profiles.value.length, selectedBillingProfileId], () => {
+  if (step.value === 2 && invoiceFor.value === 'me' && profiles.value.length === 0 &&
+      invoiceView.value === 'list' && !selectedBillingProfileId.value) {
+    startInvoiceForm('personal', 'me')
+  }
+})
 // Persist checkout progress (debounced) so it survives reload / back-forward / payment return.
 watch([step, openItemKey, selectedBillingProfileId, invoiceView, invoiceFormType, invoiceFor, saveAsInvoiceProfile], scheduleProgressSave)
 watch(itemForms, scheduleProgressSave, { deep: true })
@@ -816,7 +839,7 @@ watch(sessionRemainingSeconds, (seconds) => {
       @keydown="handleCheckoutActivity"
     >
       <a class="back-shop" :href="shopBackUrl">&larr; {{ copy.backToShop }}</a>
-      <template v-if="transactionResult !== 'success'">
+      <template v-if="transactionResult !== 'success' && cart.items.length">
         <p class="page-kicker">
           Checkout
         </p>
@@ -951,8 +974,17 @@ watch(sessionRemainingSeconds, (seconds) => {
         <div v-if="error" class="error">
           {{ error }}
         </div>
-        <div v-if="!cart.items.length" class="empty">
-          {{ copy.empty }}
+        <div v-if="!cart.items.length" class="cart-empty">
+          <p class="page-kicker">
+            Checkout
+          </p>
+          <h2 class="cart-empty-title">
+            {{ copy.empty }}
+          </h2>
+          <p class="cart-empty-text">
+            {{ copy.emptyHint }}
+          </p>
+          <a class="primary cart-empty-go" :href="shopBackUrl">{{ copy.goToShop }} &rarr;</a>
         </div>
 
         <div v-if="cart.items.length" class="checkout-grid">

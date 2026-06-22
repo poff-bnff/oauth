@@ -106,7 +106,7 @@ const COMPLETE_BUYER_PROFILE = {
 // A real-looking JWT with exp set to 1 hour from NOW so the cache doesn't block re-fetching.
 // Header.Payload.Signature — only payload needs to be valid base64 JSON.
 const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })).toString('base64url')
-const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
+const ADMIN_JWT = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')}.${ADMIN_JWT_PAYLOAD}.sig`
 const ADMIN_TOKEN_RESPONSE = { data: { token: ADMIN_JWT } }
 
 // Default claim handler: a Mode-A claim (pay-time confirm by productIds) succeeds for every
@@ -590,6 +590,27 @@ describe('touchCheckoutCartSession', () => {
     expect(categoryListFetches).toBe(1)
     expect(individualProductFetches).toBe(0)
     expect(individualCategoryFetches).toBe(0)
+  })
+
+  it('refreshes the held reservations via an atomic claim on touch, then throttles (STEP 1)', async () => {
+    let claimBody = null
+    claimOverride = (body) => { claimBody = body; return { claimed: [{ id: PRODUCT.id, code: 'C' }] } }
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_ITEM]
+        if (url.includes('/carts/') && opts?.method === 'PUT') return CART_WITH_ITEM
+      }
+    )
+
+    await touchCheckoutCartSession({ userId: USER_ID }, 'en')
+    expect(claimBody?.productIds).toContain(PRODUCT.id)
+    expect(claimBody?.userId).toBe(USER_ID)
+
+    claimBody = null
+    await touchCheckoutCartSession({ userId: USER_ID }, 'en')
+    expect(claimBody).toBeNull()
   })
 })
 

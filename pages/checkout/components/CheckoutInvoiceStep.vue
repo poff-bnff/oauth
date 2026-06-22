@@ -134,7 +134,7 @@ function isOrganisationProfile (profile) {
           <label class="span"><span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span><input v-model.trim="invoiceForm.email" type="email" autocomplete="email" required></label>
           <label><span class="field-label">{{ copy.phone }}</span><input v-model.trim="invoiceForm.phone" type="tel" autocomplete="tel"></label>
         </div>
-        <label class="check save-profile-note" @click.prevent="$emit('update:saveAsInvoiceProfile', !saveAsInvoiceProfile)">
+        <label class="check save-profile-note">
           <input :checked="saveAsInvoiceProfile" type="checkbox" @change="$emit('update:saveAsInvoiceProfile', $event.target.checked)">
           <span>
             <strong>{{ copy.saveAsProfile }}</strong>
@@ -180,7 +180,7 @@ function isOrganisationProfile (profile) {
           <label class="span"><span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span><input v-model.trim="invoiceForm.email" type="email" autocomplete="email" required></label>
           <label><span class="field-label">{{ copy.phone }}</span><input v-model.trim="invoiceForm.phone" type="tel" autocomplete="tel"></label>
         </div>
-        <label class="check save-profile-note" @click.prevent="$emit('update:saveAsInvoiceProfile', !saveAsInvoiceProfile)">
+        <label class="check save-profile-note">
           <input :checked="saveAsInvoiceProfile" type="checkbox" @change="$emit('update:saveAsInvoiceProfile', $event.target.checked)">
           <span>
             <strong>{{ copy.saveAsProfile }}</strong>

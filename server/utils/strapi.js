@@ -7,7 +7,6 @@ const config = useRuntimeConfig()
 
 const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
 
-
 const STRAPI_TOKEN = {
   token: null,
   expires: null
@@ -232,7 +231,6 @@ export async function loadFionaBadges (user) {
 
   return user
 }
-
 
 // --- ROLE VALIDATION LOGIC ---
 
@@ -954,13 +952,16 @@ export async function getStrapiToken () {
   }
 }
 
+let _adminTokenRefresh = null
 export async function getStrapiAdminToken () {
   // If a cached token exists, and it's not expired, return it
   if (STRAPI_ADMIN_TOKEN.token && STRAPI_ADMIN_TOKEN.expires > Date.now()) {
     return STRAPI_ADMIN_TOKEN.token
-  } else {
-    return await refreshStrapiAdminToken()
   }
+  if (!_adminTokenRefresh) {
+    _adminTokenRefresh = refreshStrapiAdminToken().finally(() => { _adminTokenRefresh = null })
+  }
+  return await _adminTokenRefresh
 }
 
 async function refreshStrapiAdminToken () {
@@ -1054,9 +1055,12 @@ export async function getStrapiFilm (id) {
   return await $fetch(`${config.strapiUrl}/films/${id}`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
+let _paymentMethodsCache = null
+const PAYMENT_METHODS_TTL_MS = 5 * 60_000
+
 export async function getPaymentMethods (id) {
-  console.log('getPaymentMethods', id) // eslint-disable-line no-console
   if (id) await getStrapiCollectionItem('product-categories', id)
+  if (_paymentMethodsCache && _paymentMethodsCache.expires > Date.now()) return _paymentMethodsCache.value
 
   const host = String(config.maksekeskusHost || 'https://api.test.maksekeskus.ee').replace(/\/$/, '')
   const mkUrl = host.startsWith('http') ? `${host}/v1/shop/configuration` : `https://${host}/v1/shop/configuration`
@@ -1068,12 +1072,14 @@ export async function getPaymentMethods (id) {
     }
   })
 
-  return {
+  const value = {
     banklinks: normalizeMaksekeskusMethods(mkResponse.payment_methods?.banklinks || []),
     cards: normalizeMaksekeskusMethods(mkResponse.payment_methods?.cards || []),
     other: normalizeMaksekeskusMethods(mkResponse.payment_methods?.other || []),
     payLater: normalizeMaksekeskusMethods(mkResponse.payment_methods?.payLater || [])
   }
+  _paymentMethodsCache = { value, expires: Date.now() + PAYMENT_METHODS_TTL_MS }
+  return value
 }
 
 // Known display names for Maksekeskus payment method identifiers.
@@ -1746,7 +1752,7 @@ function isNumericId(value) {
   return /^\d+$/.test(String(value || ''))
 }
 
-async function getProductCategoryByAnyId(categoryId, codePrefix) {
+async function fetchProductCategoryByAnyId(categoryId, codePrefix) {
   const token = await getStrapiAdminToken()
   if (isNumericId(categoryId)) return await getStrapiCollectionItem('product-categories', categoryId)
 
@@ -1757,6 +1763,24 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
     headers: { Authorization: `Bearer ${token}` }
   })
   return Array.isArray(categories) ? categories[0] : categories
+}
+
+const _categoryCache = new Map()
+const CATEGORY_CACHE_TTL_MS = 30_000
+
+export function __clearCheckoutCaches() {
+  _categoryCache.clear()
+  _lastReservationRefresh.clear()
+  _paymentMethodsCache = null
+}
+
+async function getProductCategoryByAnyId(categoryId, codePrefix) {
+  const key = `${categoryId ?? ''}|${codePrefix ?? ''}`
+  const hit = _categoryCache.get(key)
+  if (hit && hit.expires > Date.now()) return hit.value
+  const value = await fetchProductCategoryByAnyId(categoryId, codePrefix)
+  if (value?.id) _categoryCache.set(key, { value, expires: Date.now() + CATEGORY_CACHE_TTL_MS })
+  return value
 }
 
 // Atomically claim (reserve) products via the Strapi /products/claim endpoint
@@ -1782,7 +1806,7 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   const excluded = new Set(excludedProductIds.map(id => String(id)))
   const buildParams = (queryLimit) => {
     const params = new URLSearchParams()
-    params.append('_limit', String(Math.max(queryLimit, 10)))
+    params.append('_limit', String(queryLimit))
     params.append('code_null', 'false')
     params.append('reserved_to_null', 'true')
     params.append('owner_null', 'true')
@@ -1813,6 +1837,29 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   }
 
   return await fetchProducts(buildParams(limit + excludedProductIds.length + 5))
+}
+
+async function peekAvailableCheckoutProductIds(category, quantity = 1, excludedProductIds = []) {
+  const token = await getStrapiAdminToken()
+  const body = { peek: true, quantity, excludeIds: excludedProductIds }
+  if (category?.id) body.categoryId = category.id
+  else if (category?.codePrefix) body.codePrefix = category.codePrefix
+  const res = await $fetch(`${config.strapiUrl}/products/claim`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body
+  })
+  if (!res || !Array.isArray(res.peeked)) throw new Error('peekUnsupported')
+  const excluded = new Set(excludedProductIds.map(id => String(id)))
+  return res.peeked.filter(p => p && !excluded.has(String(p.id))).slice(0, quantity)
+}
+
+async function acquireGuestCheckoutProducts(category, quantity, excludedProductIds) {
+  try {
+    return await peekAvailableCheckoutProductIds(category, quantity, excludedProductIds)
+  } catch {
+    return await getAvailableCheckoutProducts(category, quantity, excludedProductIds)
+  }
 }
 
 function checkoutCategoryTitle(category, locale = 'et') {
@@ -1986,23 +2033,48 @@ function checkoutCategoryCartLimit(category) {
   return category?.cartLimit != null && category.cartLimit !== '' ? Number(category.cartLimit) : null
 }
 
+async function getAvailableCheckoutProductCount(category, excludedProductIds = []) {
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('code_null', 'false')
+  params.append('reserved_to_null', 'true')
+  params.append('owner_null', 'true')
+  params.append('product_category_null', 'false')
+  params.append('transactions_null', 'true')
+  params.append('active', 'true')
+  if (category?.id) params.append('product_category', category.id)
+  else if (category?.codePrefix) params.append('product_category.codePrefix', category.codePrefix)
+  excludedProductIds.forEach(id => params.append('id_nin', id))
+  try {
+    const count = await $fetch(`${config.strapiUrl}/products/count?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return Number(count) || 0
+  } catch (error) {
+    const products = await getAvailableCheckoutProducts(category, 1, excludedProductIds)
+    return products.length
+  }
+}
+
 export async function getCheckoutCategoryAvailability(owner, categoryId, codePrefix) {
   const category = await getProductCategoryByAnyId(categoryId || codePrefix, codePrefix)
   if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
   const cart = owner ? await getCurrentCheckoutCart(owner) : null
   const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-  const products = await getAvailableCheckoutProducts(category, 50, existingProductIds)
   const cartLimit = checkoutCategoryCartLimit(category)
-  const inCart = cartLimit != null ? await countCheckoutCartCategoryItems(cart, category.id) : 0
+  const [availableCount, inCart] = await Promise.all([
+    getAvailableCheckoutProductCount(category, existingProductIds),
+    cartLimit != null ? countCheckoutCartCategoryItems(cart, category.id) : Promise.resolve(0)
+  ])
 
   // Reasons the product can't be added right now. Frontend shows the specific
   // message when there's exactly one, otherwise a generic "unavailable".
   const reasons = []
   if (!isCategoryOnSale(category)) reasons.push('notOnSale')
   if (getCheckoutProductCurrentPrice(category) == null) reasons.push('noPrice')
-  if (products.length <= 0) reasons.push('soldOut')
+  if (availableCount <= 0) reasons.push('soldOut')
 
-  return { availableCount: products.length, cartLimit, inCart, reasons }
+  return { availableCount, cartLimit, inCart, reasons }
 }
 
 // Per-cart async mutex — serializes add/remove/clear within one Node process so that
@@ -2075,7 +2147,7 @@ export async function addCheckoutCartItem(owner, body = {}) {
       acquired = await claimCheckoutProducts({ category, userId, quantity, price })
     } else {
       const existingProductIds = (cart.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-      acquired = await getAvailableCheckoutProducts(category, quantity, existingProductIds)
+      acquired = await acquireGuestCheckoutProducts(category, quantity, existingProductIds)
     }
     if (acquired.length < quantity) {
       // Release any partial hold we just took before reporting sold-out.
@@ -2205,6 +2277,20 @@ export async function clearCheckoutCart(owner) {
   return result
 }
 
+const _lastReservationRefresh = new Map()
+const RESERVATION_REFRESH_INTERVAL_MS = 5 * 60_000
+
+async function refreshHeldCartReservations(owner, cart) {
+  if (!owner?.userId || !cart?.id) return
+  const last = _lastReservationRefresh.get(cart.id) || 0
+  if (Date.now() - last < RESERVATION_REFRESH_INTERVAL_MS) return
+  _lastReservationRefresh.set(cart.id, Date.now())
+  const rows = cart.cartProducts || []
+  const productIds = rows.map(item => item.product?.id || item.product).filter(Boolean)
+  if (!productIds.length) return
+  await claimCheckoutProducts({ productIds, userId: owner.userId, price: rows[0]?.priceInCart ?? null }).catch(() => null)
+}
+
 export async function touchCheckoutCartSession(owner, locale = 'et') {
   if (!owner) return { items: [], total: 0 }
   const cart = await getCurrentCheckoutCart(owner)
@@ -2217,21 +2303,48 @@ export async function touchCheckoutCartSession(owner, locale = 'et') {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: { cartUpdatedAt: now }
   })
+  await refreshHeldCartReservations(owner, updated)
   return await serializeCheckoutCart(updated, locale || cart.locale || 'et')
 }
 
-export async function getCheckoutContext(userId, locale = 'et') {
-  if (!userId) return { code: 401, case: 'unauthorized' }
-  const user = await getStrapiUser(userId)
-  const cart = await getCheckoutCart({ userId }, locale)
+export async function reactivateStrandedCheckoutCart(userId) {
+  if (!userId) return null
+  const stranded = await getCurrentCheckoutCart({ userId }, { status: 'checkout_started' })
+  if (!stranded || !(stranded.cartProducts || []).length) return null
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus('active')
+  return await $fetch(`${config.strapiUrl}/carts/${stranded.id}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: { cart_status: activeStatus.id, cartUpdatedAt: new Date().toISOString() }
+  }).catch(() => null)
+}
+
+async function getOwnBusinessProfiles(userId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_where[user]', userId)
   params.append('_where[saved_for_reuse_ne]', false)
-  const businessProfiles = await $fetch(`${config.strapiUrl}/business-profiles?${params.toString()}`, {
+  return await $fetch(`${config.strapiUrl}/business-profiles?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-  const paymentMethods = await getPaymentMethods()
+}
+
+export async function getCheckoutContext(userId, locale = 'et') {
+  if (!userId) return { code: 401, case: 'unauthorized' }
+  const [user, initialCart, businessProfiles, paymentMethods] = await Promise.all([
+    getStrapiUser(userId),
+    getCheckoutCart({ userId }, locale),
+    getOwnBusinessProfiles(userId),
+    getPaymentMethods()
+  ])
+
+  let cart = initialCart
+  if (!cart?.items?.length) {
+    const recovered = await reactivateStrandedCheckoutCart(userId)
+    if (recovered) cart = await serializeCheckoutCart(recovered, locale)
+  }
+
   return {
     user,
     profile: user?.user_profile || null,
@@ -2326,7 +2439,7 @@ export async function payCheckoutCart(userId, body = {}) {
   try {
     for (const cartItem of cartData.items) {
       const submitted = itemPayload.find(item => String(item.productId) === String(cartItem.productId) || Number(item.index) === Number(cartItem.index)) || {}
-      const category = await getStrapiCollectionItem('product-categories', cartItem.categoryId)
+      const category = await getProductCategoryByAnyId(cartItem.categoryId)
       const deliveryLocationId = validateCheckoutDeliveryLocation(category.pickup_locations || [], submitted.pickupLocationId)
       if (deliveryLocationId === false) throw checkoutError({ code: 400, case: submitted.pickupLocationId ? 'invalidDeliveryLocation' : 'noDeliveryLocation', productId: cartItem.productId })
 
@@ -2644,8 +2757,6 @@ export async function getStrapiCollections(ids, apiEndpoint) {
   return collections
 }
 
-
-
 export async function getStrapiOrganisationByField(field, name) {
   if (!name) return null
   const token = await getStrapiToken()
@@ -2809,7 +2920,6 @@ export async function putStrapiCollection (collectionName, collectionData) {
   return result
 }
 
-
 export async function getUniqSlug(slug, contentTypeUID, field) {
   //  grep -r -P "^path: " . | grep -v _fetchdir | grep source | awk -F': ' '{print "\""$2"\","}' | uniq
   const reserverdSlugs = [
@@ -2937,14 +3047,31 @@ export async function claimGuestCart(userId, cartToken) {
       }
     })
   } else {
-    // Merge guest lines into the existing user cart by claiming a distinct available product
-    // of each line's category. The claim's reserved_to filter already excludes the user's own
-    // held cart products, so we never double-add; lines drop only if the category is sold out.
+    const lineCategories = []
+    for (const item of guestProducts) lineCategories.push({ item, category: await resolveCartLineCategory(item) })
+
+    const catLimit = new Map()
+    const runningCat = new Map()
+    for (const catId of new Set(lineCategories.map(lc => lc.category?.id).filter(Boolean))) {
+      const cat = lineCategories.find(lc => lc.category?.id === catId).category
+      catLimit.set(catId, checkoutCategoryCartLimit(cat))
+      runningCat.set(catId, await countCheckoutCartCategoryItems(userCart, catId))
+    }
+    let totalCount = (userCart.cartProducts || []).length
+
     const addedRows = []
-    for (const item of guestProducts) {
-      const bound = await claimGuestLine(item, userId)
-      if (!bound) { droppedItems.push({ productId: item.product?.id || item.product, reason: 'soldOut' }); continue }
-      addedRows.push({ product: bound.productId, priceInCart: bound.price, timeToCart: now })
+    for (const { item, category } of lineCategories) {
+      const pid = item.product?.id || item.product
+      if (!category?.id) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
+      if (totalCount >= CART_LIMITS.maxItemsPerCart) { droppedItems.push({ productId: pid, reason: 'cartFull' }); continue }
+      const limit = catLimit.get(category.id)
+      if (limit != null && (runningCat.get(category.id) || 0) >= limit) { droppedItems.push({ productId: pid, reason: 'cartLimit' }); continue }
+      const price = getCheckoutProductCurrentPrice(category) ?? item.priceInCart
+      const claimed = await claimCheckoutProducts({ category, userId, quantity: 1, price })
+      if (!claimed.length) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
+      addedRows.push({ product: claimed[0].id, priceInCart: price, timeToCart: now })
+      totalCount++
+      runningCat.set(category.id, (runningCat.get(category.id) || 0) + 1)
     }
 
     if (addedRows.length) {

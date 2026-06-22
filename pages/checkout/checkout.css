@@ -9,6 +9,36 @@
   padding: 64px;
   text-align: center;
 }
+.cart-empty {
+  max-width: 520px;
+  margin: 64px auto 72px;
+  padding: 8px 24px;
+  text-align: center;
+}
+.cart-empty .page-kicker {
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.cart-empty-title {
+  margin: 0 0 14px;
+  color: #1f1f1f;
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -.6px;
+  line-height: 1.1;
+}
+.cart-empty-text {
+  margin: 0 0 30px;
+  color: rgba(0,0,0,.6);
+  font-size: 16px;
+  line-height: 1.55;
+}
+.cart-empty-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
 .sr-only {
   position: absolute;
   width: 1px;
@@ -523,6 +553,15 @@
   color: #111820;
   background: #f5a623;
   font-weight: 700;
+}
+/* Owner choice ("For me" / "As a gift") ships with neither selected. Keep the chosen (orange)
+   look exactly as the base .segmented, but for the UNCHOSEN state add a divider between the two
+   halves (so it doesn't read as one button) and a subtle hover tint. */
+.owner-segmented button { transition: background .15s ease, color .15s ease; }
+.owner-segmented button + button { border-left: 1px solid rgba(0,0,0,.14); }
+.owner-segmented button:not(.active):hover {
+  background: rgba(245,166,35,.12);
+  color: #111820;
 }
 
 /* ── Forms (qualified to avoid global leakage) ──────────── */

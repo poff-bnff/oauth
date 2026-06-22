@@ -16,7 +16,7 @@ export function cartSignature (items = []) {
 export function emptyCheckoutItemForm () {
   return {
     pickupLocationId: '',
-    ownerMode: 'me',
+    ownerMode: '',
     firstName: '',
     lastName: '',
     email: '',
@@ -25,6 +25,33 @@ export function emptyCheckoutItemForm () {
     photoError: '',
     sendEmail: true
   }
+}
+
+export function isGiftOwnerComplete (form = {}) {
+  return !!(
+    (form.firstName || '').trim() &&
+    (form.lastName || '').trim() &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((form.email || '').trim()) &&
+    form.photo
+  )
+}
+
+export function isCheckoutItemComplete (item = {}, form = {}) {
+  if (item.pickupLocations?.length && !form.pickupLocationId) return false
+  if (item.transferable) {
+    if (form.ownerMode !== 'me' && form.ownerMode !== 'gift') return false
+    if (form.ownerMode === 'gift') return isGiftOwnerComplete(form)
+  }
+  return true
+}
+
+export function isCheckoutProfileComplete (form = {}, hasPicture = false) {
+  return !!(
+    (form.firstName || '').trim() &&
+    (form.lastName || '').trim() &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((form.email || '').trim()) &&
+    (form.photo || hasPicture)
+  )
 }
 
 export function findCompatibleSavedForm (source, item, index = 0) {

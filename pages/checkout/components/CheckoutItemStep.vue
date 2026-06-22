@@ -4,7 +4,8 @@
   this component mutates them directly (same reactive instance as the parent).
 -->
 <script setup>
-import { emptyCheckoutItemForm, itemKey } from '../composables/useCheckoutProgress.js'
+import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete } from '../composables/useCheckoutProgress.js'
+import { savePhoto, deletePhoto } from '../composables/useCheckoutPhotoStore.js'
 
 const props = defineProps({
   cart: { type: Object, required: true },
@@ -32,20 +33,8 @@ function ensureItemForm (item, index = 0) {
   return props.itemForms[key]
 }
 
-function isGiftOwnerComplete (form) {
-  return !!(
-    form.firstName.trim() &&
-    form.lastName.trim() &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim()) &&
-    form.photo
-  )
-}
-
 function isItemComplete (item, index) {
-  const form = ensureItemForm(item, index)
-  if (item.pickupLocations?.length && !form.pickupLocationId) return false
-  if (item.transferable && form.ownerMode === 'gift') return isGiftOwnerComplete(form)
-  return true
+  return isCheckoutItemComplete(item, ensureItemForm(item, index))
 }
 
 function isItemOpen (item, index) {
@@ -91,9 +80,19 @@ function pickupSummary (item, index) {
 function ownerSummary (item, index) {
   if (!item.transferable) return props.copy.me
   const form = ensureItemForm(item, index)
-  if (form.ownerMode !== 'gift') return props.copy.me
-  if (isGiftOwnerComplete(form)) return `Gift to ${form.firstName.trim()}`
-  return 'recipient details needed'
+  if (form.ownerMode === 'me') return props.copy.me
+  if (form.ownerMode === 'gift') {
+    return isGiftOwnerComplete(form) ? `Gift to ${form.firstName.trim()}` : 'recipient details needed'
+  }
+  return props.copy.chooseOwner
+}
+
+function ownerNeedsChoice (item, index) {
+  if (!item.transferable) return false
+  const form = ensureItemForm(item, index)
+  if (form.ownerMode === 'me') return false
+  if (form.ownerMode === 'gift') return !isGiftOwnerComplete(form)
+  return true
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -143,12 +142,14 @@ async function handleOwnerPhoto (event, item, index) {
   const file = input.files?.[0]
   if (!file) return
   const form = ensureItemForm(item, index)
+  const key = itemKey(item, index)
 
   const reject = (message) => {
     form.photo = null
     form.photoName = ''
     form.photoError = message
     input.value = ''
+    deletePhoto(key)
   }
 
   if (!file.type.startsWith('image/')) return reject(props.copy.photoNotImage)
@@ -163,6 +164,7 @@ async function handleOwnerPhoto (event, item, index) {
   form.photoError = ''
   form.photoName = file.name
   form.photo = { name: file.name, data: dataUrl }
+  await savePhoto(key, { name: file.name, data: dataUrl })
 }
 
 function validateAndContinue () {
@@ -170,6 +172,11 @@ function validateAndContinue () {
     const form = ensureItemForm(item, index)
     if (item.pickupLocations?.length && !form.pickupLocationId) {
       emit('error', props.copy.choosePickup)
+      emit('update:openItemKey', itemKey(item, index))
+      return
+    }
+    if (item.transferable && form.ownerMode !== 'me' && form.ownerMode !== 'gift') {
+      emit('error', props.copy.chooseOwner)
       emit('update:openItemKey', itemKey(item, index))
       return
     }
@@ -213,7 +220,7 @@ function validateAndContinue () {
             <strong>{{ item.title }}</strong>
             <small>
               {{ copy.pickup }}: <span :class="{ missing: item.pickupLocations?.length && !ensureItemForm(item, index).pickupLocationId }">{{ pickupSummary(item, index) }}</span>
-              <span v-if="item.transferable"> · {{ copy.owner }}: <span :class="{ missing: ensureItemForm(item, index).ownerMode === 'gift' && !isGiftOwnerComplete(ensureItemForm(item, index)) }">{{ ownerSummary(item, index) }}</span></span>
+              <span v-if="item.transferable"> · {{ copy.owner }}: <span :class="{ missing: ownerNeedsChoice(item, index) }">{{ ownerSummary(item, index) }}</span></span>
             </small>
           </div>
           <span class="item-caret" aria-hidden="true" />

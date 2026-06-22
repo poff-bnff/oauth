@@ -13,7 +13,7 @@ const USER_ID = 42
 const GUEST_TOKEN = 'claim-test-token'
 
 const ADMIN_JWT_PAYLOAD = Buffer.from(JSON.stringify({ exp: Math.floor(new Date(NOW).getTime() / 1000) + 3600 })).toString('base64url')
-const ADMIN_JWT = `eyJhbGciOiJIUzI1NiJ9.${ADMIN_JWT_PAYLOAD}.sig`
+const ADMIN_JWT = `${Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')}.${ADMIN_JWT_PAYLOAD}.sig`
 
 const CATEGORY = {
   id: 300,
@@ -240,6 +240,33 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
     const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
     expect(result.claimed).toBe(true)
     expect(result.droppedItems).toEqual([{ productId: PRODUCT.id, reason: 'soldOut' }])
+    expect(userCartPutCalled).toBe(false)
+  })
+
+  it('drops a guest line on merge when it would exceed the category cartLimit', async () => {
+    const LIMITED = { ...CATEGORY, cartLimit: 1 }
+    const guestProductLimited = { ...PRODUCT, id: 9050, product_category: LIMITED }
+    const guestCartLimited = { ...GUEST_CART, cartProducts: [{ id: 850, product: guestProductLimited, priceInCart: 50, timeToCart: NOW }] }
+    const userCartAtLimit = { ...USER_CART, cartProducts: [{ id: 801, product: { id: 9002, product_category: LIMITED }, priceInCart: 50, timeToCart: NOW }] }
+    let userCartPutCalled = false
+    let claimCalled = false
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && url.includes('cartToken')) return [guestCartLimited]
+        if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return [userCartAtLimit]
+        if (url.includes('/products/claim')) { claimCalled = true; return { claimed: [{ id: 9051, code: 'X' }] } }
+        if (url.includes(`/carts/${USER_CART.id}`) && opts?.method === 'PUT') { userCartPutCalled = true; return userCartAtLimit }
+        if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'DELETE') return {}
+        if (url.includes('/carts') && !url.includes('/carts/')) return [userCartAtLimit]
+        if (url.includes('/product-categories/')) return LIMITED
+      }
+    )
+    const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
+    expect(result.claimed).toBe(true)
+    expect(result.droppedItems).toContainEqual({ productId: 9050, reason: 'cartLimit' })
+    expect(claimCalled).toBe(false)
     expect(userCartPutCalled).toBe(false)
   })
 })

@@ -1,4 +1,6 @@
 <script setup>
+import { isCheckoutProfileComplete } from '../composables/useCheckoutProgress.js'
+
 const props = defineProps({
   copy: { type: Object, required: true },
   authHeaders: { type: Object, required: true },
@@ -20,6 +22,7 @@ const form = reactive({
 })
 
 const hasPicture = computed(() => !!(props.profile?.picture))
+const isProfileComplete = computed(() => isCheckoutProfileComplete(form, hasPicture.value))
 
 function fileToDataUrl (file) {
   return new Promise((resolve, reject) => {
@@ -145,7 +148,7 @@ async function save () {
     </p>
 
     <div class="actions">
-      <button class="primary" type="button" :disabled="saving" @click="save">
+      <button class="primary" type="button" :disabled="saving || !isProfileComplete" @click="save">
         {{ saving ? copy.savingProfile : copy.saveAndContinue }} →
       </button>
     </div>
