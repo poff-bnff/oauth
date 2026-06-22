@@ -110,3 +110,21 @@ describe('BUG 6 — gift photo IndexedDB wiring', () => {
     expect(indexSource).toContain('deletePhoto(itemKey(item))')
   })
 })
+
+describe('checkout auth gating — unauthenticated/expired sessions go to login', () => {
+  test('no token redirects to login', () => {
+    expect(indexSource).toMatch(/if \(!token\.value\) \{[\s\S]*?redirect_uri=/)
+  })
+  test('a 401 from the context fetch clears the stale token and redirects to login (not empty cart)', () => {
+    expect(indexSource).toMatch(/statusCode === 401 \|\| err\?\.data\?\.case === 'unauthorized'/)
+    expect(indexSource).toContain('tokenCookie.value = null')
+  })
+  test('the login redirect is a full-page navigation so the login page actually loads', () => {
+    // client-side nav left the checkout view mounted; external:true loads index.vue (which redirects to OAuth)
+    expect(indexSource).not.toMatch(/redirect_uri=[\s\S]*?\{ external: false \}/)
+    expect(indexSource).toMatch(/redirect_uri=[\s\S]*?\{ external: true \}/)
+  })
+  test('the empty-cart card never renders without a token (no flash while redirecting to login)', () => {
+    expect(indexSource).toContain('v-if="!cart.items.length && token"')
+  })
+})
