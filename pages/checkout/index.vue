@@ -451,7 +451,7 @@ async function refreshContext () {
       }
 
       if (!token.value) {
-        await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: false })
+        await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: true })
         return
       }
       const nextContext = await $fetch(`/api/checkout/context?locale=${encodeURIComponent(locale.value)}`, { headers: authHeaders.value })
@@ -460,6 +460,12 @@ async function refreshContext () {
       if (!selectedBillingProfileId.value && profiles.value.length === 1) selectedBillingProfileId.value = profiles.value[0].id
       if (transactionResult.value === 'cancelled') error.value = copy.value.paymentCancelledText
     } catch (err) {
+      if (err?.statusCode === 401 || err?.data?.case === 'unauthorized') {
+        token.value = ''
+        tokenCookie.value = null
+        await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: true })
+        return
+      }
       error.value = err?.data?.statusMessage || err?.message || 'Checkout failed to load'
     } finally {
       loading.value = false
@@ -974,7 +980,7 @@ watch(sessionRemainingSeconds, (seconds) => {
         <div v-if="error" class="error">
           {{ error }}
         </div>
-        <div v-if="!cart.items.length" class="cart-empty">
+        <div v-if="!cart.items.length && token" class="cart-empty">
           <p class="page-kicker">
             Checkout
           </p>
