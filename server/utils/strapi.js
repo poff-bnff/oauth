@@ -3101,14 +3101,35 @@ export async function claimGuestCart(userId, cartToken) {
       }
     })
   } else {
-    // Merge guest lines into the existing user cart by claiming a distinct available product
-    // of each line's category. The claim's reserved_to filter already excludes the user's own
-    // held cart products, so we never double-add; lines drop only if the category is sold out.
+    // Merge guest lines into the existing user cart by claiming a distinct available product of each
+    // line's category. Re-enforce the per-category cartLimit and the global cap here too — the
+    // front-door add checks them, and this merge is a side door that must not skip them. Seed running
+    // counts from the existing cart; drop lines that would exceed a limit (surfaced as droppedItems).
+    const lineCategories = []
+    for (const item of guestProducts) lineCategories.push({ item, category: await resolveCartLineCategory(item) })
+
+    const catLimit = new Map()   // categoryId -> cartLimit (null = unlimited)
+    const runningCat = new Map() // categoryId -> count already in / added to the cart
+    for (const catId of new Set(lineCategories.map(lc => lc.category?.id).filter(Boolean))) {
+      const cat = lineCategories.find(lc => lc.category?.id === catId).category
+      catLimit.set(catId, checkoutCategoryCartLimit(cat))
+      runningCat.set(catId, await countCheckoutCartCategoryItems(userCart, catId))
+    }
+    let totalCount = (userCart.cartProducts || []).length
+
     const addedRows = []
-    for (const item of guestProducts) {
-      const bound = await claimGuestLine(item, userId)
-      if (!bound) { droppedItems.push({ productId: item.product?.id || item.product, reason: 'soldOut' }); continue }
-      addedRows.push({ product: bound.productId, priceInCart: bound.price, timeToCart: now })
+    for (const { item, category } of lineCategories) {
+      const pid = item.product?.id || item.product
+      if (!category?.id) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
+      if (totalCount >= CART_LIMITS.maxItemsPerCart) { droppedItems.push({ productId: pid, reason: 'cartFull' }); continue }
+      const limit = catLimit.get(category.id)
+      if (limit != null && (runningCat.get(category.id) || 0) >= limit) { droppedItems.push({ productId: pid, reason: 'cartLimit' }); continue }
+      const price = getCheckoutProductCurrentPrice(category) ?? item.priceInCart
+      const claimed = await claimCheckoutProducts({ category, userId, quantity: 1, price })
+      if (!claimed.length) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
+      addedRows.push({ product: claimed[0].id, priceInCart: price, timeToCart: now })
+      totalCount++
+      runningCat.set(category.id, (runningCat.get(category.id) || 0) + 1)
     }
 
     if (addedRows.length) {

@@ -242,4 +242,33 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
     expect(result.droppedItems).toEqual([{ productId: PRODUCT.id, reason: 'soldOut' }])
     expect(userCartPutCalled).toBe(false)
   })
+
+  it('drops a guest line on merge when it would exceed the category cartLimit', async () => {
+    // User cart already holds 1 of a cartLimit=1 category; the guest line of the same category must
+    // be dropped on merge (the side door must re-enforce the front-door limit), without even claiming.
+    const LIMITED = { ...CATEGORY, cartLimit: 1 }
+    const guestProductLimited = { ...PRODUCT, id: 9050, product_category: LIMITED }
+    const guestCartLimited = { ...GUEST_CART, cartProducts: [{ id: 850, product: guestProductLimited, priceInCart: 50, timeToCart: NOW }] }
+    const userCartAtLimit = { ...USER_CART, cartProducts: [{ id: 801, product: { id: 9002, product_category: LIMITED }, priceInCart: 50, timeToCart: NOW }] }
+    let userCartPutCalled = false
+    let claimCalled = false
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && url.includes('cartToken')) return [guestCartLimited]
+        if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return [userCartAtLimit]
+        if (url.includes('/products/claim')) { claimCalled = true; return { claimed: [{ id: 9051, code: 'X' }] } }
+        if (url.includes(`/carts/${USER_CART.id}`) && opts?.method === 'PUT') { userCartPutCalled = true; return userCartAtLimit }
+        if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'DELETE') return {}
+        if (url.includes('/carts') && !url.includes('/carts/')) return [userCartAtLimit]
+        if (url.includes('/product-categories/')) return LIMITED
+      }
+    )
+    const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
+    expect(result.claimed).toBe(true)
+    expect(result.droppedItems).toContainEqual({ productId: 9050, reason: 'cartLimit' })
+    expect(claimCalled).toBe(false)      // limit checked BEFORE claiming
+    expect(userCartPutCalled).toBe(false) // nothing added → no cart write
+  })
 })
