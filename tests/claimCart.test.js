@@ -270,3 +270,44 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
     expect(userCartPutCalled).toBe(false)
   })
 })
+
+// ── Reuse a stale (non-active) user cart (one-to-one cart↔user) ──────────────────
+describe('claimGuestCart — user has only a non-active cart', () => {
+  it('reuses the stale cart (reset to active) and merges into it — never creates a second cart', async () => {
+    const STALE_USER_CART = {
+      id: 702,
+      cartProducts: [],
+      cartUpdatedAt: NOW, cartToken: null,
+      cart_status: { id: 4, status: 'checkout_started' }, users_permissions_user: { id: USER_ID }, locale: 'et'
+    }
+    let postCartsCalled = false
+    let resetPutId = null
+    let mergePutBody = null
+    let guestDeleted = false
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && url.includes('cartToken')) return [GUEST_CART]
+        if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) {
+          return url.includes('cart_status') ? [] : [STALE_USER_CART]
+        }
+        if (url.includes('/products/claim') && opts?.method === 'POST') return { claimed: [{ id: PRODUCT.id, code: PRODUCT.code }] }
+        if (url.includes('/carts') && !url.includes('/carts/') && opts?.method === 'POST') { postCartsCalled = true; return {} }
+        if (url.includes(`/carts/${STALE_USER_CART.id}`) && opts?.method === 'PUT') {
+          if (opts.body.cart_status !== undefined) { resetPutId = STALE_USER_CART.id; return { ...STALE_USER_CART, cart_status: { id: 1, status: 'active' }, cartProducts: [] } }
+          mergePutBody = opts.body; return { ...STALE_USER_CART, cartProducts: opts.body.cartProducts }
+        }
+        if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'DELETE') { guestDeleted = true; return {} }
+        if (url.includes('/carts') && !url.includes('/carts/')) return []
+        if (url.includes('/product-categories/')) return CATEGORY
+      }
+    )
+    const result = await claimGuestCart(USER_ID, GUEST_TOKEN)
+    expect(result.claimed).toBe(true)
+    expect(postCartsCalled).toBe(false)
+    expect(resetPutId).toBe(STALE_USER_CART.id)
+    expect(guestDeleted).toBe(true)
+    expect((mergePutBody?.cartProducts || []).map(r => r.product)).toContain(PRODUCT.id)
+  })
+})

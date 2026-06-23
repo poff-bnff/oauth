@@ -1673,7 +1673,6 @@ export async function expireStaleCheckoutCarts() {
   return { checked: carts.length, expired: staleCarts.length }
 }
 
-// owner: { userId } | { cartToken } | null
 async function getCurrentCheckoutCart(owner, options = {}) {
   if (!owner) return null
   const token = await getStrapiAdminToken()
@@ -1701,11 +1700,40 @@ async function getCurrentCheckoutCart(owner, options = {}) {
   return cart
 }
 
-// Returns { cart, newToken } where newToken is only set for a freshly-created guest cart.
-// A client-generated guest cart token (UUID-ish). Validated before we trust it as a
-// cart identity — same security model as a server-minted token: it's a random bearer.
 function isValidClientCartToken(token) {
   return typeof token === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(token)
+}
+
+async function resetCheckoutCartToActive(cart, overrides = {}) {
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus('active')
+  const now = new Date().toISOString()
+  const body = {
+    cartProducts: [],
+    cartTimeout: '00:30:00',
+    cartCreatedAt: now,
+    cartUpdatedAt: now,
+    cart_status: activeStatus.id
+  }
+  if (overrides.domain !== undefined) body.domain = overrides.domain
+  if (overrides.locale !== undefined) body.locale = overrides.locale
+  return await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body
+  })
+}
+
+async function getUserCartAnyStatus(userId) {
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('users_permissions_user', userId)
+  params.append('_sort', 'cartUpdatedAt:DESC')
+  params.append('_limit', '1')
+  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return Array.isArray(carts) ? carts[0] : carts
 }
 
 async function ensureCurrentCheckoutCart(owner, body = {}) {
@@ -1716,6 +1744,14 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
   const activeStatus = await getCartStatus('active')
   const now = new Date().toISOString()
   const domainId = await resolveCheckoutDomainId(body.domain)
+
+  if (owner?.userId) {
+    const existingAny = await getUserCartAnyStatus(owner.userId)
+    if (existingAny) {
+      const reset = await resetCheckoutCartToActive(existingAny, { domain: domainId, locale: body.locale || 'et' })
+      return { cart: reset, newToken: null }
+    }
+  }
 
   const cartBody = {
     domain: domainId,
@@ -1731,12 +1767,8 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
   if (owner?.userId) {
     cartBody.users_permissions_user = owner.userId
   } else if (isValidClientCartToken(owner?.cartToken)) {
-    // Adopt the client-generated guest token so the cart identity exists before the
-    // first add's response is received — this survives a fast navigation / cancelled
-    // fetch and prevents a second orphan cart. No newToken: the client already has it.
     cartBody.cartToken = owner.cartToken
   } else {
-    // Legacy fallback: no usable client token — mint one and return it to the client.
     newToken = crypto.randomBytes(24).toString('base64url')
     cartBody.cartToken = newToken
   }
@@ -1784,11 +1816,6 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
   return value
 }
 
-// Atomically claim (reserve) products via the Strapi /products/claim endpoint
-// (Postgres FOR UPDATE SKIP LOCKED) so concurrent buyers can't double-hold the same item.
-// Mode B (acquire): pass { category, quantity } → up to N available of the category.
-// Mode A (confirm): pass { productIds } → the specific ids if free OR already this user's.
-// Returns the rows the DB actually claimed: [{ id, code }].
 async function claimCheckoutProducts({ category, productIds, userId, quantity, price }) {
   const token = await getStrapiAdminToken()
   const body = (productIds && productIds.length)
@@ -1832,8 +1859,6 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
     try {
       return await fetchProducts(params)
     } catch (error) {
-      // Older Strapi/query-parser setups may not support id_nin. Keep the
-      // previous over-fetch-and-filter behavior as a compatibility fallback.
     }
   }
 
@@ -1882,7 +1907,6 @@ function checkoutPublicStrapiUrl() {
 function checkoutMediaUrl(media) {
   const file = Array.isArray(media) ? media[0] : media
   if (!file) return ''
-  // Prefer the assets CDN (same source the product page uses) over the Strapi upload folder.
   if (file.hash && file.ext) return `https://assets.poff.ee/img/${file.hash}${file.ext}`
   if (file.url && /^https?:\/\//.test(file.url)) return file.url
   if (file.url && file.url.startsWith('/') && checkoutPublicStrapiUrl()) return `${checkoutPublicStrapiUrl()}${file.url}`
@@ -1995,10 +2019,6 @@ export async function getCheckoutCart(owner, locale = 'et') {
   return await serializeCheckoutCart(cart, locale)
 }
 
-// How many more products of a category this owner can still add to their cart
-// (in stock, not owned/reserved/transacted, and not already in their cart).
-// Used by the shop to disable "Add to cart" / "Add another" up front.
-// How many products of this category are already in the cart.
 async function countCheckoutCartCategoryItems(cart, categoryId) {
   if (!categoryId) return 0
   let count = 0
@@ -2029,7 +2049,6 @@ async function countCheckoutCartCategoryItems(cart, categoryId) {
   return count + normalizeStrapiList(products).length
 }
 
-// Admin-set max of this category allowed in a cart (null/empty = unlimited).
 function checkoutCategoryCartLimit(category) {
   return category?.cartLimit != null && category.cartLimit !== '' ? Number(category.cartLimit) : null
 }
@@ -2068,8 +2087,6 @@ export async function getCheckoutCategoryAvailability(owner, categoryId, codePre
     cartLimit != null ? countCheckoutCartCategoryItems(cart, category.id) : Promise.resolve(0)
   ])
 
-  // Reasons the product can't be added right now. Frontend shows the specific
-  // message when there's exactly one, otherwise a generic "unavailable".
   const reasons = []
   if (!isCategoryOnSale(category)) reasons.push('notOnSale')
   if (getCheckoutProductCurrentPrice(category) == null) reasons.push('noPrice')
@@ -2110,7 +2127,6 @@ function minimalCartMutationResponse(cart, newToken = null) {
   return response
 }
 
-// owner: { userId } | { cartToken } | null (null = brand-new guest, cart will be created)
 export async function addCheckoutCartItem(owner, body = {}) {
   const quantity = Math.max(1, Math.min(20, Number(body.quantity || 1)))
   const category = await getProductCategoryByAnyId(body.categoryId || body.codePrefix, body.codePrefix)
@@ -2120,14 +2136,12 @@ export async function addCheckoutCartItem(owner, body = {}) {
   if (price === undefined || price === null || Number.isNaN(Number(price))) return { code: 400, case: 'noCurrentPrice' }
 
   const result = await withCartLock(ownerLockKey(owner), async () => {
-    // Re-read cart inside the lock so we see the committed state of any preceding op.
     const { cart, newToken } = await ensureCurrentCheckoutCart(owner, body)
 
     if ((cart.cartProducts || []).length >= CART_LIMITS.maxItemsPerCart) {
       return { code: 400, case: 'cartFull' }
     }
 
-    // Per-category cart limit (admin-set on the product category; empty = unlimited).
     const categoryCartLimit = checkoutCategoryCartLimit(category)
     if (categoryCartLimit != null) {
       const inCategory = await countCheckoutCartCategoryItems(cart, category.id)
@@ -2139,10 +2153,6 @@ export async function addCheckoutCartItem(owner, body = {}) {
     const isGuest = !owner?.userId
     const userId = owner?.userId || null
 
-    // Acquire the products. Authenticated users atomically CLAIM (reserve) them so concurrent
-    // buyers can't double-hold the same item; guests just reference available ones (no hold —
-    // re-checked/claimed at checkout). The claim's reserved_to filter already excludes the
-    // user's own held products, so it won't re-grab what's already in their cart.
     let acquired
     if (!isGuest) {
       acquired = await claimCheckoutProducts({ category, userId, quantity, price })
@@ -2151,7 +2161,6 @@ export async function addCheckoutCartItem(owner, body = {}) {
       acquired = await acquireGuestCheckoutProducts(category, quantity, existingProductIds)
     }
     if (acquired.length < quantity) {
-      // Release any partial hold we just took before reporting sold-out.
       if (!isGuest) await Promise.all(acquired.map(p => clearCheckoutProductReservation(p.id, userId).catch(() => null)))
       return { code: 404, case: 'noItems', available: acquired.length }
     }
@@ -2166,7 +2175,6 @@ export async function addCheckoutCartItem(owner, body = {}) {
     }))
 
     try {
-      // Products are already claimed (authenticated) or unheld (guest) — go straight to the cart write.
       const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -2201,13 +2209,11 @@ export async function addCheckoutCartItem(owner, body = {}) {
 export async function removeCheckoutCartItem(owner, body = {}) {
   if (!owner) return { code: 401, case: 'unauthorized' }
   const result = await withCartLock(ownerLockKey(owner), async () => {
-    // Re-read cart inside the lock so index/position reflects committed state.
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { code: 404, case: 'noCart' }
 
     const token = await getStrapiAdminToken()
     const userId = owner.userId || null
-    // Identity order: componentId (stable row id) → productId → index (stale, last resort).
     const removeComponentId = body.componentId != null ? Number(body.componentId) : null
     const removeProductId = body.productId ? String(body.productId) : null
     const removeIndex = body.index != null ? Number(body.index) : NaN
@@ -2263,7 +2269,6 @@ export async function clearCheckoutCart(owner) {
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { ok: true }
     const token = await getStrapiAdminToken()
-    // Guests have no reservations; only release for authenticated carts.
     if (owner?.userId) await releaseCheckoutCartReservations(cart)
     const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
       method: 'PUT',
@@ -2447,7 +2452,6 @@ export async function payCheckoutCart(userId, body = {}) {
       const ownerResult = await resolveCheckoutOwner(userId, category, submitted.owner || { mode: 'me' })
       if (ownerResult.error) throw checkoutError({ code: 400, case: ownerResult.error, missing: ownerResult.missing, productId: cartItem.productId })
 
-      // Atomically confirm/claim the cart's specific product for this user (free OR already theirs).
       const claimed = await claimCheckoutProducts({ productIds: [cartItem.productId], userId, price: cartItem.price })
       if (!claimed.length) throw checkoutError({ code: 409, case: 'productUnavailable', productId: cartItem.productId })
       reservedProductIds.push(cartItem.productId)
@@ -2922,7 +2926,6 @@ export async function putStrapiCollection (collectionName, collectionData) {
 }
 
 export async function getUniqSlug(slug, contentTypeUID, field) {
-  //  grep -r -P "^path: " . | grep -v _fetchdir | grep source | awk -F': ' '{print "\""$2"\","}' | uniq
   const reserverdSlugs = [
       "artikkel", "about", "artikl", "intervjuud", "interviews",
       "projects", "industry-projects", "toetajad", "supporters", "supportersru",
@@ -2969,9 +2972,6 @@ export async function getUniqSlug(slug, contentTypeUID, field) {
 
 // ── Guest cart claim (WS4) ────────────────────────────────────────────────────
 
-// (isProductAvailableForUser removed — claimGuestCart now binds guest lines via the atomic
-//  claim-by-category, which checks availability and reserves in one step.)
-
 async function deleteGuestCart(cartId) {
   const token = await getStrapiAdminToken()
   return $fetch(`${config.strapiUrl}/carts/${cartId}`, {
@@ -2996,10 +2996,6 @@ async function resolveCartLineCategory(item) {
   return null
 }
 
-// At login, bind a guest cart line to an ACTUAL available product of its category via the
-// atomic claim. Guests never hold a specific product, so we claim by category — the user keeps
-// the item as long as the category has any stock (not just the specific instance they saw), and
-// each line gets a distinct product. Returns { productId, price } or null if the category is empty.
 async function claimGuestLine(item, userId) {
   const category = await resolveCartLineCategory(item)
   if (!category?.id) return null
@@ -3025,10 +3021,15 @@ export async function claimGuestCart(userId, cartToken) {
   const now = new Date().toISOString()
   const droppedItems = []
 
-  const userCart = await getCurrentCheckoutCart({ userId })
+  let userCart = await getCurrentCheckoutCart({ userId })
 
   if (!userCart) {
-    // No existing user cart — convert the guest cart in-place.
+    const stale = await getUserCartAnyStatus(userId)
+    if (stale) userCart = await resetCheckoutCartToActive(stale, { domain: guestCart.domain?.id || guestCart.domain, locale: guestCart.locale })
+  }
+
+  if (!userCart) {
+
     const validRows = []
     for (const item of guestProducts) {
       // Bind this guest line to an actual available product of its category (atomic claim).
@@ -3095,7 +3096,6 @@ export async function claimGuestCart(userId, cartToken) {
   return { claimed: true, cart, droppedItems }
 }
 
-// Hard-delete guest carts that have been expired for at least CART_LIMITS.hardDeleteAfterDays.
 export async function deleteStaleGuestCarts() {
   const token = await getStrapiAdminToken()
   const expiredStatus = await getCartStatus('expired')
