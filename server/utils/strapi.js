@@ -893,7 +893,7 @@ export async function setFavorites (user, favorites) {
 export function getAdminBearer (event) {
   const headers = getRequestHeaders(event)
 
-  const token = headers?.authorization?.split(' ')[1]
+  const token = String(headers?.authorization || '').split(' ')[1]
 
   if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
@@ -903,7 +903,7 @@ export function getAdminBearer (event) {
 export function getUserIdFromEvent (event) {
   const headers = getRequestHeaders(event)
 
-  const token = headers?.authorization?.split(' ')[1]
+  const token = String(headers?.authorization || '').split(' ')[1]
 
   if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
@@ -919,14 +919,15 @@ export function getUserIdFromEvent (event) {
 // Never throws — callers decide whether a missing identity is an error.
 export function getCartOwner (event) {
   const headers = getRequestHeaders(event)
-  const token = headers?.authorization?.split(' ')[1]
+  const token = String(headers?.authorization || '').split(' ')[1]
   if (token) {
     try {
       const { sub } = jwt.verify(token, config.jwtSecret)
       return { userId: parseInt(sub) }
     } catch { /* invalid JWT — fall through to cartToken */ }
   }
-  const cartToken = headers?.['x-cart-token']
+  const rawCartToken = headers?.['x-cart-token']
+  const cartToken = Array.isArray(rawCartToken) ? rawCartToken[0] : rawCartToken
   if (cartToken) return { cartToken }
   return null
 }
