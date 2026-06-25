@@ -109,7 +109,7 @@ export function useCheckoutCopy (locale) {
       chooseLocation: ru ? 'Выберите место' : et ? 'Vali asukoht' : 'choose location',
       chooseOwner: ru ? 'Выберите владельца' : et ? 'Vali omanik' : 'choose owner',
       me: ru ? 'Я' : et ? 'Mina' : 'Me',
-      order: ru ? 'Заказ' : et ? 'Tellimus' : 'Order',
+      order: ru ? 'Заказ' : et ? 'Tellimus' : 'Order summary',
       subtotal: ru ? 'Промежуточный итог' : et ? 'Vahesumma' : 'Subtotal',
       vatIncluded: ru ? 'НДС 24% включен' : et ? 'KM 24% sisaldub' : 'VAT 24% (incl.)',
       noPickupNeeded: ru ? 'Место получения не требуется' : et ? 'Kättesaamise kohta pole vaja' : 'No pickup location required',
