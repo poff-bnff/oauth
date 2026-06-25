@@ -77,7 +77,7 @@ export function useCheckoutCopy (locale) {
       city: ru ? 'Город' : et ? 'Linn' : 'City',
       postalCode: ru ? 'Почтовый индекс' : et ? 'Postiindeks' : 'Postal code',
       choosePayment: ru ? 'Выберите способ оплаты' : et ? 'Vali makseviis' : 'Choose a payment method',
-      bankTransfer: ru ? 'Выберите способ оплаты' : et ? 'Valige makseviis' : 'Choose a payment method',
+      bankTransfer: ru ? 'Банковский перевод' : et ? 'Pangaülekanne' : 'Bank transfer',
       cardPayment: ru ? 'Оплата картой' : et ? 'Kaardimakse' : 'Card payment',
       otherPayments: ru ? 'Другие способы' : et ? 'Muud maksed' : 'Other methods',
       payLaterLabel: ru ? 'Купи сейчас, плати потом' : et ? 'Osta nüüd, maksa hiljem' : 'Pay later',
