@@ -1746,6 +1746,19 @@ async function getUserCartAnyStatus(userId) {
   return Array.isArray(carts) ? carts[0] : carts
 }
 
+async function getCartByTokenAnyStatus(cartToken) {
+  if (!isValidClientCartToken(cartToken)) return null
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('cartToken', cartToken)
+  params.append('_sort', 'cartUpdatedAt:DESC')
+  params.append('_limit', '1')
+  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return Array.isArray(carts) ? carts[0] : carts
+}
+
 async function ensureCurrentCheckoutCart(owner, body = {}) {
   const strapiToken = await getStrapiAdminToken()
   const existing = await getCurrentCheckoutCart(owner)
@@ -1757,6 +1770,12 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
 
   if (owner?.userId) {
     const existingAny = await getUserCartAnyStatus(owner.userId)
+    if (existingAny) {
+      const reset = await resetCheckoutCartToActive(existingAny, { domain: domainId, locale: body.locale || 'et' })
+      return { cart: reset, newToken: null }
+    }
+  } else if (isValidClientCartToken(owner?.cartToken)) {
+    const existingAny = await getCartByTokenAnyStatus(owner.cartToken)
     if (existingAny) {
       const reset = await resetCheckoutCartToActive(existingAny, { domain: domainId, locale: body.locale || 'et' })
       return { cart: reset, newToken: null }
@@ -1794,13 +1813,26 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
     let raced = null
     try {
       raced = await getCurrentCheckoutCart(owner)
-        || (owner?.userId ? await getUserCartAnyStatus(owner.userId) : null)
+        || (owner?.userId
+          ? await getUserCartAnyStatus(owner.userId)
+          : await getCartByTokenAnyStatus(owner?.cartToken))
     } catch { /* lookup failed too — fall through to rethrow the original create error */ }
     if (raced) {
-      const reset = checkoutCartExpired(raced)
+      const reset = checkoutCartExpired(raced) || raced?.cart_status?.status !== 'active'
         ? await resetCheckoutCartToActive(raced, { domain: domainId, locale: body.locale || 'et' })
         : raced
       return { cart: reset, newToken: null }
+    }
+    if (!owner?.userId) {
+      const retryToken = crypto.randomBytes(24).toString('base64url')
+      try {
+        const cart = await $fetch(`${config.strapiUrl}/carts`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${strapiToken}`, 'Content-Type': 'application/json' },
+          body: { ...cartBody, cartToken: retryToken }
+        })
+        return { cart, newToken: retryToken }
+      } catch { /* retry failed too — surface the original create failure */ }
     }
     throw createError
   }

@@ -3,6 +3,7 @@ import { addCheckoutCartItem } from '../server/utils/strapi.js'
 
 const NOW = '2026-06-02T12:00:00.000Z'
 const USER_ID = 14783
+const GUEST_TOKEN = 'guestToken_1234567890'
 const PERIOD = { startDateTime: '2026-01-01T00:00:00.000Z', endDateTime: '2027-01-01T00:00:00.000Z' }
 const CATEGORY = { id: 59, codePrefix: 'HOFF-MERCH', priceAtPeriod: [{ ...PERIOD, price: 100 }], salesPeriod: [PERIOD] }
 
@@ -16,6 +17,13 @@ const STALE_CART = {
   users_permissions_user: { id: USER_ID },
   cartUpdatedAt: NOW,
   cartTimeout: '00:30:00'
+}
+
+const STALE_GUEST_CART = {
+  ...STALE_CART,
+  id: 88,
+  users_permissions_user: null,
+  cartToken: GUEST_TOKEN
 }
 
 let postCartsCalled
@@ -125,5 +133,39 @@ describe('addCheckoutCartItem — one-to-one cart reuse (no second-cart 500)', (
     expect(putIds).toContain(555)           // and added the item to the winner's recovered cart
     expect(result.cartId).toBe(555)
     expect(result.itemCount).toBe(1)        // add ends with exactly the one product, not an empty cart
+  })
+
+  it('reuses a guest token existing non-active cart instead of creating a duplicate token cart', async () => {
+    let claimedToken = null
+    globalThis.$fetch = vi.fn().mockImplementation(async (url, opts = {}) => {
+      if (url.includes('/admin/login')) return ADMIN_TOKEN_RESPONSE
+      if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+      if (url.includes('/product-categories')) return CATEGORY
+      if (url.includes('/products/claim')) {
+        claimedToken = opts.body?.cartToken
+        return { mode: 'byCategory', got: 1, claimed: [{ id: 9001, code: 'HOFF-1' }] }
+      }
+      if (url.includes('/carts') && !url.match(/\/carts\/\d+/) && opts.method === 'POST') {
+        throw new Error('POST /carts should not be called for a reusable guest token cart')
+      }
+      if (url.includes('/carts') && !url.match(/\/carts\/\d+/) && opts.method !== 'POST') {
+        if (url.includes('cart_status')) return []
+        if (url.includes(`cartToken=${GUEST_TOKEN}`)) return [STALE_GUEST_CART]
+        return []
+      }
+      const put = url.match(/\/carts\/(\d+)/)
+      if (put && opts.method === 'PUT') {
+        return { ...STALE_GUEST_CART, cart_status: { id: 1, status: 'active' }, cartProducts: opts.body.cartProducts || [] }
+      }
+      if (url.includes('/products')) return []
+      throw new Error(`Unmocked $fetch call: ${url}`)
+    })
+
+    const result = await addCheckoutCartItem({ cartToken: GUEST_TOKEN }, { categoryId: 59, response: 'minimal' })
+
+    expect(result?.code).toBeUndefined()
+    expect(result.cartId).toBe(88)
+    expect(result.itemCount).toBe(1)
+    expect(claimedToken).toBe(GUEST_TOKEN)
   })
 })
