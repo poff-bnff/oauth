@@ -10,7 +10,7 @@ const checkoutItemStepSource = read('../pages/checkout/components/CheckoutItemSt
 const indexSource = read('../pages/checkout/index.vue')
 const invoiceStepSource = read('../pages/checkout/components/CheckoutInvoiceStep.vue')
 const progressSource = read('../pages/checkout/composables/useCheckoutProgress.js')
-const copySource = read('../pages/checkout/composables/useCheckoutCopy.js')
+const copyDefaults = JSON.parse(read('../utils/checkoutCopyDefaults.json'))
 const profileStepSource = read('../pages/checkout/components/CheckoutProfileStep.vue')
 
 describe('checkout item step source', () => {
@@ -91,8 +91,10 @@ describe('BUG 8 — empty-cart state', () => {
     expect(indexSource).toContain('copy.emptyHint')
   })
   test('the copy defines goToShop and emptyHint', () => {
-    expect(copySource).toContain('goToShop:')
-    expect(copySource).toContain('emptyHint:')
+    expect(copyDefaults.en.goToShop).toBeTruthy()
+    expect(copyDefaults.en.emptyHint).toBeTruthy()
+    expect(copyDefaults.et.goToShop).toBeTruthy()
+    expect(copyDefaults.ru.emptyHint).toBeTruthy()
   })
 })
 
