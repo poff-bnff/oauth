@@ -311,6 +311,7 @@ describe('addCheckoutCartItem', () => {
         if (url.includes('/product-categories/109')) return CATEGORY
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_ITEM]
+        if (url.includes('/products/claim')) return { claimed: [{ id: PRODUCT_2.id, code: PRODUCT_2.code }] }
         if (url.includes('/products?')) {
           productListFetches++
           productListUrl = url
@@ -337,8 +338,8 @@ describe('addCheckoutCartItem', () => {
     const result = await addCheckoutCartItem({ cartToken: 'guest-cart-token' }, { categoryId: 109, response: 'minimal' })
 
     expect(result).toMatchObject({ ok: true, cartId: CART_WITH_ITEM.id, itemCount: 2 })
-    expect(productListFetches).toBe(1)
-    expect(productListUrl).toContain('id_nin=7255')
+    expect(productListFetches).toBe(0)  // guests claim now — no product-list fetch for acquisition
+    expect(productListUrl).toBe('')     // so no exclusion query was issued
     expect(productBulkSerializeFetches).toBe(0)
     expect(categoryBulkSerializeFetches).toBe(0)
   })
