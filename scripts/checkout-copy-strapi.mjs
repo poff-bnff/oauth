@@ -38,12 +38,14 @@ export function getStrapiConfig() {
     process.env.STRAPI_URL ||
     composeStrapiUrl()
   )
-  const identifier = process.env.NUXT_STRAPI_USER ||
+  const identifier = process.env.NUXT_STRAPI_ADMIN_USER ||
+    process.env.NUXT_STRAPI_USER ||
     process.env.STRAPI_USER ||
     process.env.StrapiUserName ||
     process.env.StrapiUser ||
     process.env.STRAPI_USERNAME
-  const password = process.env.NUXT_STRAPI_PASSWORD ||
+  const password = process.env.NUXT_STRAPI_ADMIN_PASSWORD ||
+    process.env.NUXT_STRAPI_PASSWORD ||
     process.env.STRAPI_PASSWORD ||
     process.env.StrapiPassword
 
