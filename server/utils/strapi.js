@@ -1783,12 +1783,27 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
     cartBody.cartToken = newToken
   }
 
-  const cart = await $fetch(`${config.strapiUrl}/carts`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${strapiToken}`, 'Content-Type': 'application/json' },
-    body: cartBody
-  })
-  return { cart, newToken }
+  try {
+    const cart = await $fetch(`${config.strapiUrl}/carts`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${strapiToken}`, 'Content-Type': 'application/json' },
+      body: cartBody
+    })
+    return { cart, newToken }
+  } catch (createError) {
+    let raced = null
+    try {
+      raced = await getCurrentCheckoutCart(owner)
+        || (owner?.userId ? await getUserCartAnyStatus(owner.userId) : null)
+    } catch { /* lookup failed too — fall through to rethrow the original create error */ }
+    if (raced) {
+      const reset = checkoutCartExpired(raced)
+        ? await resetCheckoutCartToActive(raced, { domain: domainId, locale: body.locale || 'et' })
+        : raced
+      return { cart: reset, newToken: null }
+    }
+    throw createError
+  }
 }
 
 function isNumericId(value) {
