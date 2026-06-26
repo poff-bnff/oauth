@@ -54,7 +54,11 @@ export function getStrapiConfig() {
 
 export async function getStrapiToken({ baseUrl, identifier, password }) {
   if (!baseUrl || !identifier || !password) {
-    throw new Error('Missing Strapi URL or credentials')
+    throw new Error(
+      'Missing Strapi URL or content API credentials. ' +
+      'Use CHECKOUT_COPY_STRAPI_USER/PASSWORD or NUXT_STRAPI_USER/PASSWORD. ' +
+      'Strapi admin-panel credentials do not work with /auth/local.'
+    )
   }
 
   const data = await fetchJson(`${baseUrl}/auth/local`, {
@@ -152,7 +156,7 @@ async function fetchJson(url, options = {}) {
   const data = text ? JSON.parse(text) : null
 
   if (response.status < 200 || response.status >= 300) {
-    const message = data?.message || data?.error || text || response.statusText
+    const message = stringifyErrorMessage(data?.message || data?.error || text || response.statusText)
     throw new Error(`${response.status} ${response.statusText || ''}: ${message}`)
   }
 
@@ -279,4 +283,14 @@ function firstText(...values) {
 function stringifyLabelValue(value) {
   if (typeof value === 'function') return value({ count: '{count}' })
   return String(value || '')
+}
+
+function stringifyErrorMessage(value) {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return ''
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }

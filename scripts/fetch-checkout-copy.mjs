@@ -11,8 +11,15 @@ await loadLocalEnv()
 
 try {
   const config = getStrapiConfig()
-  const token = await getStrapiToken(config)
-  const labelGroups = await fetchCheckoutLabelGroups(config.baseUrl, token)
+  const labelGroups = await fetchCheckoutLabelGroups(config.baseUrl, null)
+    .catch(async (publicReadError) => {
+      const token = await getStrapiToken(config)
+      return fetchCheckoutLabelGroups(config.baseUrl, token)
+        .catch((authenticatedReadError) => {
+          authenticatedReadError.message = `${authenticatedReadError.message}; public read also failed: ${publicReadError.message}`
+          throw authenticatedReadError
+        })
+    })
   const overrides = normalizeCheckoutLabelGroups(labelGroups)
 
   await writeCheckoutCopyOverrides(overrides)
