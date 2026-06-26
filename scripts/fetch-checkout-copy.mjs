@@ -1,5 +1,6 @@
 import {
   fetchCheckoutLabelGroups,
+  getStrapiAdminToken,
   getStrapiConfig,
   getStrapiToken,
   loadLocalEnv,
@@ -13,12 +14,25 @@ try {
   const config = getStrapiConfig()
   const labelGroups = await fetchCheckoutLabelGroups(config.baseUrl, null)
     .catch(async (publicReadError) => {
-      const token = await getStrapiToken(config)
-      return fetchCheckoutLabelGroups(config.baseUrl, token)
-        .catch((authenticatedReadError) => {
-          authenticatedReadError.message = `${authenticatedReadError.message}; public read also failed: ${publicReadError.message}`
-          throw authenticatedReadError
-        })
+      const adminReadError = await readWithAdminToken(config).then(
+        labelGroups => ({ labelGroups }),
+        error => ({ error })
+      )
+      if (adminReadError.labelGroups) return adminReadError.labelGroups
+
+      const contentReadError = await readWithContentToken(config).then(
+        labelGroups => ({ labelGroups }),
+        error => ({ error })
+      )
+      if (contentReadError.labelGroups) return contentReadError.labelGroups
+
+      const error = contentReadError.error
+      error.message = [
+        error.message,
+        `admin read failed: ${adminReadError.error.message}`,
+        `public read failed: ${publicReadError.message}`
+      ].join('; ')
+      throw error
     })
   const overrides = normalizeCheckoutLabelGroups(labelGroups)
 
@@ -34,4 +48,14 @@ function countLabels(overrides) {
   return Object.values(overrides || {}).reduce((total, localeCopy) => {
     return total + Object.keys(localeCopy || {}).length
   }, 0)
+}
+
+async function readWithAdminToken(config) {
+  const token = await getStrapiAdminToken(config)
+  return fetchCheckoutLabelGroups(config.baseUrl, token)
+}
+
+async function readWithContentToken(config) {
+  const token = await getStrapiToken(config)
+  return fetchCheckoutLabelGroups(config.baseUrl, token)
 }

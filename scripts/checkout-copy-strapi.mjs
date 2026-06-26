@@ -34,22 +34,29 @@ export async function loadLocalEnv() {
 
 export function getStrapiConfig() {
   const baseUrl = normalizeBaseUrl(
+    process.env.CHECKOUT_COPY_STRAPI_URL ||
     process.env.NUXT_STRAPI_URL ||
     process.env.STRAPI_URL ||
     composeStrapiUrl()
   )
-  const identifier = process.env.NUXT_STRAPI_ADMIN_USER ||
+  const identifier = process.env.CHECKOUT_COPY_STRAPI_USER ||
     process.env.NUXT_STRAPI_USER ||
     process.env.STRAPI_USER ||
     process.env.StrapiUserName ||
     process.env.StrapiUser ||
     process.env.STRAPI_USERNAME
-  const password = process.env.NUXT_STRAPI_ADMIN_PASSWORD ||
+  const password = process.env.CHECKOUT_COPY_STRAPI_PASSWORD ||
     process.env.NUXT_STRAPI_PASSWORD ||
     process.env.STRAPI_PASSWORD ||
     process.env.StrapiPassword
+  const adminEmail = process.env.CHECKOUT_COPY_STRAPI_ADMIN_USER ||
+    process.env.NUXT_STRAPI_ADMIN_USER ||
+    process.env.STRAPI_ADMIN_USER
+  const adminPassword = process.env.CHECKOUT_COPY_STRAPI_ADMIN_PASSWORD ||
+    process.env.NUXT_STRAPI_ADMIN_PASSWORD ||
+    process.env.STRAPI_ADMIN_PASSWORD
 
-  return { baseUrl, identifier, password }
+  return { baseUrl, identifier, password, adminEmail, adminPassword }
 }
 
 export async function getStrapiToken({ baseUrl, identifier, password }) {
@@ -69,6 +76,25 @@ export async function getStrapiToken({ baseUrl, identifier, password }) {
 
   if (!data?.jwt) throw new Error('Strapi login did not return jwt')
   return data.jwt
+}
+
+export async function getStrapiAdminToken({ baseUrl, adminEmail, adminPassword }) {
+  if (!baseUrl || !adminEmail || !adminPassword) {
+    throw new Error(
+      'Missing Strapi admin credentials. ' +
+      'Use NUXT_STRAPI_ADMIN_USER/PASSWORD or CHECKOUT_COPY_STRAPI_ADMIN_USER/PASSWORD.'
+    )
+  }
+
+  const data = await fetchJson(`${baseUrl}/admin/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: adminEmail, password: adminPassword })
+  })
+
+  const token = data?.data?.token
+  if (!token) throw new Error('Strapi admin login did not return token')
+  return token
 }
 
 export async function fetchCheckoutLabelGroups(baseUrl, token) {
