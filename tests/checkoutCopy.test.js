@@ -42,7 +42,7 @@ describe('checkout copy Strapi label-group normalization', () => {
   test('extracts checkout labels from Strapi v3 response shape', () => {
     const normalized = normalizeCheckoutLabelGroups([
       {
-        name: 'checkout',
+        name: 'oauthCheckout',
         label: [
           {
             name: 'completeOrder',
@@ -57,6 +57,24 @@ describe('checkout copy Strapi label-group normalization', () => {
     expect(normalized.en.completeOrder).toBe('Complete from Strapi')
     expect(normalized.et.completeOrder).toBe('Lõpeta Strapis')
     expect(normalized.ru.completeOrder).toBe('Завершить из Strapi')
+  })
+
+  test('does not read the web2021 shop checkout label group', () => {
+    const normalized = normalizeCheckoutLabelGroups([
+      {
+        name: 'checkout',
+        label: [
+          {
+            name: 'addToCart',
+            value_en: 'Add to cart'
+          }
+        ]
+      }
+    ])
+
+    expect(normalized.en).toEqual({})
+    expect(normalized.et).toEqual({})
+    expect(normalized.ru).toEqual({})
   })
 
   test('accepts wrapped entity response shape and falls back to English label values', () => {
