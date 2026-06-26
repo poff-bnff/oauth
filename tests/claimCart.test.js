@@ -256,7 +256,7 @@ describe('claimGuestCart — merge (user has existing cart)', () => {
         if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
         if (url.includes('/carts') && url.includes('cartToken')) return [guestCartLimited]
         if (url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`)) return [userCartAtLimit]
-        if (url.includes('/products/claim')) { claimCalled = true; return { claimed: [{ id: 9051, code: 'X' }] } }
+        if (url.includes('/products/claim')) { if (!opts.body?.transfer) claimCalled = true; return { claimed: [{ id: 9051, code: 'X' }] } }
         if (url.includes(`/carts/${USER_CART.id}`) && opts?.method === 'PUT') { userCartPutCalled = true; return userCartAtLimit }
         if (url.includes(`/carts/${GUEST_CART.id}`) && opts?.method === 'DELETE') return {}
         if (url.includes('/carts') && !url.includes('/carts/')) return [userCartAtLimit]

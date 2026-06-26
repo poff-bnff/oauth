@@ -1388,14 +1388,21 @@ async function uploadCheckoutOwnerPhoto(photo, profileId, email) {
 // (reserveCheckoutProduct removed — replaced by the atomic /products/claim endpoint via
 //  claimCheckoutProducts; the per-product read-then-PUT reserve is no longer used.)
 
-async function clearCheckoutProductReservation(productId, userId = null) {
+// owner: { userId } | { cartToken } | a bare userId (back-compat) | null (force-clear). When an owner is
+// given, only the owner's own hold is released (never someone else's reclaimed hold).
+async function clearCheckoutProductReservation(productId, owner = null) {
+  const userId = (owner && typeof owner === 'object') ? owner.userId : owner
+  const cartToken = (owner && typeof owner === 'object') ? owner.cartToken : null
   const token = await getStrapiAdminToken()
-  if (userId) {
+  if (userId || cartToken) {
     const product = await $fetch(`${config.strapiUrl}/products/${productId}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
     const reservedTo = product?.reserved_to?.id || product?.reserved_to || null
-    if (String(reservedTo || '') !== String(userId)) return product
+    const reservedToken = product?.reserved_to_token || null
+    const mine = (userId && String(reservedTo || '') === String(userId)) ||
+                 (cartToken && String(reservedToken || '') === String(cartToken))
+    if (!mine) return product
   }
   return await $fetch(`${config.strapiUrl}/products/${productId}`, {
     method: 'PUT',
@@ -1405,6 +1412,7 @@ async function clearCheckoutProductReservation(productId, userId = null) {
     },
     body: {
       reserved_to: null,
+      reserved_to_token: null,
       reservation_price: null,
       reservation_time: null
     }
@@ -1583,7 +1591,9 @@ function checkoutCartProductIds(cart) {
 
 async function releaseCheckoutCartReservations(cart) {
   const userId = cart?.users_permissions_user?.id || cart?.users_permissions_user || null
-  await Promise.all(checkoutCartProductIds(cart).map(productId => clearCheckoutProductReservation(productId, userId).catch(() => null)))
+  const cartToken = cart?.cartToken || null
+  const owner = userId ? { userId } : { cartToken } // release this cart's own holds (user or guest token)
+  await Promise.all(checkoutCartProductIds(cart).map(productId => clearCheckoutProductReservation(productId, owner).catch(() => null)))
 }
 
 async function refreshCheckoutCartReservations(cart, userId) {
@@ -1816,15 +1826,30 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
   return value
 }
 
-async function claimCheckoutProducts({ category, productIds, userId, quantity, price }) {
+// Atomically claim (reserve) products for an owner — a logged-in user (userId) OR a guest cart token
+// (cartToken). Guests now hold products just like users.
+async function claimCheckoutProducts({ category, productIds, userId, cartToken, quantity, price }) {
   const token = await getStrapiAdminToken()
+  const owner = userId ? { userId } : { cartToken }
   const body = (productIds && productIds.length)
-    ? { productIds, userId, reservationPrice: price }
-    : { categoryId: category.id, userId, quantity, reservationPrice: price }
+    ? { productIds, ...owner, reservationPrice: price }
+    : { categoryId: category.id, ...owner, quantity, reservationPrice: price }
   const res = await $fetch(`${config.strapiUrl}/products/claim`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body
+  })
+  return res?.claimed || []
+}
+
+// Move a guest's token-held products onto the now-logged-in user (one atomic UPDATE in Strapi).
+async function transferGuestReservations(cartToken, userId) {
+  if (!cartToken || !userId) return []
+  const token = await getStrapiAdminToken()
+  const res = await $fetch(`${config.strapiUrl}/products/claim`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: { transfer: true, cartToken: String(cartToken), userId }
   })
   return res?.claimed || []
 }
@@ -1837,6 +1862,7 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
     params.append('_limit', String(queryLimit))
     params.append('code_null', 'false')
     params.append('reserved_to_null', 'true')
+    params.append('reserved_to_token_null', 'true') // a guest token hold counts as taken
     params.append('owner_null', 'true')
     params.append('product_category_null', 'false')
     params.append('transactions_null', 'true')
@@ -1863,29 +1889,6 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   }
 
   return await fetchProducts(buildParams(limit + excludedProductIds.length + 5))
-}
-
-async function peekAvailableCheckoutProductIds(category, quantity = 1, excludedProductIds = []) {
-  const token = await getStrapiAdminToken()
-  const body = { peek: true, quantity, excludeIds: excludedProductIds }
-  if (category?.id) body.categoryId = category.id
-  else if (category?.codePrefix) body.codePrefix = category.codePrefix
-  const res = await $fetch(`${config.strapiUrl}/products/claim`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body
-  })
-  if (!res || !Array.isArray(res.peeked)) throw new Error('peekUnsupported')
-  const excluded = new Set(excludedProductIds.map(id => String(id)))
-  return res.peeked.filter(p => p && !excluded.has(String(p.id))).slice(0, quantity)
-}
-
-async function acquireGuestCheckoutProducts(category, quantity, excludedProductIds) {
-  try {
-    return await peekAvailableCheckoutProductIds(category, quantity, excludedProductIds)
-  } catch {
-    return await getAvailableCheckoutProducts(category, quantity, excludedProductIds)
-  }
 }
 
 function checkoutCategoryTitle(category, locale = 'et') {
@@ -2058,6 +2061,7 @@ async function getAvailableCheckoutProductCount(category, excludedProductIds = [
   const params = new URLSearchParams()
   params.append('code_null', 'false')
   params.append('reserved_to_null', 'true')
+  params.append('reserved_to_token_null', 'true') // a guest token hold counts as taken
   params.append('owner_null', 'true')
   params.append('product_category_null', 'false')
   params.append('transactions_null', 'true')
@@ -2152,22 +2156,20 @@ export async function addCheckoutCartItem(owner, body = {}) {
 
     const isGuest = !owner?.userId
     const userId = owner?.userId || null
+    // Guests now reserve too, against their cart token (the adopted one, or the freshly-minted newToken).
+    const guestToken = isGuest ? (owner?.cartToken || newToken) : null
 
-    let acquired
-    if (!isGuest) {
-      acquired = await claimCheckoutProducts({ category, userId, quantity, price })
-    } else {
-      const existingProductIds = (cart.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
-      acquired = await acquireGuestCheckoutProducts(category, quantity, existingProductIds)
-    }
+    // Atomically claim/reserve for the owner (user or guest token) — identical handling for both. The
+    // reserved-filter already excludes products this owner is already holding, so no manual exclusion.
+    const acquired = await claimCheckoutProducts({ category, userId, cartToken: guestToken, quantity, price })
     if (acquired.length < quantity) {
-      if (!isGuest) await Promise.all(acquired.map(p => clearCheckoutProductReservation(p.id, userId).catch(() => null)))
+      await Promise.all(acquired.map(p => clearCheckoutProductReservation(p.id, { userId, cartToken: guestToken }).catch(() => null)))
       return { code: 404, case: 'noItems', available: acquired.length }
     }
 
     const token = await getStrapiAdminToken()
     const now = new Date().toISOString()
-    const reservedProductIds = isGuest ? [] : acquired.map(p => p.id)
+    const reservedProductIds = acquired.map(p => p.id)
     const newRows = acquired.map(product => ({
       product: product.id,
       priceInCart: price,
@@ -2197,9 +2199,8 @@ export async function addCheckoutCartItem(owner, body = {}) {
       if (newToken) return { ...serialized, newCartToken: newToken }
       return serialized
     } catch (error) {
-      if (!isGuest) {
-        await Promise.all(reservedProductIds.map(productId => clearCheckoutProductReservation(productId, userId).catch(() => null)))
-      }
+      // Release the holds we just took (user or guest token) so a failed cart write doesn't orphan them.
+      await Promise.all(reservedProductIds.map(productId => clearCheckoutProductReservation(productId, { userId, cartToken: guestToken }).catch(() => null)))
       return { code: 409, case: error.message === 'reservationSaveFailed' ? 'reservationSaveFailed' : 'productUnavailable' }
     }
   })
@@ -2287,14 +2288,15 @@ const _lastReservationRefresh = new Map()
 const RESERVATION_REFRESH_INTERVAL_MS = 5 * 60_000
 
 async function refreshHeldCartReservations(owner, cart) {
-  if (!owner?.userId || !cart?.id) return
+  if ((!owner?.userId && !owner?.cartToken) || !cart?.id) return
   const last = _lastReservationRefresh.get(cart.id) || 0
   if (Date.now() - last < RESERVATION_REFRESH_INTERVAL_MS) return
   _lastReservationRefresh.set(cart.id, Date.now())
   const rows = cart.cartProducts || []
   const productIds = rows.map(item => item.product?.id || item.product).filter(Boolean)
   if (!productIds.length) return
-  await claimCheckoutProducts({ productIds, userId: owner.userId, price: rows[0]?.priceInCart ?? null }).catch(() => null)
+  // Re-stamp the owner's held products (user or guest token) so an active cart's holds stay fresh.
+  await claimCheckoutProducts({ productIds, userId: owner.userId, cartToken: owner.cartToken, price: rows[0]?.priceInCart ?? null }).catch(() => null)
 }
 
 export async function touchCheckoutCartSession(owner, locale = 'et') {
@@ -2997,10 +2999,13 @@ async function resolveCartLineCategory(item) {
 }
 
 async function claimGuestLine(item, userId) {
+  const productId = item.product?.id || item.product
+  if (!productId) return null
   const category = await resolveCartLineCategory(item)
-  if (!category?.id) return null
-  const price = getCheckoutProductCurrentPrice(category) ?? item.priceInCart
-  const claimed = await claimCheckoutProducts({ category, userId, quantity: 1, price })
+  const price = (category && getCheckoutProductCurrentPrice(category)) ?? item.priceInCart
+  // Claim the guest's OWN product by id — after the transfer it's reserved to this user ("mine"), so it
+  // succeeds and the guest keeps that exact product; if it was taken before login the claim fails → drop.
+  const claimed = await claimCheckoutProducts({ productIds: [productId], userId, price })
   if (!claimed.length) return null
   return { productId: claimed[0].id, price }
 }
@@ -3016,6 +3021,11 @@ export async function claimGuestCart(userId, cartToken) {
     await deleteGuestCart(guestCart.id)
     return { claimed: true, droppedItems: [] }
   }
+
+  // Guests now hold their products (reserved_to_token). Move those holds onto the user in one shot, so the
+  // per-line claims below match the user's own reservation ("mine") and keep the guest's EXACT products.
+  // Anything taken before login simply won't transfer and is dropped below.
+  await transferGuestReservations(cartToken, userId).catch(() => null)
 
   const token = await getStrapiAdminToken()
   const now = new Date().toISOString()
@@ -3069,7 +3079,7 @@ export async function claimGuestCart(userId, cartToken) {
       const limit = catLimit.get(category.id)
       if (limit != null && (runningCat.get(category.id) || 0) >= limit) { droppedItems.push({ productId: pid, reason: 'cartLimit' }); continue }
       const price = getCheckoutProductCurrentPrice(category) ?? item.priceInCart
-      const claimed = await claimCheckoutProducts({ category, userId, quantity: 1, price })
+      const claimed = await claimCheckoutProducts({ productIds: [pid], userId, price }) // keep the guest's own product (transferred above)
       if (!claimed.length) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
       addedRows.push({ product: claimed[0].id, priceInCart: price, timeToCart: now })
       totalCount++

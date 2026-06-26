@@ -73,11 +73,27 @@ function makeStatefulFetch(cart, availableProducts) {
   let state = { ...cart, cartProducts: cart.cartProducts.map(r => ({ ...r })) }
   const cartId = cart.id
   let nextComponentId = 1000
+  const claimedIds = new Set()
 
   return vi.fn().mockImplementation(async (url, opts) => {
     if (url.includes('/admin/login')) return { data: { token: ADMIN_JWT } }
     if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
     if (url.includes('/product-categories')) return CATEGORY
+
+    // /products/claim — atomically reserve a product (simulates FOR UPDATE SKIP LOCKED). Guests and
+    // users both claim now; hand out the next unclaimed product so parallel adds never collide.
+    if (url.includes('/products/claim') && opts?.method === 'POST') {
+      const body = opts.body || {}
+      if (body.transfer) return { claimed: [] }
+      if (Array.isArray(body.productIds)) return { claimed: body.productIds.map(id => ({ id, code: `PROD-${id}` })) }
+      const qty = Math.max(1, Number(body.quantity || 1))
+      const claimed = []
+      for (const p of availableProducts) {
+        if (claimed.length >= qty) break
+        if (!claimedIds.has(p.id)) { claimedIds.add(p.id); claimed.push({ id: p.id, code: p.code }) }
+      }
+      return { claimed }
+    }
 
     // Products availability — return the full pool; the function filters by excludedProductIds
     if (url.includes('/products') && !url.match(/\/products\/\d+/)) {
