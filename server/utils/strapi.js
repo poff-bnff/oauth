@@ -1698,11 +1698,8 @@ async function getCurrentCheckoutCart(owner, options = {}) {
   params.append('cart_status', activeStatus.id)
   params.append('_sort', 'cartUpdatedAt:DESC')
   params.append('_limit', '1')
-  params.append('lean', 'checkout')
 
-  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
+  const carts = await fetchCheckoutCarts(params, token)
   const cart = Array.isArray(carts) ? carts[0] : carts
   if (cart && checkoutCartExpired(cart)) {
     await expireCheckoutCart(cart)
@@ -1741,10 +1738,7 @@ async function getUserCartAnyStatus(userId) {
   params.append('users_permissions_user', userId)
   params.append('_sort', 'cartUpdatedAt:DESC')
   params.append('_limit', '1')
-  params.append('lean', 'checkout')
-  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
+  const carts = await fetchCheckoutCarts(params, token)
   return Array.isArray(carts) ? carts[0] : carts
 }
 
@@ -1755,11 +1749,23 @@ async function getCartByTokenAnyStatus(cartToken) {
   params.append('cartToken', cartToken)
   params.append('_sort', 'cartUpdatedAt:DESC')
   params.append('_limit', '1')
-  params.append('lean', 'checkout')
-  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
+  const carts = await fetchCheckoutCarts(params, token)
   return Array.isArray(carts) ? carts[0] : carts
+}
+
+async function fetchCheckoutCarts(params, token) {
+  const leanParams = new URLSearchParams(params)
+  leanParams.append('lean', 'checkout')
+  try {
+    return await $fetch(`${config.strapiUrl}/carts?${leanParams.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+  } catch (error) {
+    console.warn('[checkout] lean cart read failed; falling back to default Strapi cart read:', error?.message || error)
+    return await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+  }
 }
 
 async function ensureCurrentCheckoutCart(owner, body = {}) {
