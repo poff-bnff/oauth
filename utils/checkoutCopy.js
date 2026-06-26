@@ -2,11 +2,10 @@ import checkoutCopyDefaults from './checkoutCopyDefaults.json'
 import checkoutCopyOverrides from '../generated/checkoutCopy.json'
 
 export const CHECKOUT_COPY_GROUP_NAMES = [
-  'checkout',
-  'checkoutCopy',
-  'checkout-copy',
   'oauthCheckout',
-  'oauth-checkout'
+  'oauth-checkout',
+  'checkoutCopy',
+  'checkout-copy'
 ]
 
 export const CHECKOUT_COPY_DEFAULTS = checkoutCopyDefaults

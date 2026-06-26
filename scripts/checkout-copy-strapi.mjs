@@ -8,11 +8,10 @@ const projectRoot = resolve(__dirname, '..')
 export const checkoutCopyOutputPath = resolve(projectRoot, 'generated/checkoutCopy.json')
 export const checkoutCopyDefaultsPath = resolve(projectRoot, 'utils/checkoutCopyDefaults.json')
 export const CHECKOUT_COPY_GROUP_NAMES = [
-  'checkout',
-  'checkoutCopy',
-  'checkout-copy',
   'oauthCheckout',
-  'oauth-checkout'
+  'oauth-checkout',
+  'checkoutCopy',
+  'checkout-copy'
 ]
 export const CHECKOUT_COPY_LOCALES = ['en', 'et', 'ru']
 
@@ -105,7 +104,7 @@ export function normalizeCheckoutLabelGroups(labelGroups) {
 export function checkoutLabelPayload(defaults) {
   const keys = Object.keys(defaults?.en || {}).sort()
   return {
-    name: 'checkout',
+    name: 'oauthCheckout',
     label: keys.map(name => ({
       name,
       value_en: stringifyLabelValue(defaults.en?.[name]),
