@@ -1698,6 +1698,7 @@ async function getCurrentCheckoutCart(owner, options = {}) {
   params.append('cart_status', activeStatus.id)
   params.append('_sort', 'cartUpdatedAt:DESC')
   params.append('_limit', '1')
+  params.append('lean', 'checkout')
 
   const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -1740,6 +1741,7 @@ async function getUserCartAnyStatus(userId) {
   params.append('users_permissions_user', userId)
   params.append('_sort', 'cartUpdatedAt:DESC')
   params.append('_limit', '1')
+  params.append('lean', 'checkout')
   const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
@@ -1753,6 +1755,7 @@ async function getCartByTokenAnyStatus(cartToken) {
   params.append('cartToken', cartToken)
   params.append('_sort', 'cartUpdatedAt:DESC')
   params.append('_limit', '1')
+  params.append('lean', 'checkout')
   const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` }
   })

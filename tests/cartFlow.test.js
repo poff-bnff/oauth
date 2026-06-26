@@ -298,6 +298,38 @@ describe('addCheckoutCartItem', () => {
     expect(claimBody).toMatchObject({ categoryId: 109, userId: USER_ID, quantity: 1 })
   })
 
+  it('uses lean Strapi cart reads on the checkout add-to-cart hot path', async () => {
+    const cartListUrls = []
+
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/products/claim')) return { mode: 'byCategory', got: 1, claimed: [{ id: SECOND_PRODUCT.id, code: SECOND_PRODUCT.code }] }
+        if (url.includes('/product-categories')) return CATEGORY
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) {
+          cartListUrls.push(url)
+          return [CART_WITH_ITEM]
+        }
+        if (url.includes('/carts/') && opts?.method === 'PUT') {
+          return {
+            ...CART_WITH_ITEM,
+            cartProducts: [
+              ...CART_WITH_ITEM.cartProducts,
+              { id: 101, product: SECOND_PRODUCT, priceInCart: 100, timeToCart: NOW }
+            ]
+          }
+        }
+      }
+    )
+
+    const result = await addCheckoutCartItem({ userId: USER_ID }, { categoryId: 109, response: 'minimal' })
+
+    expect(result).toMatchObject({ ok: true, cartId: CART_WITH_ITEM.id, itemCount: 2 })
+    expect(cartListUrls.length).toBeGreaterThan(0)
+    expect(cartListUrls.every(url => url.includes('lean=checkout'))).toBe(true)
+  })
+
   it('can return a minimal response without serializing the full cart', async () => {
     const PRODUCT_2 = { ...PRODUCT, id: 7256, code: 'TEST-2026-0005' }
     let productListFetches = 0
