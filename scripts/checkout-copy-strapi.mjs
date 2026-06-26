@@ -1,4 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import http from 'node:http'
+import https from 'node:https'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -143,16 +145,64 @@ export async function upsertCheckoutLabelGroup(baseUrl, token, payload) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options)
-  const text = await response.text()
+  const response = await request(url, options)
+  const text = response.text
   const data = text ? JSON.parse(text) : null
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     const message = data?.message || data?.error || text || response.statusText
-    throw new Error(`${response.status} ${response.statusText}: ${message}`)
+    throw new Error(`${response.status} ${response.statusText || ''}: ${message}`)
   }
 
   return data
+}
+
+async function request(url, options = {}) {
+  if (typeof fetch === 'function') {
+    const response = await fetch(url, options)
+    return {
+      status: response.status,
+      statusText: response.statusText,
+      text: await response.text()
+    }
+  }
+
+  return nodeRequest(url, options)
+}
+
+function nodeRequest(url, options = {}) {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const parsedUrl = new URL(url)
+    const body = options.body || null
+    const transport = parsedUrl.protocol === 'https:' ? https : http
+    const requestOptions = {
+      method: options.method || 'GET',
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || undefined,
+      path: `${parsedUrl.pathname}${parsedUrl.search}`,
+      headers: {
+        ...(options.headers || {}),
+        ...(body ? { 'content-length': Buffer.byteLength(body) } : {})
+      }
+    }
+
+    const req = transport.request(requestOptions, (res) => {
+      let text = ''
+      res.setEncoding('utf8')
+      res.on('data', chunk => { text += chunk })
+      res.on('end', () => {
+        resolveRequest({
+          status: res.statusCode,
+          statusText: res.statusMessage,
+          text
+        })
+      })
+    })
+
+    req.on('error', rejectRequest)
+    if (body) req.write(body)
+    req.end()
+  })
 }
 
 async function loadEnvFile(filePath) {
