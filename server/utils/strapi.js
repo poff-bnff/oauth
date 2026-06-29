@@ -1272,6 +1272,19 @@ async function getStrapiCollectionItemsByIds(collection, ids = []) {
   return new Map(normalizeStrapiList(rows).map(row => [String(row.id), row]))
 }
 
+async function getCheckoutProductCategoriesByIds(ids = []) {
+  const categories = await getStrapiCollectionItemsByIds('product-categories', ids)
+  const entries = [...categories.entries()]
+
+  await Promise.all(entries.map(async ([id, category]) => {
+    if (!category || Object.prototype.hasOwnProperty.call(category, 'pickup_locations')) return
+    const hydrated = await getProductCategoryByAnyId(id, category.codePrefix).catch(() => null)
+    if (hydrated?.id) categories.set(String(hydrated.id), hydrated)
+  }))
+
+  return categories
+}
+
 async function getAvailableCheckoutProduct(categoryId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
@@ -2031,7 +2044,7 @@ async function serializeCheckoutCart(cart, locale = 'et') {
     }
   }
 
-  const fetchedCategories = await getStrapiCollectionItemsByIds('product-categories', missingCategoryIds)
+  const fetchedCategories = await getCheckoutProductCategoriesByIds(missingCategoryIds)
 
   const resolved = products.map((row, index) => {
     const productIsPopulated = row.product && typeof row.product === 'object'

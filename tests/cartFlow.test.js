@@ -662,6 +662,53 @@ describe('touchCheckoutCartSession', () => {
     expect(individualCategoryFetches).toBe(0)
   })
 
+  it('hydrates shallow bulk category rows so pickup locations do not disappear', async () => {
+    const pickupLocation = { id: 44, name: { en: 'Festival info desk' }, address: 'Tallinn' }
+    const shallowCategory = {
+      id: CATEGORY.id,
+      codePrefix: CATEGORY.codePrefix,
+      namePrivate: CATEGORY.namePrivate,
+      priceAtPeriod: CATEGORY.priceAtPeriod,
+      salesPeriod: CATEGORY.salesPeriod,
+      business_profile: CATEGORY.business_profile
+    }
+    const fullCategory = { ...CATEGORY, pickup_locations: [pickupLocation] }
+    let individualCategoryFetches = 0
+
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [CART_WITH_TWO_UNPOPULATED_ITEMS]
+        if (url.includes('/carts/') && opts?.method === 'PUT') {
+          return { ...CART_WITH_TWO_UNPOPULATED_ITEMS, cartUpdatedAt: opts.body.cartUpdatedAt }
+        }
+        if (url.includes('/products?')) {
+          return [
+            { ...PRODUCT, product_category: CATEGORY.id },
+            { ...SECOND_PRODUCT, product_category: CATEGORY.id }
+          ]
+        }
+        if (url.includes('/product-categories?')) return [shallowCategory]
+        if (/\/product-categories\/\d+/.test(url)) {
+          individualCategoryFetches++
+          return fullCategory
+        }
+      }
+    )
+
+    const result = await touchCheckoutCartSession({ userId: USER_ID }, 'en')
+
+    expect(individualCategoryFetches).toBe(1)
+    expect(result.items).toHaveLength(2)
+    expect(result.items[0].pickupLocations).toEqual([
+      expect.objectContaining({ id: 44, name: 'Festival info desk' })
+    ])
+    expect(result.items[1].pickupLocations).toEqual([
+      expect.objectContaining({ id: 44, name: 'Festival info desk' })
+    ])
+  })
+
   it('refreshes the held reservations via an atomic claim on touch, then throttles (STEP 1)', async () => {
     let claimBody = null
     claimOverride = (body) => { claimBody = body; return { claimed: [{ id: PRODUCT.id, code: 'C' }] } }
