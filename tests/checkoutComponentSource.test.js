@@ -109,6 +109,23 @@ describe('checkout context refresh metadata stability', () => {
   })
 })
 
+describe('checkout action error display', () => {
+  test('page-level errors hide raw fetch/network internals from users', () => {
+    expect(indexSource).toContain('function checkoutErrorMessage')
+    expect(indexSource).toContain("String(message).includes('NetworkError')")
+    expect(indexSource).toContain("String(message).startsWith('[')")
+    expect(indexSource).not.toContain("err?.data?.statusMessage || err?.message || 'Could not remove item'")
+  })
+
+  test('remove refreshes the cart before showing a friendly fallback error', () => {
+    expect(indexSource).toContain("console.warn('[checkout] cart item remove failed'")
+    expect(indexSource).toMatch(/catch \(err\)[\s\S]*await refreshContext\(\)[\s\S]*checkoutCartUpdateFailedMessage\(\)/)
+    expect(copyDefaults.en.cartUpdateFailed).toBeTruthy()
+    expect(copyDefaults.et.cartUpdateFailed).toBeTruthy()
+    expect(copyDefaults.ru.cartUpdateFailed).toBeTruthy()
+  })
+})
+
 describe('BUG 6 — gift photo IndexedDB wiring', () => {
   test('the item step stashes and clears photos', () => {
     expect(checkoutItemStepSource).toContain("from '../composables/useCheckoutPhotoStore.js'")

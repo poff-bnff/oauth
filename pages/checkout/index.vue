@@ -32,6 +32,13 @@ const authHeaders = computed(() => ({ Authorization: `Bearer ${token.value}` }))
 // ── Copy (i18n) ───────────────────────────────────────────────────────────────
 const copy = useCheckoutCopy(locale)
 
+function checkoutErrorMessage (err, fallback) {
+  const message = err?.data?.data?.case || err?.data?.statusMessage || err?.message || ''
+  if (!message) return fallback
+  if (String(message).includes('NetworkError') || String(message).startsWith('[')) return fallback
+  return message
+}
+
 // ── Core state ────────────────────────────────────────────────────────────────
 // ── Transaction result (return from payment gateway) ─────────────────────────
 const transactionResult = computed(() => {
@@ -486,7 +493,7 @@ async function refreshContext () {
         await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: true })
         return
       }
-      error.value = err?.data?.statusMessage || err?.message || 'Checkout failed to load'
+      error.value = checkoutErrorMessage(err, 'Checkout failed to load')
     } finally {
       loading.value = false
       contextRefreshInFlight.value = false
@@ -623,7 +630,7 @@ async function saveInvoiceProfile (options = {}) {
     await refreshBusinessProfiles()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {
-    error.value = err?.data?.statusMessage || err?.message || 'Could not save invoice profile'
+    error.value = checkoutErrorMessage(err, 'Could not save invoice profile')
   } finally {
     savingInvoiceProfile.value = false
   }
@@ -644,7 +651,7 @@ async function saveSelectedProfile (options = {}) {
     snapshotInvoiceForm()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {
-    error.value = err?.data?.statusMessage || err?.message || 'Could not save invoice profile'
+    error.value = checkoutErrorMessage(err, 'Could not save invoice profile')
   } finally {
     savingInvoiceProfile.value = false
   }
@@ -687,6 +694,18 @@ function buildPaymentReturnUrl () {
   return base.toString()
 }
 
+function checkoutCartUpdateFailedMessage () {
+  return copy.value.cartUpdateFailed || 'Could not update your cart. Please try again.'
+}
+
+function isCheckoutCartItemPresent (item, componentId) {
+  const productId = item?.productId != null ? String(item.productId) : null
+  return (cart.value.items || []).some((current) => {
+    if (componentId != null && current.componentId === componentId) return true
+    return productId != null && String(current.productId) === productId
+  })
+}
+
 function removeItem ({ item }) {
   const componentId = item.componentId ?? null
   error.value = ''
@@ -706,7 +725,14 @@ function removeItem ({ item }) {
       deletePhoto(itemKey(item))
       await refreshContext()
     } catch (err) {
-      error.value = err?.data?.statusMessage || err?.message || 'Could not remove item'
+      console.warn('[checkout] cart item remove failed', err) // eslint-disable-line no-console
+      await refreshContext()
+      if (isCheckoutCartItemPresent(item, componentId)) {
+        error.value = checkoutCartUpdateFailedMessage()
+      } else {
+        error.value = ''
+        deletePhoto(itemKey(item))
+      }
     } finally {
       removingComponentIds.value = new Set([...removingComponentIds.value].filter(id => id !== componentId))
     }
@@ -777,7 +803,7 @@ async function pay () {
       await navigateTo(result.url, { external: true })
     }
   } catch (err) {
-    error.value = err?.data?.data?.case || err?.data?.statusMessage || err?.message || 'Payment failed'
+    error.value = checkoutErrorMessage(err, 'Payment failed')
   } finally {
     paying.value = false
   }
