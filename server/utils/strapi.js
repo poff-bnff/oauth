@@ -1273,12 +1273,15 @@ async function getStrapiCollectionItemsByIds(collection, ids = []) {
 }
 
 async function getCheckoutProductCategoriesByIds(ids = []) {
-  const categories = await getStrapiCollectionItemsByIds('product-categories', ids)
-  const entries = [...categories.entries()]
+  const idsToFetch = [...new Set(ids.map(id => String(id || '')).filter(Boolean))]
+  if (!idsToFetch.length) return new Map()
 
-  await Promise.all(entries.map(async ([id, category]) => {
-    if (!category || Object.prototype.hasOwnProperty.call(category, 'pickup_locations')) return
-    const hydrated = await getProductCategoryByAnyId(id, category.codePrefix).catch(() => null)
+  const categories = await getStrapiCollectionItemsByIds('product-categories', idsToFetch)
+
+  await Promise.all(idsToFetch.map(async (id) => {
+    const category = categories.get(String(id))
+    if (category && Object.prototype.hasOwnProperty.call(category, 'pickup_locations')) return
+    const hydrated = await getProductCategoryByAnyId(id, category?.codePrefix).catch(() => null)
     if (hydrated?.id) categories.set(String(hydrated.id), hydrated)
   }))
 
@@ -2039,8 +2042,9 @@ async function serializeCheckoutCart(cart, locale = 'et') {
       ? row.product
       : fetchedProducts.get(String(row.product))
     const category = product?.product_category
-    if (category && typeof category !== 'object') {
-      missingCategoryIds.push(category)
+    const categoryId = category && typeof category === 'object' ? category.id : category
+    if (categoryId && (typeof category !== 'object' || !Object.prototype.hasOwnProperty.call(category, 'pickup_locations'))) {
+      missingCategoryIds.push(categoryId)
     }
   }
 
@@ -2050,10 +2054,11 @@ async function serializeCheckoutCart(cart, locale = 'et') {
     const productIsPopulated = row.product && typeof row.product === 'object'
     const product = productIsPopulated ? row.product : fetchedProducts.get(String(row.product))
     if (!product) return null
-    const categoryIsPopulated = product.product_category && typeof product.product_category === 'object'
-    const category = categoryIsPopulated
-      ? product.product_category
-      : fetchedCategories.get(String(product.product_category))
+    const categoryId = product.product_category && typeof product.product_category === 'object'
+      ? product.product_category.id
+      : product.product_category
+    const category = fetchedCategories.get(String(categoryId)) ||
+      (product.product_category && typeof product.product_category === 'object' ? product.product_category : null)
     const price = Number(row.priceInCart || getCheckoutProductCurrentPrice(category) || 0)
     return {
       index,

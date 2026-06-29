@@ -98,6 +98,17 @@ describe('BUG 8 — empty-cart state', () => {
   })
 })
 
+describe('checkout context refresh metadata stability', () => {
+  test('background refreshes preserve existing pickup options when a shallow cart response omits them', () => {
+    expect(indexSource).toContain('function preserveCheckoutItemDetails')
+    expect(indexSource).toContain('previous?.pickupLocations?.length')
+    expect(indexSource).toContain('const sameProduct =')
+    expect(indexSource).toContain('const sameCategory =')
+    expect(indexSource).toContain('return { ...item, pickupLocations: previous.pickupLocations }')
+    expect(indexSource).toMatch(/context\.value = preserveCheckoutItemDetails\(nextContext, previousItems\)/)
+  })
+})
+
 describe('BUG 6 — gift photo IndexedDB wiring', () => {
   test('the item step stashes and clears photos', () => {
     expect(checkoutItemStepSource).toContain("from '../composables/useCheckoutPhotoStore.js'")

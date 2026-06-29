@@ -709,6 +709,52 @@ describe('touchCheckoutCartSession', () => {
     ])
   })
 
+  it('hydrates shallow embedded category rows from Strapi cart update responses', async () => {
+    const pickupLocation = { id: 45, name: { en: 'Pass pickup desk' }, address: 'Tartu mnt' }
+    const shallowEmbeddedCategory = {
+      id: CATEGORY.id,
+      codePrefix: CATEGORY.codePrefix,
+      namePrivate: CATEGORY.namePrivate,
+      priceAtPeriod: CATEGORY.priceAtPeriod,
+      salesPeriod: CATEGORY.salesPeriod,
+      business_profile: CATEGORY.business_profile,
+      transferable: true
+    }
+    const fullCategory = { ...shallowEmbeddedCategory, pickup_locations: [pickupLocation] }
+    const cartWithShallowEmbeddedCategory = {
+      ...CART_WITH_ITEM,
+      cartProducts: [{
+        id: 100,
+        product: { ...PRODUCT, product_category: shallowEmbeddedCategory },
+        priceInCart: 100,
+        timeToCart: NOW
+      }]
+    }
+    let individualCategoryFetches = 0
+
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts') && !url.includes('/carts/')) return [cartWithShallowEmbeddedCategory]
+        if (url.includes('/carts/') && opts?.method === 'PUT') return cartWithShallowEmbeddedCategory
+        if (url.includes('/product-categories?')) return [shallowEmbeddedCategory]
+        if (/\/product-categories\/\d+/.test(url)) {
+          individualCategoryFetches++
+          return fullCategory
+        }
+      }
+    )
+
+    const result = await touchCheckoutCartSession({ userId: USER_ID }, 'en')
+
+    expect(individualCategoryFetches).toBe(1)
+    expect(result.items[0]).toMatchObject({
+      transferable: true,
+      pickupLocations: [expect.objectContaining({ id: 45, name: 'Pass pickup desk' })]
+    })
+  })
+
   it('refreshes the held reservations via an atomic claim on touch, then throttles (STEP 1)', async () => {
     let claimBody = null
     claimOverride = (body) => { claimBody = body; return { claimed: [{ id: PRODUCT.id, code: 'C' }] } }

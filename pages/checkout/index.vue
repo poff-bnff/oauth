@@ -385,9 +385,29 @@ function openNextIncompleteItem () {
   if (nextIndex >= 0) openItemKey.value = itemKey(items[nextIndex], nextIndex)
 }
 
+function preserveCheckoutItemDetails (nextContext, previousItems = []) {
+  const nextItems = nextContext?.cart?.items
+  if (!Array.isArray(nextItems) || !previousItems.length) return nextContext
+
+  const previousByKey = new Map(previousItems.map((item, index) => [itemKey(item, index), item]))
+  let changed = false
+  const mergedItems = nextItems.map((item, index) => {
+    const previous = previousByKey.get(itemKey(item, index))
+    const sameProduct = String(previous?.productId || '') === String(item.productId || '')
+    const sameCategory = String(previous?.categoryId || previous?.codePrefix || '') === String(item.categoryId || item.codePrefix || '')
+    if (!sameProduct || !sameCategory || !previous?.pickupLocations?.length || item.pickupLocations?.length) return item
+    changed = true
+    return { ...item, pickupLocations: previous.pickupLocations }
+  })
+
+  if (!changed) return nextContext
+  return { ...nextContext, cart: { ...nextContext.cart, items: mergedItems } }
+}
+
 function applyCheckoutContext (nextContext, options = {}) {
-  const previousSignature = cartSignature(cart.value.items || [])
-  context.value = nextContext
+  const previousItems = cart.value.items || []
+  const previousSignature = cartSignature(previousItems)
+  context.value = preserveCheckoutItemDetails(nextContext, previousItems)
   const nextItems = cart.value.items || []
   const nextSignature = cartSignature(nextItems)
 
