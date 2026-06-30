@@ -2319,8 +2319,13 @@ export async function removeCheckoutCartItem(owner, body = {}) {
       timeToCart: item.timeToCart
     }))
 
-    if (userId) {
-      await Promise.all(removedProductIds.map(productId => clearCheckoutProductReservation(productId, userId).catch(() => null)))
+    // Release the removed products' holds for THIS owner — user or guest token. Guests reserve too
+    // (reserved_to_token), so a userId-only gate leaked guest holds: the row left the cart but the
+    // reservation stayed, and later cart-expiry can't release it (it's no longer in cartProducts).
+    // clearCheckoutProductReservation only clears a hold that matches this owner, so it's safe.
+    const releaseOwner = userId ? { userId } : (owner.cartToken ? { cartToken: owner.cartToken } : null)
+    if (releaseOwner) {
+      await Promise.all(removedProductIds.map(productId => clearCheckoutProductReservation(productId, releaseOwner).catch(() => null)))
     }
 
     const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
@@ -2344,7 +2349,9 @@ export async function clearCheckoutCart(owner) {
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { ok: true }
     const token = await getStrapiAdminToken()
-    if (owner?.userId) await releaseCheckoutCartReservations(cart)
+    // Release holds for user AND guest carts — releaseCheckoutCartReservations reads the cart's own
+    // owner (users_permissions_user or cartToken), so guests' reserved_to_token holds get cleared too.
+    if (owner?.userId || owner?.cartToken) await releaseCheckoutCartReservations(cart)
     const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

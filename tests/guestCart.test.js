@@ -7,7 +7,7 @@
  *   - Cart is capped at CART_LIMITS.maxItemsPerCart (50) items
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { addCheckoutCartItem } from '../server/utils/strapi.js'
+import { addCheckoutCartItem, removeCheckoutCartItem } from '../server/utils/strapi.js'
 
 const NOW = '2026-06-02T12:00:00.000Z'
 const GUEST_TOKEN = 'guest-abc123'
@@ -204,5 +204,44 @@ describe('sales period gate (returns before any claim)', () => {
     const expired = { ...CATEGORY, salesPeriod: [{ startDateTime: '2025-01-01T00:00:00.000Z', endDateTime: '2025-06-01T00:00:00.000Z' }] }
     setupFetch(adminTokenHandler, (url) => { if (url.includes('/product-categories')) return expired })
     expect(await addCheckoutCartItem(null, { categoryId: 200 })).toMatchObject({ code: 400, case: 'notOnSale' })
+  })
+})
+
+// ── Guest remove releases the guest's product hold (no leaked reserved_to_token) ──
+describe('guest cart remove — releases the guest token reservation', () => {
+  it('clears reserved_to_token on the removed product so the hold does not leak', async () => {
+    const cart = {
+      id: 520, cartProducts: [{ id: 901, product: PRODUCT_A, priceInCart: 75, timeToCart: NOW }],
+      cartUpdatedAt: NOW, cartTimeout: '00:30:00', cartToken: GUEST_TOKEN,
+      cart_status: { id: 1, status: 'active' }, users_permissions_user: null, locale: 'et'
+    }
+    let releasedProductId = null
+    let releaseBody = null
+    setupFetch(
+      adminTokenHandler,
+      (url, opts) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        // getCurrentCheckoutCart (list by cartToken) → the guest's active cart
+        if (url.includes('/carts') && !url.match(/\/carts\/\d+/) && opts?.method !== 'POST') return [cart]
+        // clearCheckoutProductReservation: GET the product → it's held by THIS guest token
+        if (url.match(/\/products\/8001$/) && (!opts || opts.method !== 'PUT')) {
+          return { id: PRODUCT_A.id, reserved_to: null, reserved_to_token: GUEST_TOKEN }
+        }
+        // the release PUT
+        if (url.match(/\/products\/8001$/) && opts?.method === 'PUT') {
+          releasedProductId = 8001; releaseBody = opts.body; return {}
+        }
+        // PUT cart with the row removed
+        if (url.match(/\/carts\/520$/) && opts?.method === 'PUT') {
+          return { ...cart, cartProducts: opts.body.cartProducts || [] }
+        }
+      }
+    )
+
+    const result = await removeCheckoutCartItem({ cartToken: GUEST_TOKEN }, { componentId: 901, response: 'minimal' })
+
+    expect(result?.code).toBeUndefined()
+    expect(releasedProductId).toBe(8001)            // the guest's hold WAS released
+    expect(releaseBody?.reserved_to_token).toBeNull()
   })
 })
