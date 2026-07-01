@@ -1601,6 +1601,8 @@ async function resolveCheckoutDomainId(domainName) {
 export { checkoutTimeoutSeconds, checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
 import { checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
 
+const CHECKOUT_TEST_CART_TIMEOUT = '24:00:00'
+
 function checkoutCartProductIds(cart) {
   return (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
 }
@@ -1734,7 +1736,7 @@ async function resetCheckoutCartToActive(cart, overrides = {}) {
   const now = new Date().toISOString()
   const body = {
     cartProducts: [],
-    cartTimeout: '00:30:00',
+    cartTimeout: CHECKOUT_TEST_CART_TIMEOUT,
     cartCreatedAt: now,
     cartUpdatedAt: now,
     cart_status: activeStatus.id
@@ -1811,7 +1813,7 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
     domain: domainId,
     locale: body.locale || 'et',
     cartProducts: [],
-    cartTimeout: '00:30:00',
+    cartTimeout: CHECKOUT_TEST_CART_TIMEOUT,
     cartCreatedAt: now,
     cartUpdatedAt: now,
     cart_status: activeStatus.id
@@ -2572,7 +2574,7 @@ export async function payCheckoutCart(userId, body = {}) {
       body: {
         users_permissions_user: userId,
         domain: domainId,
-        orderTimeout: '00:30:00',
+        orderTimeout: CHECKOUT_TEST_CART_TIMEOUT,
         orderCreatedAt: now,
         orderUpdatedAt: now,
         orderProducts: componentRows,
