@@ -11,21 +11,6 @@ export const CHECKOUT_COPY_GROUP_NAMES = [
 export const CHECKOUT_COPY_DEFAULTS = checkoutCopyDefaults
 export const CHECKOUT_COPY_OVERRIDES = checkoutCopyOverrides
 
-const CHECKOUT_TEST_COPY_OVERRIDES = {
-  en: {
-    holdCart: 'We hold your cart for 24 hours of inactivity.',
-    sessionExpiredText: 'Your session ended after 24 hours of inactivity and your cart was cleared. You can start a new order from the shop.'
-  },
-  et: {
-    holdCart: 'Hoiame sinu ostukorvi 24 tundi tegevusetust.',
-    sessionExpiredText: 'Sinu sessioon lõppes pärast 24 tundi tegevusetust ja ostukorv tühjendati. Saad alustada uut tellimust poest.'
-  },
-  ru: {
-    holdCart: 'Мы держим вашу корзину 24 часа бездействия.',
-    sessionExpiredText: 'Ваша сессия закончилась после 24 часов бездействия, и корзина была очищена. Вы можете начать новый заказ в магазине.'
-  }
-}
-
 export function normalizeCheckoutLocale(locale) {
   return ['et', 'en', 'ru'].includes(locale) ? locale : 'en'
 }
@@ -34,7 +19,7 @@ export function buildCheckoutCopy(locale, overridesByLocale = CHECKOUT_COPY_OVER
   const safeLocale = normalizeCheckoutLocale(locale)
   const defaults = CHECKOUT_COPY_DEFAULTS[safeLocale] || CHECKOUT_COPY_DEFAULTS.en || {}
   const overrides = withoutEmptyValues(overridesByLocale?.[safeLocale])
-  const merged = { ...defaults, ...overrides, ...CHECKOUT_TEST_COPY_OVERRIDES[safeLocale] }
+  const merged = { ...defaults, ...overrides }
   const itemsRemovedTemplate = merged.itemsRemoved || CHECKOUT_COPY_DEFAULTS.en.itemsRemoved
 
   return {
