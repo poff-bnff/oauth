@@ -1601,7 +1601,7 @@ async function resolveCheckoutDomainId(domainName) {
 export { checkoutTimeoutSeconds, checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
 import { checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
 
-const CHECKOUT_TEST_CART_TIMEOUT = '24:00:00'
+const CHECKOUT_TEST_CART_TIMEOUT = '23:59:59'
 
 function checkoutCartProductIds(cart) {
   return (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
