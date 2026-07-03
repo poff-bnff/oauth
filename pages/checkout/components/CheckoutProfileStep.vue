@@ -1,5 +1,6 @@
 <script setup>
 import { isCheckoutProfileComplete } from '../composables/useCheckoutProgress.js'
+import { checkoutErrorMessage } from '../../../utils/checkoutErrors.js'
 
 const props = defineProps({
   copy: { type: Object, required: true },
@@ -94,7 +95,8 @@ async function save () {
     })
     emit('done')
   } catch (err) {
-    errorMsg.value = err?.data?.statusMessage || err?.message || 'Could not save profile'
+    console.warn('[checkout] profile save failed', err) // eslint-disable-line no-console
+    errorMsg.value = checkoutErrorMessage(err, props.copy, props.copy.checkoutProfileSaveFailed)
   } finally {
     saving.value = false
   }

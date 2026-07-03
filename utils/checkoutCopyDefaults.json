@@ -126,7 +126,20 @@
     "yourProfile": "Your profile",
     "profileIntro": "Your PÖFF account is missing a few details. Items like the festival pass are personal, so we need your name and a photo — you'll only do this once.",
     "saveAndContinue": "Save and continue",
-    "savingProfile": "Saving..."
+    "savingProfile": "Saving...",
+    "checkoutLoadFailed": "We could not load your checkout. Please refresh the page and try again.",
+    "checkoutPaymentFailed": "We could not start the payment. Please try again or choose another payment method.",
+    "checkoutInvoiceSaveFailed": "We could not save your invoice details. Please check the fields and try again.",
+    "checkoutProfileSaveFailed": "We could not save your profile details. Please check the fields and try again.",
+    "checkoutNetwork": "Connection lost. Please check your internet connection and try again.",
+    "checkoutBusy": "Our shop is very busy right now. Please try again in a moment.",
+    "checkoutUnexpected": "Something went wrong. Please try again in a moment.",
+    "checkoutSessionInvalid": "Your checkout session has expired. Please log in again to continue.",
+    "checkoutCartEmpty": "Your cart is empty. Please add items in the shop before continuing.",
+    "checkoutChoosePaymentMethod": "Please choose a payment method before continuing.",
+    "checkoutInvoiceProfileInvalid": "Please choose or add valid invoice details before continuing.",
+    "checkoutDetailsInvalid": "Please check the item details and try again.",
+    "checkoutItemUnavailable": "One or more items are no longer available. Please review your cart and try again."
   },
   "et": {
     "secureCheckout": "Turvaline ostuvorm",
@@ -255,7 +268,20 @@
     "yourProfile": "Sinu profiil",
     "profileIntro": "Sinu PÖFFi kontolt on mõned andmed puudu. Festivalipass ja teised sarnased asjad on isiklikud, seega vajame sinu nime ja fotot – seda pead tegema ainult üks kord.",
     "saveAndContinue": "Salvesta ja jätka",
-    "savingProfile": "Salvestamine..."
+    "savingProfile": "Salvestamine...",
+    "checkoutLoadFailed": "Ostuvormi ei õnnestunud laadida. Palun värskenda lehte ja proovi uuesti.",
+    "checkoutPaymentFailed": "Makset ei õnnestunud alustada. Palun proovi uuesti või vali teine makseviis.",
+    "checkoutInvoiceSaveFailed": "Arve andmeid ei õnnestunud salvestada. Palun kontrolli välju ja proovi uuesti.",
+    "checkoutProfileSaveFailed": "Profiili andmeid ei õnnestunud salvestada. Palun kontrolli välju ja proovi uuesti.",
+    "checkoutNetwork": "Ühendus katkes. Palun kontrolli internetiühendust ja proovi uuesti.",
+    "checkoutBusy": "Pood on hetkel väga koormatud. Palun proovi hetke pärast uuesti.",
+    "checkoutUnexpected": "Midagi läks valesti. Palun proovi hetke pärast uuesti.",
+    "checkoutSessionInvalid": "Sinu ostusessioon aegus. Palun logi uuesti sisse, et jätkata.",
+    "checkoutCartEmpty": "Sinu ostukorv on tühi. Palun lisa enne jätkamist tooteid poest.",
+    "checkoutChoosePaymentMethod": "Palun vali enne jätkamist makseviis.",
+    "checkoutInvoiceProfileInvalid": "Palun vali või lisa enne jätkamist kehtivad arveandmed.",
+    "checkoutDetailsInvalid": "Palun kontrolli toodete andmeid ja proovi uuesti.",
+    "checkoutItemUnavailable": "Üks või mitu toodet ei ole enam saadaval. Palun vaata ostukorv üle ja proovi uuesti."
   },
   "ru": {
     "secureCheckout": "Безопасное оформление",
@@ -384,6 +410,19 @@
     "yourProfile": "Ваш профиль",
     "profileIntro": "В вашем аккаунте PÖFF отсутствуют некоторые данные. Такие вещи, как фестивальный пропуск, являются персональными, поэтому нам нужны ваше имя и фотография — это нужно будет сделать только один раз.",
     "saveAndContinue": "Сохранить и продолжить",
-    "savingProfile": "Сохранение..."
+    "savingProfile": "Сохранение...",
+    "checkoutLoadFailed": "Не удалось загрузить оформление заказа. Обновите страницу и попробуйте снова.",
+    "checkoutPaymentFailed": "Не удалось начать оплату. Попробуйте снова или выберите другой способ оплаты.",
+    "checkoutInvoiceSaveFailed": "Не удалось сохранить данные счёта. Проверьте поля и попробуйте снова.",
+    "checkoutProfileSaveFailed": "Не удалось сохранить данные профиля. Проверьте поля и попробуйте снова.",
+    "checkoutNetwork": "Соединение потеряно. Проверьте интернет-соединение и попробуйте снова.",
+    "checkoutBusy": "Магазин сейчас очень загружен. Попробуйте ещё раз через минуту.",
+    "checkoutUnexpected": "Что-то пошло не так. Попробуйте ещё раз через минуту.",
+    "checkoutSessionInvalid": "Ваша сессия оформления заказа истекла. Войдите снова, чтобы продолжить.",
+    "checkoutCartEmpty": "Ваша корзина пуста. Добавьте товары в магазине, прежде чем продолжить.",
+    "checkoutChoosePaymentMethod": "Выберите способ оплаты, прежде чем продолжить.",
+    "checkoutInvoiceProfileInvalid": "Выберите или добавьте корректные данные счёта, прежде чем продолжить.",
+    "checkoutDetailsInvalid": "Проверьте данные товаров и попробуйте снова.",
+    "checkoutItemUnavailable": "Один или несколько товаров больше недоступны. Проверьте корзину и попробуйте снова."
   }
 }
