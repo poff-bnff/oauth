@@ -36,6 +36,33 @@ describe('checkout copy defaults and build-time overrides', () => {
 
     expect(copy.itemsRemoved(3)).toBe('3 item(s) were dropped.')
   })
+
+  test('defines friendly checkout error messages for every supported locale', () => {
+    const keys = [
+      'checkoutLoadFailed',
+      'checkoutPaymentFailed',
+      'checkoutInvoiceSaveFailed',
+      'checkoutProfileSaveFailed',
+      'checkoutNetwork',
+      'checkoutBusy',
+      'checkoutUnexpected',
+      'checkoutSessionInvalid',
+      'checkoutCartEmpty',
+      'checkoutChoosePaymentMethod',
+      'checkoutInvoiceProfileInvalid',
+      'checkoutDetailsInvalid',
+      'checkoutItemUnavailable',
+      'cartUpdateFailed'
+    ]
+
+    for (const locale of ['en', 'et', 'ru']) {
+      const copy = buildCheckoutCopy(locale, {})
+      for (const key of keys) {
+        expect(copy[key], `${locale}.${key}`).toBeTruthy()
+        expect(copy[key], `${locale}.${key}`).not.toMatch(/\[[A-Z]+\]|Bad Request|Internal Server Error|FetchError|statusCode|undefined|null/i)
+      }
+    }
+  })
 })
 
 describe('checkout copy Strapi label-group normalization', () => {

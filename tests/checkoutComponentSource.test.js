@@ -125,6 +125,13 @@ describe('checkout action error display', () => {
     expect(copyDefaults.et.cartUpdateFailed).toBeTruthy()
     expect(copyDefaults.ru.cartUpdateFailed).toBeTruthy()
   })
+
+  test('profile save errors are logged for developers and shown as friendly copy', () => {
+    expect(profileStepSource).toContain("from '../../../utils/checkoutErrors.js'")
+    expect(profileStepSource).toContain("console.warn('[checkout] profile save failed'")
+    expect(profileStepSource).toContain('checkoutErrorMessage(err, props.copy, props.copy.checkoutProfileSaveFailed)')
+    expect(profileStepSource).not.toMatch(/err\?\.data\?\.statusMessage|err\?\.message/)
+  })
 })
 
 describe('BUG 6 — gift photo IndexedDB wiring', () => {

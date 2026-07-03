@@ -29,6 +29,22 @@ describe('checkout error messages', () => {
     expect(checkoutErrorMessage(err, copy, copy.checkoutPaymentFailed)).toBe(copy.checkoutUnexpected)
   })
 
+  test('maps overloaded shop responses to busy copy', () => {
+    for (const statusCode of [429, 502, 503]) {
+      const err = { data: { statusCode, statusMessage: `${statusCode} upstream overloaded` } }
+
+      expect(checkoutErrorMessage(err, copy, copy.checkoutPaymentFailed)).toBe(copy.checkoutBusy)
+    }
+  })
+
+  test('maps timeout responses to connection copy', () => {
+    for (const statusCode of [408, 504]) {
+      const err = { data: { statusCode, statusMessage: `${statusCode} timeout` } }
+
+      expect(checkoutErrorMessage(err, copy, copy.checkoutPaymentFailed)).toBe(copy.checkoutNetwork)
+    }
+  })
+
   test('replaces terse legacy payment errors with recovery copy', () => {
     expect(checkoutErrorMessage({ message: 'Payment failed' }, copy, copy.checkoutPaymentFailed)).toBe(copy.checkoutPaymentFailed)
   })
