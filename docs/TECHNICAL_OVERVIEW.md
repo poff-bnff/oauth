@@ -12,12 +12,12 @@ The application is not a static build like Web2021. It runs as a server process 
 
 | Area | Files | Responsibility |
 | --- | --- | --- |
-| Checkout UI | `pages/checkout/index.vue`, `pages/checkout/components/*`, `pages/checkout/composables/*` | Multi-step checkout, cart session display, invoice/profile/payment forms, progress persistence, photo persistence. |
-| Cart API | `server/api/cart/*` | Thin Nitro handlers for cart context, add/remove/touch/clear/claim/availability. |
-| Checkout API | `server/api/checkout/*` | Checkout context, owner validation, profile update, and payment start. |
-| Strapi integration | `server/utils/strapi.js` | Central integration layer for Strapi auth, users, carts, products, orders, payment, guest claim, and external integrations. |
-| Runtime resilience | `server/plugins/network-resilience.js`, `server/plugins/cleanup.js`, `server/middleware/cart-rate-limit.js` | HTTP resilience, expired-cart cleanup scheduling, and cart rate limiting. |
-| Checkout copy | `utils/checkoutCopy*.json`, `utils/checkoutCopy.js`, `generated/checkoutCopy.json`, `scripts/fetch-checkout-copy.mjs` | Build-time checkout labels from Strapi with bundled fallbacks. |
+| Checkout UI | `pages/checkout/index.vue`, `pages/checkout/components/*`, `pages/checkout/composables/*` | What the customer sees while completing the order: item details, invoice, payment, saved progress, and gift photo handling. |
+| Cart API | `server/api/cart/*` | Browser-facing endpoints used by product pages and checkout to add/remove items, keep the cart alive, and read availability. |
+| Checkout API | `server/api/checkout/*` | Browser-facing endpoints used by checkout to load the order context, validate customer details, update profile data, and start payment. |
+| Strapi integration | `server/utils/strapi.js` | The main bridge to Strapi data: users, carts, products, orders, payments, guest cart claim, and external-service side effects. |
+| Runtime resilience | `server/plugins/network-resilience.js`, `server/plugins/cleanup.js`, `server/middleware/cart-rate-limit.js` | Protection around runtime failures: retry/stale behavior, expired-cart cleanup, and limiting repeated cart calls. |
+| Checkout copy | `utils/checkoutCopy*.json`, `utils/checkoutCopy.js`, `generated/checkoutCopy.json`, `scripts/fetch-checkout-copy.mjs` | Checkout labels and messages, fetched at build time when possible and backed by bundled defaults. |
 | Tests | `tests/*`, `integration-tests/*`, `load/*` | Unit/source tests, mocked Playwright flows, and local load helpers. |
 
 ## Runtime Architecture
@@ -41,6 +41,8 @@ flowchart LR
   Nuxt -->|"course actions"| Moodle
   Nuxt -->|"email side effects"| Mail
 ```
+
+Operationally, this means OAuth is in the middle of most checkout actions. If Strapi, payment, or external profile services are slow, the customer may experience that slowness in checkout even though the public product page itself is static.
 
 ## Shop To Checkout Flow
 
@@ -79,6 +81,8 @@ sequenceDiagram
   Pay-->>Checkout: return/cancel/success redirect
 ```
 
+This is the customer journey to verify: add an item on a static product page, open the cart preview, continue to checkout, complete item/invoice details, and start payment. Guest login adds one extra step where the guest cart is claimed after authentication.
+
 ## Cart Ownership And Recovery
 
 The cart layer must support both logged-in users and guests:
@@ -89,15 +93,17 @@ The cart layer must support both logged-in users and guests:
 - Existing carts can be reused even when the previous cart is no longer active; this avoids duplicate `cartToken` insert failures and keeps stale browser state from surfacing as Strapi 500s.
 - Product reservations are intentionally not released by checkout cart reset paths that may run during in-flight payment recovery.
 
-Important implementation points live in `server/utils/strapi.js`:
+Important cart/checkout behavior is implemented in `server/utils/strapi.js`:
 
-- `getCartOwner(event)`
-- `ensureCurrentCheckoutCart(owner, body)`
-- `addCheckoutCartItem(owner, body)`
-- `removeCheckoutCartItem(owner, body)`
-- `getCheckoutContext(userId, locale)`
-- `claimGuestCart(userId, cartToken)`
-- `payCheckoutCart(userId, body)`
+| Function | What it controls |
+| --- | --- |
+| `getCartOwner(event)` | Decides whether the cart belongs to a logged-in user or to a guest browser token. |
+| `ensureCurrentCheckoutCart(owner, body)` | Finds, reuses, or creates the active cart before an add/remove/checkout action. |
+| `addCheckoutCartItem(owner, body)` | Adds one product to the cart and reserves it for that customer. |
+| `removeCheckoutCartItem(owner, body)` | Removes one product from the cart and refreshes the remaining cart state. |
+| `getCheckoutContext(userId, locale)` | Builds the data needed to render the checkout page: cart, profile, invoice options, and payment setup. |
+| `claimGuestCart(userId, cartToken)` | Moves a guest cart onto the user account after login so the customer does not lose items. |
+| `payCheckoutCart(userId, body)` | Performs the final cart validation and starts the payment flow. |
 
 ## Checkout Page State
 
@@ -105,10 +111,10 @@ The checkout page is a Nuxt page with client-side state:
 
 - Step state: profile, item details, invoice, payment.
 - Item detail forms: owner, pickup location, gift details, email-notification choice.
-- Saved progress: stored and matched against the current cart signature so stale progress is not applied to a different cart.
-- Photo persistence: separate IndexedDB/local storage helper for gift photos.
+- Saved progress: form values are stored locally and only restored when the cart still matches, so old invoice/item data is not applied to the wrong cart.
+- Photo persistence: gift photos are kept separately in browser storage because file inputs cannot be restored like ordinary text fields.
 - Cart mutations: remove operations are queued so rapid clicks do not overlap writes for the same browser tab.
-- Cart context refreshes are deduplicated to avoid repeated concurrent reloads.
+- Cart context refreshes are deduplicated so one user action does not trigger several identical cart reloads at once.
 
 ```mermaid
 flowchart TD
@@ -123,9 +129,11 @@ flowchart TD
   Payment --> Gateway["Payment gateway"]
 ```
 
+The important behavior is that checkout should only restore saved form data when it still belongs to the same cart. If the cart changed in another tab, the page should refresh around the current cart instead of applying old details to new items.
+
 ## Checkout Copy
 
-Checkout labels are designed to be runtime-light:
+Checkout labels are designed to be runtime-light, meaning the checkout page should not call Strapi just to render button text or error messages:
 
 1. `npm run build` runs `prebuild`.
 2. `scripts/fetch-checkout-copy.mjs` attempts to read Strapi label groups.
@@ -147,20 +155,20 @@ flowchart LR
 | Interface | Direction | Notes |
 | --- | --- | --- |
 | Strapi REST | OAuth -> Strapi | Main persistence layer for users, carts, products, orders, label groups, business profiles. |
-| Web2021 shop pages | Browser -> OAuth | Static pages call OAuth APIs for cart operations and checkout handoff. |
-| Maksekeskus | OAuth -> gateway | Payment creation and return handling. |
-| Eventival | OAuth -> external service | OAuth/profile integration. |
+| Web2021 shop pages | Browser -> OAuth | Static product pages call OAuth when the customer checks availability, adds/removes items, opens the cart preview, or enters checkout. |
+| Maksekeskus | OAuth -> gateway | Payment creation and return handling; issues here affect the final pay step. |
+| Eventival | OAuth -> external service | Account/profile integration; issues here can affect login/profile-dependent checkout behavior. |
 | Fiona | OAuth -> external service | Badge lookup with retry/resilience behavior. |
-| Moodle | OAuth -> external service | Course-related user/enrolment actions. |
+| Moodle | OAuth -> external service | Course-related user/enrolment actions after relevant purchases. |
 
 ## Testing Strategy
 
 | Layer | Command | Purpose |
 | --- | --- | --- |
-| Unit/source tests | `npm test` | Fast tests for cart logic, checkout state helpers, copy parsing, rate limiting, resilience helpers. |
-| Mocked browser tests | `npm run test:integration` | Playwright flows with mocked checkout API responses, independent of Strapi/Web2021. |
-| Local multi-service smoke | Manual | Run local Strapi, OAuth, and Web2021 SSG together to prove real add/remove/checkout flows. |
-| Load helpers | `node load/cart-flow-load.mjs` | Local/dev load probes for cart and availability paths. Use deliberately. |
+| Unit/source tests | `npm test` | Fast checks that protect cart logic, checkout state, translations, rate limiting, and resilience behavior from regressions. |
+| Mocked browser tests | `npm run test:integration` | Browser checks for checkout flows without needing real Strapi/Web2021 data; useful for repeatable regression coverage. |
+| Local multi-service smoke | Manual | Run local Strapi, OAuth, and Web2021 SSG together when you need to prove the real add/remove/checkout flow end to end. |
+| Load helpers | `node load/cart-flow-load.mjs` | Local/dev load probes for cart and availability paths; use deliberately because they create real traffic and cart data. |
 
 ## Operational Notes
 
@@ -169,4 +177,4 @@ flowchart LR
 - Build-time checkout label fetch depends on Strapi credentials; failure is non-fatal and falls back to defaults.
 - The Nitro app should be redeployed when server code, generated checkout copy, or Nuxt build output changes.
 - Web2021 SSG changes require a separate Web2021 rebuild/publish; OAuth does not regenerate static product pages.
-
+- If only Strapi content changes, OAuth sees the change at runtime only for data it requests from Strapi. Static product-page text still depends on the Web2021 build.
