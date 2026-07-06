@@ -111,9 +111,10 @@ describe('checkout context refresh metadata stability', () => {
 
 describe('checkout action error display', () => {
   test('page-level errors hide raw fetch/network internals from users', () => {
-    expect(indexSource).toContain('function checkoutErrorMessage')
-    expect(indexSource).toContain("String(message).includes('NetworkError')")
-    expect(indexSource).toContain("String(message).startsWith('[')")
+    expect(indexSource).toContain("from '../../utils/checkoutErrors.js'")
+    expect(indexSource).toContain('checkoutErrorMessage(err, copy.value')
+    expect(indexSource).toContain("console.warn('[checkout] context load failed'")
+    expect(indexSource).toContain('copy.value.checkoutPaymentFailed')
     expect(indexSource).not.toContain("err?.data?.statusMessage || err?.message || 'Could not remove item'")
   })
 
@@ -123,6 +124,13 @@ describe('checkout action error display', () => {
     expect(copyDefaults.en.cartUpdateFailed).toBeTruthy()
     expect(copyDefaults.et.cartUpdateFailed).toBeTruthy()
     expect(copyDefaults.ru.cartUpdateFailed).toBeTruthy()
+  })
+
+  test('profile save errors are logged for developers and shown as friendly copy', () => {
+    expect(profileStepSource).toContain("from '../../../utils/checkoutErrors.js'")
+    expect(profileStepSource).toContain("console.warn('[checkout] profile save failed'")
+    expect(profileStepSource).toContain('checkoutErrorMessage(err, props.copy, props.copy.checkoutProfileSaveFailed)')
+    expect(profileStepSource).not.toMatch(/err\?\.data\?\.statusMessage|err\?\.message/)
   })
 })
 

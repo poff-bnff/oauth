@@ -1,6 +1,7 @@
 <script setup>
 import { useCheckoutCopy } from './composables/useCheckoutCopy.js'
 import { useCheckoutSession } from './composables/useCheckoutSession.js'
+import { checkoutErrorMessage } from '../../utils/checkoutErrors.js'
 import CheckoutSessionBanner from './components/CheckoutSessionBanner.vue'
 import CheckoutItemStep from './components/CheckoutItemStep.vue'
 import CheckoutInvoiceStep from './components/CheckoutInvoiceStep.vue'
@@ -31,13 +32,6 @@ const authHeaders = computed(() => ({ Authorization: `Bearer ${token.value}` }))
 
 // ── Copy (i18n) ───────────────────────────────────────────────────────────────
 const copy = useCheckoutCopy(locale)
-
-function checkoutErrorMessage (err, fallback) {
-  const message = err?.data?.data?.case || err?.data?.statusMessage || err?.message || ''
-  if (!message) return fallback
-  if (String(message).includes('NetworkError') || String(message).startsWith('[')) return fallback
-  return message
-}
 
 // ── Core state ────────────────────────────────────────────────────────────────
 // ── Transaction result (return from payment gateway) ─────────────────────────
@@ -493,7 +487,8 @@ async function refreshContext () {
         await navigateTo(`/?redirect_uri=${encodeURIComponent(checkoutLoginRedirectUri())}&locale=${locale.value}`, { external: true })
         return
       }
-      error.value = checkoutErrorMessage(err, 'Checkout failed to load')
+      console.warn('[checkout] context load failed', err) // eslint-disable-line no-console
+      error.value = checkoutErrorMessage(err, copy.value, copy.value.checkoutLoadFailed)
     } finally {
       loading.value = false
       contextRefreshInFlight.value = false
@@ -630,7 +625,8 @@ async function saveInvoiceProfile (options = {}) {
     await refreshBusinessProfiles()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {
-    error.value = checkoutErrorMessage(err, 'Could not save invoice profile')
+    console.warn('[checkout] invoice profile create failed', err) // eslint-disable-line no-console
+    error.value = checkoutErrorMessage(err, copy.value, copy.value.checkoutInvoiceSaveFailed)
   } finally {
     savingInvoiceProfile.value = false
   }
@@ -651,7 +647,8 @@ async function saveSelectedProfile (options = {}) {
     snapshotInvoiceForm()
     if (options.continueToPayment) nextFromInvoice()
   } catch (err) {
-    error.value = checkoutErrorMessage(err, 'Could not save invoice profile')
+    console.warn('[checkout] invoice profile update failed', err) // eslint-disable-line no-console
+    error.value = checkoutErrorMessage(err, copy.value, copy.value.checkoutInvoiceSaveFailed)
   } finally {
     savingInvoiceProfile.value = false
   }
@@ -803,7 +800,8 @@ async function pay () {
       await navigateTo(result.url, { external: true })
     }
   } catch (err) {
-    error.value = checkoutErrorMessage(err, 'Payment failed')
+    console.warn('[checkout] payment start failed', err) // eslint-disable-line no-console
+    error.value = checkoutErrorMessage(err, copy.value, copy.value.checkoutPaymentFailed)
   } finally {
     paying.value = false
   }
