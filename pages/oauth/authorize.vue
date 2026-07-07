@@ -1,6 +1,4 @@
 <script setup>
-import crypto from 'crypto'
-
 const { oauthUrl } = useRuntimeConfig().public
 const { locale, t } = useI18n()
 const route = useRoute()

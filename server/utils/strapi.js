@@ -1,12 +1,11 @@
 import { URLSearchParams } from 'url'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
-
+import { CART_LIMITS } from './cartLimits.js'
 
 const config = useRuntimeConfig()
 
 const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
-
 
 const STRAPI_TOKEN = {
   token: null,
@@ -232,7 +231,6 @@ export async function loadFionaBadges (user) {
 
   return user
 }
-
 
 // --- ROLE VALIDATION LOGIC ---
 
@@ -541,7 +539,7 @@ export async function getStrapiUser(id) {
   if (!id) {
     throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
   }
-  const token = await getStrapiToken()
+  const token = await getStrapiAdminToken()
 
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -580,7 +578,7 @@ export async function getStrapiIndividual (id) {
   if (!id) {
     throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
   }
-  const token = await getStrapiToken()
+  const token = await getStrapiAdminToken()
 
   const user = await $fetch(`${config.strapiUrl}/users/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -636,7 +634,7 @@ export async function deleteStrapiUserProfile (id) {
 
 export async function createStrapiUserProfile (user) {
   if (!user) return null
-  const token = await getStrapiToken()
+  const token = await getStrapiAdminToken()
   const userProfile = {
     user: user.id,
     email: user.email
@@ -658,7 +656,7 @@ export async function setStrapiUserProfile (profileId, body) {
   if (!profileId) return new Error('No profile ID provided. Endpoint: "/user-profiles/:id"')
   if (!body) return null
   body.id = profileId
-  const token = await getStrapiToken()
+  const token = await getStrapiAdminToken()
 
   return await $fetch(`${config.strapiUrl}/user-profiles/${profileId}`, {
     method: 'PUT',
@@ -673,7 +671,7 @@ export async function setStrapiUserProfile (profileId, body) {
 export async function uploadStrapiImage (file, ref, refId, fileInfo) {
   if (!file) return null
 
-  const token = await getStrapiToken()
+  const token = await getStrapiAdminToken()
   const formData = new FormData()
 
   const { name, filename, data: databuff } = file
@@ -895,7 +893,7 @@ export async function setFavorites (user, favorites) {
 export function getAdminBearer (event) {
   const headers = getRequestHeaders(event)
 
-  const token = headers?.authorization?.split(' ')[1]
+  const token = String(headers?.authorization || '').split(' ')[1]
 
   if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
@@ -905,7 +903,7 @@ export function getAdminBearer (event) {
 export function getUserIdFromEvent (event) {
   const headers = getRequestHeaders(event)
 
-  const token = headers?.authorization?.split(' ')[1]
+  const token = String(headers?.authorization || '').split(' ')[1]
 
   if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
@@ -915,6 +913,23 @@ export function getUserIdFromEvent (event) {
   } catch (error) {
     throw createError({ statusCode: 401, statusMessage: 'Invalid token' })
   }
+}
+
+// Returns { userId } for a valid JWT, { cartToken } for X-Cart-Token, or null for brand-new guests.
+// Never throws — callers decide whether a missing identity is an error.
+export function getCartOwner (event) {
+  const headers = getRequestHeaders(event)
+  const token = String(headers?.authorization || '').split(' ')[1]
+  if (token) {
+    try {
+      const { sub } = jwt.verify(token, config.jwtSecret)
+      return { userId: parseInt(sub) }
+    } catch { /* invalid JWT — fall through to cartToken */ }
+  }
+  const rawCartToken = headers?.['x-cart-token']
+  const cartToken = Array.isArray(rawCartToken) ? rawCartToken[0] : rawCartToken
+  if (cartToken) return { cartToken }
+  return null
 }
 
 export function getUserIdFromToken (token) {
@@ -938,13 +953,16 @@ export async function getStrapiToken () {
   }
 }
 
+let _adminTokenRefresh = null
 export async function getStrapiAdminToken () {
   // If a cached token exists, and it's not expired, return it
   if (STRAPI_ADMIN_TOKEN.token && STRAPI_ADMIN_TOKEN.expires > Date.now()) {
     return STRAPI_ADMIN_TOKEN.token
-  } else {
-    return await refreshStrapiAdminToken()
   }
+  if (!_adminTokenRefresh) {
+    _adminTokenRefresh = refreshStrapiAdminToken().finally(() => { _adminTokenRefresh = null })
+  }
+  return await _adminTokenRefresh
 }
 
 async function refreshStrapiAdminToken () {
@@ -1038,28 +1056,1604 @@ export async function getStrapiFilm (id) {
   return await $fetch(`${config.strapiUrl}/films/${id}`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
+let _paymentMethodsCache = null
+const PAYMENT_METHODS_TTL_MS = 5 * 60_000
+
 export async function getPaymentMethods (id) {
-  // eslint-disable-next-line no-console
-  console.log('getPaymentMethods')
-  const token = await getStrapiToken()
-  return await $fetch(`${config.strapiUrl}/users-permissions/users/paymentmethods/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (id) await getStrapiCollectionItem('product-categories', id)
+  if (_paymentMethodsCache && _paymentMethodsCache.expires > Date.now()) return _paymentMethodsCache.value
+
+  const host = String(config.maksekeskusHost || 'https://api.test.maksekeskus.ee').replace(/\/$/, '')
+  const mkUrl = host.startsWith('http') ? `${host}/v1/shop/configuration` : `https://${host}/v1/shop/configuration`
+  const mkResponse = await $fetch(mkUrl, {
+    method: 'GET',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${config.maksekeskusId}:${config.maksekeskusSecret}`).toString('base64')}`,
+      'Content-Type': 'application/json'
+    }
+  })
+
+  const value = {
+    banklinks: normalizeMaksekeskusMethods(mkResponse.payment_methods?.banklinks || []),
+    cards: normalizeMaksekeskusMethods(mkResponse.payment_methods?.cards || []),
+    other: normalizeMaksekeskusMethods(mkResponse.payment_methods?.other || []),
+    payLater: normalizeMaksekeskusMethods(mkResponse.payment_methods?.payLater || [])
+  }
+  _paymentMethodsCache = { value, expires: Date.now() + PAYMENT_METHODS_TTL_MS }
+  return value
+}
+
+// Known display names for Maksekeskus payment method identifiers.
+// The API returns raw lowercase keys (e.g. 'apple_pay', 'lhv'); this maps them to human labels.
+const PAYMENT_METHOD_DISPLAY_NAMES = {
+  swedbank: 'Swedbank',
+  seb: 'SEB',
+  lhv: 'LHV',
+  luminor: 'Luminor',
+  nordea: 'Nordea',
+  coop_pank: 'Coop Pank',
+  coop: 'Coop Pank',
+  krediidipank: 'Krediidipank',
+  visa: 'Visa',
+  mastercard: 'Mastercard',
+  'visa/mastercard': 'Visa / Mastercard',
+  apple_pay: 'Apple Pay',
+  google_pay: 'Google Pay',
+  revolut: 'Revolut',
+  paysera: 'Paysera',
+  n26: 'N26',
+  wise: 'Wise',
+  slice: 'Slice',
+  gift_card: 'Gift Card',
+  hire_purchase: 'Hire purchase',
+  liisi_hire_purchase: 'Liisi hire purchase',
+  liisi_ee: 'Liisi',
+  'indivy-go': 'Indivy Go'
+}
+
+function formatPaymentMethodName (name) {
+  const lower = String(name || '').toLowerCase()
+  if (PAYMENT_METHOD_DISPLAY_NAMES[lower]) return PAYMENT_METHOD_DISPLAY_NAMES[lower]
+  // Generic fallback: replace _ and - separators with spaces, then title-case each word
+  return lower
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function normalizeMaksekeskusMethods (methods) {
+  // The Maksekeskus test server has stale method names (e.g. 'nordea' shows
+  // Luminor's logo; 'krediidipank' shows Coop Pank's logo). Using the logo
+  // filename slug as the canonical key gives the correct brand in both test
+  // and production environments. Deduplicate by resolved display name so the
+  // same bank doesn't appear twice (test server returns many country variants).
+  const seen = new Set()
+  return methods
+    .map(method => {
+      const logoSlug = method.logo_url?.match(/\/([^/]+)\.[a-z]+$/i)?.[1]?.toLowerCase()
+      const name = formatPaymentMethodName(logoSlug || method.name)
+      return { id: buildMaksekeskusMethodId(method), name, country: method.country, logo: method.logo_url }
+    })
+    .filter(method => {
+      if (seen.has(method.name)) return false
+      seen.add(method.name)
+      return true
+    })
 }
 
 export async function buyProduct (body) {
-  // eslint-disable-next-line no-console
-  console.log('strapi:buyProduct', body)
-  const token = await getStrapiToken()
+  console.log('checkout:buyProduct', body) // eslint-disable-line no-console
 
-  const result = await $fetch(`${config.strapiUrl}/users-permissions/users/buyproduct/`, {
+  const userId = body.userId
+  const categoryId = body.categoryId
+  const paymentMethodId = body.paymentMethodId
+
+  if (!userId) return { code: 401, case: 'unauthorized' }
+  if (!categoryId) return { code: 400, case: 'noCategoryId' }
+  if (!paymentMethodId) return { code: 400, case: 'noPaymentMethodId' }
+
+  const buyer = await getStrapiUser(userId)
+  const buyerProfile = buyer.user_profile || {}
+  if (!hasCompleteCheckoutBuyerProfile(buyerProfile)) {
+    return { code: 400, case: 'buyerProfileIncomplete', missing: missingBuyerProfileFields(buyerProfile) }
+  }
+
+  const product = await getAvailableCheckoutProduct(categoryId)
+  if (!product) return { code: 404, case: 'noItems' }
+
+  const productCategoryId = product.product_category?.id || product.product_category
+  const productCategory = await getStrapiCollectionItem('product-categories', productCategoryId)
+  const pickupLocations = productCategory?.pickup_locations || []
+  const sellerBusinessProfile = product.product_category?.business_profile?.id || product.product_category?.business_profile || productCategory?.business_profile?.id || productCategory?.business_profile
+  const price = getCheckoutProductCurrentPrice(product.product_category || productCategory)
+
+  if (!price) return { code: 400, case: 'noCurrentPrice' }
+
+  const billingProfileId = await validateCheckoutBusinessProfile(userId, body.billingProfileId || body.buyerBusinessProfileId)
+  if (!billingProfileId) return { code: 400, case: 'invalidBillingProfile' }
+
+  const deliveryLocationId = validateCheckoutDeliveryLocation(pickupLocations, body.deliveryLocationId)
+  if (deliveryLocationId === false) return { code: 400, case: body.deliveryLocationId ? 'invalidDeliveryLocation' : 'noDeliveryLocation' }
+
+  const ownerResult = await resolveCheckoutOwner(userId, productCategory, body.owner || { mode: 'me' })
+  if (ownerResult.error) return { code: 400, case: ownerResult.error, missing: ownerResult.missing }
+
+  // Atomically claim this product for the user (free OR already theirs); graceful if just taken.
+  const claimed = await claimCheckoutProducts({ productIds: [product.id], userId, price })
+  if (!claimed.length) return { code: 409, case: 'productUnavailable' }
+
+  const userEmail = buyerProfile.email || buyer.email
+  let mkResponse
+  try {
+    mkResponse = await createMaksekeskusTransaction({
+      body,
+      categoryId,
+      product,
+      productId: product.id,
+      productCatSeller: sellerBusinessProfile,
+      price,
+      userId,
+      userEmail,
+      billingProfileId,
+      deliveryLocationId,
+      ownerResult
+    })
+  } catch (error) {
+    await clearCheckoutProductReservation(product.id)
+    throw error
+  }
+
+  const paymentMethod = [
+    ...(mkResponse.payment_methods?.banklinks || []),
+    ...(mkResponse.payment_methods?.cards || []),
+    ...(mkResponse.payment_methods?.other || []),
+    ...(mkResponse.payment_methods?.payLater || [])
+  ].find(method => buildMaksekeskusMethodId(method) === paymentMethodId)
+
+  if (!paymentMethod) return { code: 400, case: 'noPaymentMethod' }
+
+  return { url: paymentMethod.url }
+}
+
+export function hasCompleteCheckoutBuyerProfile(profile = {}) {
+  return !!(profile.email && profile.firstName && profile.lastName && profile.birthdate && profile.phoneNr && profile.gender && profile.picture)
+}
+
+export function missingBuyerProfileFields(profile = {}) {
+  return ['email', 'firstName', 'lastName', 'birthdate', 'phoneNr', 'gender', 'picture'].filter(field => !profile[field])
+}
+
+// 4-field check used by the "Your profile" checkout step gate and the payment-time guard.
+// Leave hasCompleteCheckoutBuyerProfile (7-field) untouched for other callers.
+export function hasCheckoutBuyerProfile(profile = {}) {
+  return !!(profile.email && profile.firstName && profile.lastName && profile.picture)
+}
+
+export function missingCheckoutBuyerProfileFields(profile = {}) {
+  return ['email', 'firstName', 'lastName', 'picture'].filter(field => !profile[field])
+}
+
+function missingOwnerProfileFields(profile = {}) {
+  return ['email', 'firstName', 'lastName', 'picture'].filter(field => !profile[field])
+}
+
+function normalizeCheckoutEmail(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function validCheckoutEmail(value) {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalizeCheckoutEmail(value))
+}
+
+async function getStrapiCollectionItem(collection, id) {
+  const token = await getStrapiAdminToken()
+  return await $fetch(`${config.strapiUrl}/${collection}/${id}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+}
+
+function normalizeStrapiList(value) {
+  if (!value) return []
+  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean)
+}
+
+async function getStrapiCollectionItemsByIds(collection, ids = []) {
+  const uniqueIds = [...new Set(ids.map(id => String(id || '')).filter(Boolean))]
+  if (!uniqueIds.length) return new Map()
+
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  uniqueIds.forEach(id => params.append('id_in', id))
+  params.append('_limit', '-1')
+
+  const rows = await $fetch(`${config.strapiUrl}/${collection}?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+
+  return new Map(normalizeStrapiList(rows).map(row => [String(row.id), row]))
+}
+
+async function getCheckoutProductCategoriesByIds(ids = []) {
+  const idsToFetch = [...new Set(ids.map(id => String(id || '')).filter(Boolean))]
+  if (!idsToFetch.length) return new Map()
+
+  const categories = await getStrapiCollectionItemsByIds('product-categories', idsToFetch)
+
+  await Promise.all(idsToFetch.map(async (id) => {
+    const category = categories.get(String(id))
+    if (category && Object.prototype.hasOwnProperty.call(category, 'pickup_locations')) return
+    const hydrated = await getProductCategoryByAnyId(id, category?.codePrefix).catch(() => null)
+    if (hydrated?.id) categories.set(String(hydrated.id), hydrated)
+  }))
+
+  return categories
+}
+
+async function getAvailableCheckoutProduct(categoryId) {
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('_limit', '1')
+  params.append('code_null', 'false')
+  params.append('reserved_to_null', 'true')
+  params.append('owner_null', 'true')
+  params.append('product_category_null', 'false')
+  params.append('transactions_null', 'true')
+  params.append('product_category.codePrefix', categoryId)
+  params.append('active', 'true')
+
+  const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return Array.isArray(products) ? products[0] : products
+}
+
+export function getCheckoutProductCurrentPrice(category) {
+  const now = new Date()
+  const prices = category?.priceAtPeriod || []
+  const current = prices.find(item => item.startDateTime && item.endDateTime && new Date(item.startDateTime) < now && new Date(item.endDateTime) > now)
+  return current?.price
+}
+
+// True only when today falls within an active sales period. No sales period set,
+// or all periods past/future, means the product is not for sale right now (blocked).
+export function isCategoryOnSale(category) {
+  const periods = category?.salesPeriod || []
+  if (!periods.length) return false
+  const now = new Date()
+  return periods.some(p => p.startDateTime && p.endDateTime && new Date(p.startDateTime) < now && new Date(p.endDateTime) > now)
+}
+
+async function validateCheckoutBusinessProfile(userId, billingProfileId) {
+  if (!billingProfileId) return null
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('id', billingProfileId)
+  params.append('_where[user]', userId)
+  const profiles = await $fetch(`${config.strapiUrl}/business-profiles?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return Array.isArray(profiles) && profiles[0] ? profiles[0].id : null
+}
+
+export function validateCheckoutDeliveryLocation(pickupLocations, selectedLocationId) {
+  const ids = (pickupLocations || []).map(location => String(location.id))
+  if (!ids.length) return null
+  if (!selectedLocationId) return false
+  return ids.includes(String(selectedLocationId)) ? selectedLocationId : false
+}
+
+export async function validateCheckoutOwner(userId, categoryId, owner = {}) {
+  const productCategory = await getStrapiCollectionItem('product-categories', categoryId)
+  const result = await resolveCheckoutOwner(userId, productCategory, owner, { dryRun: true })
+  if (result.error) return result
+  return { ok: true, mode: result.mode, existing: result.existing === true }
+}
+
+async function resolveCheckoutOwner(userId, productCategory, owner = {}, options = {}) {
+  const mode = owner.mode === 'gift' ? 'gift' : 'me'
+  if (mode === 'me') return { userId, mode: 'me', sendEmail: false }
+
+  if (productCategory?.transferable !== true) return { error: 'invalidOwner' }
+
+  const email = normalizeCheckoutEmail(owner.email)
+  const firstName = String(owner.firstName || '').trim()
+  const lastName = String(owner.lastName || '').trim()
+  if (!firstName || !lastName || !validCheckoutEmail(email)) return { error: 'invalidOwner' }
+
+  const token = await getStrapiAdminToken()
+  const existingUsers = await $fetch(`${config.strapiUrl}/users?email=${encodeURIComponent(email)}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  const existingUser = Array.isArray(existingUsers) ? existingUsers[0] : null
+
+  if (existingUser) {
+    const user = await getStrapiUser(existingUser.id)
+    const missing = missingOwnerProfileFields(user.user_profile || {})
+    if (missing.length) return { error: 'ownerProfileIncomplete', missing }
+    return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: true }
+  }
+
+  if (!owner.hasPhoto && !owner.photo?.data) return { error: 'ownerPhotoRequired' }
+  if (options.dryRun) return { mode: 'gift', existing: false }
+
+  const authUser = await authenticateStrapiUser(email)
+  const user = await getStrapiUser(authUser.id)
+  const picture = await uploadCheckoutOwnerPhoto(owner.photo, user.user_profile.id, email)
+  if (!picture?.id) return { error: 'ownerPhotoRequired' }
+
+  await setStrapiUserProfile(user.user_profile.id, {
+    firstName,
+    lastName,
+    email,
+    picture: picture.id
+  })
+
+  return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: false }
+}
+
+async function uploadCheckoutOwnerPhoto(photo, profileId, email) {
+  if (!photo?.data) return null
+  const match = String(photo.data).match(/^data:([^;]+);base64,(.+)$/)
+  if (!match || !match[1].includes('image/')) return null
+  const buffer = Buffer.from(match[2], 'base64')
+  if (!buffer.length || buffer.length > 5 * 1024 * 1024) return null
+  const extension = (photo.name && photo.name.includes('.') ? photo.name.split('.').pop() : '') || match[1].split('/')[1] || 'jpg'
+  const filename = `checkout-owner-${String(email).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.${extension}`
+  return await uploadStrapiImage({ name: 'picture', filename, data: buffer }, 'user-profile', profileId)
+}
+
+// (reserveCheckoutProduct removed — replaced by the atomic /products/claim endpoint via
+//  claimCheckoutProducts; the per-product read-then-PUT reserve is no longer used.)
+
+// owner: { userId } | { cartToken } | a bare userId (back-compat) | null (force-clear). When an owner is
+// given, only the owner's own hold is released (never someone else's reclaimed hold).
+async function clearCheckoutProductReservation(productId, owner = null) {
+  const userId = (owner && typeof owner === 'object') ? owner.userId : owner
+  const cartToken = (owner && typeof owner === 'object') ? owner.cartToken : null
+  const token = await getStrapiAdminToken()
+  if (userId || cartToken) {
+    const product = await $fetch(`${config.strapiUrl}/products/${productId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    const reservedTo = product?.reserved_to?.id || product?.reserved_to || null
+    const reservedToken = product?.reserved_to_token || null
+    const mine = (userId && String(reservedTo || '') === String(userId)) ||
+                 (cartToken && String(reservedToken || '') === String(cartToken))
+    if (!mine) return product
+  }
+  return await $fetch(`${config.strapiUrl}/products/${productId}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
+    body: {
+      reserved_to: null,
+      reserved_to_token: null,
+      reservation_price: null,
+      reservation_time: null
+    }
+  })
+}
+
+async function refreshCheckoutProductReservation(productId, userId, price) {
+  const token = await getStrapiAdminToken()
+  const product = await $fetch(`${config.strapiUrl}/products/${productId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  const reservedTo = product?.reserved_to?.id || product?.reserved_to || null
+  if (reservedTo && String(reservedTo) !== String(userId)) return null
+  if (product?.owner?.id || product?.owner) return null
+  if (Array.isArray(product?.transactions) && product.transactions.length) return null
+
+  return await $fetch(`${config.strapiUrl}/products/${productId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      reserved_to: userId,
+      reservation_price: price,
+      reservation_time: new Date().toISOString()
+    }
+  })
+}
+
+async function createMaksekeskusTransaction({ body, categoryId, productId, productCatSeller, price, userId, userEmail, billingProfileId, deliveryLocationId, ownerResult }) {
+  const host = String(config.maksekeskusHost || 'https://api.test.maksekeskus.ee').replace(/\/$/, '')
+  const mkUrl = host.startsWith('http') ? `${host}/v1/transactions` : `https://${host}/v1/transactions`
+  const mkId = config.maksekeskusId
+  const mkSecret = config.maksekeskusSecret
+
+  const postData = {
+    customer: {
+      email: userEmail,
+      ip: body.ip || '',
+      country: 'ee',
+      locale: body.locale || 'et'
+    },
+    transaction: {
+      amount: price,
+      currency: 'EUR',
+      merchant_data: JSON.stringify({
+        userId,
+        categoryId,
+        productId,
+        productCatSeller,
+        selectedBillingProfileId: billingProfileId,
+        deliveryLocationId,
+        ownerUserId: ownerResult.userId,
+        ownerMode: ownerResult.mode,
+        ownerSendEmail: ownerResult.sendEmail === true,
+        cancel_url: body.cancel_url,
+        return_url: body.return_url
+      }),
+      reference: categoryId,
+      transaction_url: {
+        cancel_url: { method: 'POST', url: `${config.strapiUrl}/users-permissions/users/buyproductcb/cancel` },
+        notification_url: { method: 'POST', url: `${config.strapiUrl}/users-permissions/users/buyproductcb/notification` },
+        return_url: { method: 'POST', url: `${config.strapiUrl}/users-permissions/users/buyproductcb/return` }
+      }
+    }
+  }
+
+  try {
+    const response = await $fetch(mkUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${mkId}:${mkSecret}`).toString('base64')}`,
+        'Content-Type': 'application/json'
+      },
+      body: postData
+    })
+    return response
+  } catch (error) {
+    throw error
+  }
+}
+
+function buildMaksekeskusMethodId(method) {
+  return [method.country, method.name].join('_').toUpperCase()
+}
+
+async function getOrCreateStatusCollectionItem(collection, status) {
+  const token = await getStrapiAdminToken()
+  const fields = ['status', 'name']
+  let supportedField = null
+
+  for (const field of fields) {
+    const result = await getStatusCollectionItemByField(collection, field, status, token)
+    if (!result.supported) continue
+    supportedField = field
+    if (result.item) return result.item
+    break
+  }
+
+  if (!supportedField) {
+    throw createError({ statusCode: 500, statusMessage: `${collection} schema has neither status nor name field` })
+  }
+
+  return await $fetch(`${config.strapiUrl}/${collection}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: { [supportedField]: status }
+  })
+}
+
+async function getStatusCollectionItemByField(collection, field, status, token) {
+  const params = new URLSearchParams()
+  params.append(field, status)
+  params.append('_limit', '1')
+
+  try {
+    const existing = await $fetch(`${config.strapiUrl}/${collection}?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return {
+      supported: true,
+      item: Array.isArray(existing) ? existing[0] : existing
+    }
+  } catch (error) {
+    const message = error?.data?.message || error?.message || ''
+    const statusCode = error?.response?.status || error?.statusCode || error?.status
+    if (statusCode === 400 && message.includes(`field '${field}'`)) {
+      return { supported: false, item: null }
+    }
+    throw error
+  }
+}
+
+const _cartStatusCache = new Map()
+async function getCartStatus(name) {
+  if (_cartStatusCache.has(name)) return _cartStatusCache.get(name)
+  const result = await getOrCreateStatusCollectionItem('cart-statuses', name)
+  _cartStatusCache.set(name, result)
+  return result
+}
+
+async function getOrderStatus(name) {
+  return await getOrCreateStatusCollectionItem('order-statuses', name)
+}
+
+async function resolveCheckoutDomainId(domainName) {
+  if (!domainName) return null
+  const token = await getStrapiAdminToken()
+  const host = String(domainName).replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+  const params = new URLSearchParams()
+  params.append('_limit', '1')
+  params.append('_where[_or][0][url_contains]', host)
+  params.append('_where[_or][1][name_contains]', host)
+
+  try {
+    const domains = await $fetch(`${config.strapiUrl}/domains?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return Array.isArray(domains) && domains[0] ? domains[0].id : null
+  } catch (error) {
+    console.warn('checkout domain resolve failed', error.message) // eslint-disable-line no-console
+    return null
+  }
+}
+
+export { checkoutTimeoutSeconds, checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
+import { checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
+
+function checkoutCartProductIds(cart) {
+  return (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
+}
+
+async function releaseCheckoutCartReservations(cart) {
+  const userId = cart?.users_permissions_user?.id || cart?.users_permissions_user || null
+  const cartToken = cart?.cartToken || null
+  const owner = userId ? { userId } : { cartToken } // release this cart's own holds (user or guest token)
+  await Promise.all(checkoutCartProductIds(cart).map(productId => clearCheckoutProductReservation(productId, owner).catch(() => null)))
+}
+
+async function refreshCheckoutCartReservations(cart, userId) {
+  await Promise.all((cart?.cartProducts || []).map(item => {
+    const productId = item.product?.id || item.product
+    if (!productId) return null
+    return refreshCheckoutProductReservation(productId, userId, item.priceInCart).catch(() => null)
+  }))
+}
+
+async function markCheckoutCartExpired(cart) {
+  if (!cart?.id) return
+  const token = await getStrapiAdminToken()
+  const expiredStatus = await getCartStatus('expired')
+  await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: {
+      cart_status: expiredStatus.id,
+      cartUpdatedAt: new Date().toISOString()
+    }
+  }).catch(() => null)
+}
+
+async function expireCheckoutCart(cart) {
+  if (!cart) return
+  await releaseCheckoutCartReservations(cart)
+  await markCheckoutCartExpired(cart)
+}
+
+export async function getCleanupState() {
+  const token = await getStrapiAdminToken()
+  return await $fetch(`${config.strapiUrl}/cleanup-state`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => null)
+}
+
+export async function saveCleanupState(data) {
+  const token = await getStrapiAdminToken()
+  return await $fetch(`${config.strapiUrl}/cleanup-state`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: data
+  }).catch(() => null)
+}
+
+export async function runStartupCartRecovery() {
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus('active')
+  const params = new URLSearchParams()
+  params.append('cart_status', activeStatus.id)
+  params.append('_limit', '-1')
+
+  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => [])
+
+  const now = new Date().toISOString()
+  await Promise.all((Array.isArray(carts) ? carts : []).map(cart =>
+    $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: { cartUpdatedAt: now }
+    }).catch(() => null)
+  ))
+
+  return (Array.isArray(carts) ? carts : []).length
+}
+
+export async function expireStaleCheckoutCarts() {
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus('active')
+  const params = new URLSearchParams()
+  params.append('cart_status', activeStatus.id)
+  params.append('_limit', '-1')
+  params.append('_sort', 'cartUpdatedAt:ASC')
+
+  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => [])
+
+  const staleCarts = (Array.isArray(carts) ? carts : []).filter(checkoutCartExpired)
+  await Promise.all(staleCarts.map(cart => expireCheckoutCart(cart)))
+  return { checked: carts.length, expired: staleCarts.length }
+}
+
+async function getCurrentCheckoutCart(owner, options = {}) {
+  if (!owner) return null
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus(options.status || 'active')
+  const params = new URLSearchParams()
+  if (owner.userId) {
+    params.append('users_permissions_user', owner.userId)
+  } else if (owner.cartToken) {
+    params.append('cartToken', owner.cartToken)
+  } else {
+    return null
+  }
+  params.append('cart_status', activeStatus.id)
+  params.append('_sort', 'cartUpdatedAt:DESC')
+  params.append('_limit', '1')
+
+  const carts = await fetchCheckoutCarts(params, token)
+  const cart = Array.isArray(carts) ? carts[0] : carts
+  if (cart && checkoutCartExpired(cart)) {
+    await expireCheckoutCart(cart)
+    return null
+  }
+  return cart
+}
+
+function isValidClientCartToken(token) {
+  return typeof token === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(token)
+}
+
+async function resetCheckoutCartToActive(cart, overrides = {}) {
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus('active')
+  const now = new Date().toISOString()
+  const body = {
+    cartProducts: [],
+    cartTimeout: '00:30:00',
+    cartCreatedAt: now,
+    cartUpdatedAt: now,
+    cart_status: activeStatus.id
+  }
+  if (overrides.domain !== undefined) body.domain = overrides.domain
+  if (overrides.locale !== undefined) body.locale = overrides.locale
+  return await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body
   })
+}
 
+async function getUserCartAnyStatus(userId) {
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('users_permissions_user', userId)
+  params.append('_sort', 'cartUpdatedAt:DESC')
+  params.append('_limit', '1')
+  const carts = await fetchCheckoutCarts(params, token)
+  return Array.isArray(carts) ? carts[0] : carts
+}
+
+async function getCartByTokenAnyStatus(cartToken) {
+  if (!isValidClientCartToken(cartToken)) return null
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('cartToken', cartToken)
+  params.append('_sort', 'cartUpdatedAt:DESC')
+  params.append('_limit', '1')
+  const carts = await fetchCheckoutCarts(params, token)
+  return Array.isArray(carts) ? carts[0] : carts
+}
+
+async function fetchCheckoutCarts(params, token) {
+  const leanParams = new URLSearchParams(params)
+  leanParams.append('lean', 'checkout')
+  try {
+    return await $fetch(`${config.strapiUrl}/carts?${leanParams.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+  } catch (error) {
+    console.warn('[checkout] lean cart read failed; falling back to default Strapi cart read:', error?.message || error)
+    return await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+  }
+}
+
+async function ensureCurrentCheckoutCart(owner, body = {}) {
+  const strapiToken = await getStrapiAdminToken()
+  const existing = await getCurrentCheckoutCart(owner)
+  if (existing) return { cart: existing, newToken: null }
+
+  const activeStatus = await getCartStatus('active')
+  const now = new Date().toISOString()
+  const domainId = await resolveCheckoutDomainId(body.domain)
+
+  if (owner?.userId) {
+    const existingAny = await getUserCartAnyStatus(owner.userId)
+    if (existingAny) {
+      const reset = await resetCheckoutCartToActive(existingAny, { domain: domainId, locale: body.locale || 'et' })
+      return { cart: reset, newToken: null }
+    }
+  } else if (isValidClientCartToken(owner?.cartToken)) {
+    const existingAny = await getCartByTokenAnyStatus(owner.cartToken)
+    if (existingAny) {
+      const reset = await resetCheckoutCartToActive(existingAny, { domain: domainId, locale: body.locale || 'et' })
+      return { cart: reset, newToken: null }
+    }
+  }
+
+  const cartBody = {
+    domain: domainId,
+    locale: body.locale || 'et',
+    cartProducts: [],
+    cartTimeout: '00:30:00',
+    cartCreatedAt: now,
+    cartUpdatedAt: now,
+    cart_status: activeStatus.id
+  }
+
+  let newToken = null
+  if (owner?.userId) {
+    cartBody.users_permissions_user = owner.userId
+  } else if (isValidClientCartToken(owner?.cartToken)) {
+    cartBody.cartToken = owner.cartToken
+  } else {
+    newToken = crypto.randomBytes(24).toString('base64url')
+    cartBody.cartToken = newToken
+  }
+
+  try {
+    const cart = await $fetch(`${config.strapiUrl}/carts`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${strapiToken}`, 'Content-Type': 'application/json' },
+      body: cartBody
+    })
+    return { cart, newToken }
+  } catch (createError) {
+    let raced = null
+    try {
+      raced = await getCurrentCheckoutCart(owner)
+        || (owner?.userId
+          ? await getUserCartAnyStatus(owner.userId)
+          : await getCartByTokenAnyStatus(owner?.cartToken))
+    } catch { /* lookup failed too — fall through to rethrow the original create error */ }
+    if (raced) {
+      const reset = checkoutCartExpired(raced) || raced?.cart_status?.status !== 'active'
+        ? await resetCheckoutCartToActive(raced, { domain: domainId, locale: body.locale || 'et' })
+        : raced
+      return { cart: reset, newToken: null }
+    }
+    if (!owner?.userId) {
+      const retryToken = crypto.randomBytes(24).toString('base64url')
+      try {
+        const cart = await $fetch(`${config.strapiUrl}/carts`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${strapiToken}`, 'Content-Type': 'application/json' },
+          body: { ...cartBody, cartToken: retryToken }
+        })
+        return { cart, newToken: retryToken }
+      } catch { /* retry failed too — surface the original create failure */ }
+    }
+    throw createError
+  }
+}
+
+function isNumericId(value) {
+  return /^\d+$/.test(String(value || ''))
+}
+
+async function fetchProductCategoryByAnyId(categoryId, codePrefix) {
+  const token = await getStrapiAdminToken()
+  if (isNumericId(categoryId)) return await getStrapiCollectionItem('product-categories', categoryId)
+
+  const params = new URLSearchParams()
+  params.append('_limit', '1')
+  params.append('codePrefix', codePrefix || categoryId)
+  const categories = await $fetch(`${config.strapiUrl}/product-categories?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return Array.isArray(categories) ? categories[0] : categories
+}
+
+const _categoryCache = new Map()
+const CATEGORY_CACHE_TTL_MS = 30_000
+
+export function __clearCheckoutCaches() {
+  _categoryCache.clear()
+  _lastReservationRefresh.clear()
+  _paymentMethodsCache = null
+}
+
+async function getProductCategoryByAnyId(categoryId, codePrefix) {
+  const key = `${categoryId ?? ''}|${codePrefix ?? ''}`
+  const hit = _categoryCache.get(key)
+  if (hit && hit.expires > Date.now()) return hit.value
+  const value = await fetchProductCategoryByAnyId(categoryId, codePrefix)
+  if (value?.id) _categoryCache.set(key, { value, expires: Date.now() + CATEGORY_CACHE_TTL_MS })
+  return value
+}
+
+// Atomically claim (reserve) products for an owner — a logged-in user (userId) OR a guest cart token
+// (cartToken). Guests now hold products just like users.
+async function claimCheckoutProducts({ category, productIds, userId, cartToken, quantity, price }) {
+  const token = await getStrapiAdminToken()
+  const owner = userId ? { userId } : { cartToken }
+  const body = (productIds && productIds.length)
+    ? { productIds, ...owner, reservationPrice: price }
+    : { categoryId: category.id, ...owner, quantity, reservationPrice: price }
+  const res = await $fetch(`${config.strapiUrl}/products/claim`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body
+  })
+  return res?.claimed || []
+}
+
+// Move a guest's token-held products onto the now-logged-in user (one atomic UPDATE in Strapi).
+async function transferGuestReservations(cartToken, userId) {
+  if (!cartToken || !userId) return []
+  const token = await getStrapiAdminToken()
+  const res = await $fetch(`${config.strapiUrl}/products/claim`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: { transfer: true, cartToken: String(cartToken), userId }
+  })
+  return res?.claimed || []
+}
+
+async function getAvailableCheckoutProducts(category, limit = 1, excludedProductIds = []) {
+  const token = await getStrapiAdminToken()
+  const excluded = new Set(excludedProductIds.map(id => String(id)))
+  const buildParams = (queryLimit) => {
+    const params = new URLSearchParams()
+    params.append('_limit', String(queryLimit))
+    params.append('code_null', 'false')
+    params.append('reserved_to_null', 'true')
+    params.append('reserved_to_token_null', 'true') // a guest token hold counts as taken
+    params.append('owner_null', 'true')
+    params.append('product_category_null', 'false')
+    params.append('transactions_null', 'true')
+    params.append('active', 'true')
+    if (category?.id) params.append('product_category', category.id)
+    else if (category?.codePrefix) params.append('product_category.codePrefix', category.codePrefix)
+    return params
+  }
+
+  const fetchProducts = async (params) => {
+    const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return normalizeStrapiList(products).filter(product => product && !excluded.has(String(product.id))).slice(0, limit)
+  }
+
+  if (excludedProductIds.length) {
+    const params = buildParams(limit + 5)
+    excludedProductIds.forEach(id => params.append('id_nin', id))
+    try {
+      return await fetchProducts(params)
+    } catch (error) {
+    }
+  }
+
+  return await fetchProducts(buildParams(limit + excludedProductIds.length + 5))
+}
+
+function checkoutCategoryTitle(category, locale = 'et') {
+  if (!category) return ''
+  if (category.name && typeof category.name === 'object') return category.name[locale] || category.name.et || category.name.en || category.name.ru || ''
+  return category[`name_${locale}`] || category.name_et || category.name_en || category.namePrivate || ''
+}
+
+function checkoutLocalizedText(value, locale = 'et') {
+  if (!value) return ''
+  if (typeof value === 'object') return value[locale] || value.et || value.en || value.ru || ''
+  return value
+}
+
+function checkoutPublicStrapiUrl() {
+  return String(config.strapiUrl || '').replace('host.docker.internal', 'localhost').replace(/\/$/, '')
+}
+
+function checkoutMediaUrl(media) {
+  const file = Array.isArray(media) ? media[0] : media
+  if (!file) return ''
+  if (file.hash && file.ext) return `https://assets.poff.ee/img/${file.hash}${file.ext}`
+  if (file.url && /^https?:\/\//.test(file.url)) return file.url
+  if (file.url && file.url.startsWith('/') && checkoutPublicStrapiUrl()) return `${checkoutPublicStrapiUrl()}${file.url}`
+  return ''
+}
+
+function checkoutCategoryImageUrl(category, locale = 'et') {
+  const images = category?.images || {}
+  return checkoutMediaUrl(
+    images[`image_${locale}`] ||
+    images.image ||
+    images.imageDefault ||
+    images.image_en ||
+    images.image_et ||
+    images.image_ru
+  )
+}
+
+function normalizeCheckoutLocation(location, locale = 'et') {
+  if (!location) return null
+  const name = checkoutLocalizedText(location.name, locale) || location.name_et || location.name_en || ''
+  const hall = checkoutLocalizedText(location.hall, locale)
+  const city = checkoutLocalizedText(location.city, locale)
+  return {
+    id: location.id,
+    name: [name, hall, city].filter(Boolean).join(', '),
+    raw: location
+  }
+}
+
+function normalizeCheckoutMethodGroup(paymentMethods = {}) {
+  return [
+    ...(paymentMethods.banklinks || []),
+    ...(paymentMethods.cards || []),
+    ...(paymentMethods.other || []),
+    ...(paymentMethods.payLater || [])
+  ].filter(Boolean)
+}
+
+async function serializeCheckoutCart(cart, locale = 'et') {
+  if (!cart) return null
+  const products = cart.cartProducts || []
+  const items = []
+  const expiry = checkoutCartExpiry(cart)
+
+  const missingProductIds = []
+  for (const row of products) {
+    if (!(row.product && typeof row.product === 'object') && row.product) {
+      missingProductIds.push(row.product)
+    }
+  }
+
+  const fetchedProducts = await getStrapiCollectionItemsByIds('products', missingProductIds)
+
+  const missingCategoryIds = []
+  for (const row of products) {
+    const product = row.product && typeof row.product === 'object'
+      ? row.product
+      : fetchedProducts.get(String(row.product))
+    const category = product?.product_category
+    const categoryId = category && typeof category === 'object' ? category.id : category
+    if (categoryId && (typeof category !== 'object' || !Object.prototype.hasOwnProperty.call(category, 'pickup_locations'))) {
+      missingCategoryIds.push(categoryId)
+    }
+  }
+
+  const fetchedCategories = await getCheckoutProductCategoriesByIds(missingCategoryIds)
+
+  const resolved = products.map((row, index) => {
+    const productIsPopulated = row.product && typeof row.product === 'object'
+    const product = productIsPopulated ? row.product : fetchedProducts.get(String(row.product))
+    if (!product) return null
+    const categoryId = product.product_category && typeof product.product_category === 'object'
+      ? product.product_category.id
+      : product.product_category
+    const category = fetchedCategories.get(String(categoryId)) ||
+      (product.product_category && typeof product.product_category === 'object' ? product.product_category : null)
+    const price = Number(row.priceInCart || getCheckoutProductCurrentPrice(category) || 0)
+    return {
+      index,
+      componentId: row.id,
+      productId: product.id,
+      productCode: product.code,
+      categoryId: category?.id,
+      codePrefix: category?.codePrefix,
+      title: checkoutCategoryTitle(category, locale),
+      imageUrl: checkoutCategoryImageUrl(category, locale),
+      price,
+      transferable: product.transferable === true || category?.transferable === true,
+      pickupLocations: (category?.pickup_locations || []).map(location => normalizeCheckoutLocation(location, locale)).filter(Boolean),
+      sellerBusinessProfileId: category?.business_profile?.id || category?.business_profile || null,
+      timeToCart: row.timeToCart || null
+    }
+  })
+  for (const item of resolved) { if (item) items.push(item) }
+
+  return {
+    id: cart.id,
+    locale: cart.locale || locale,
+    status: cart.cart_status?.status || cart.cart_status?.name || cart.cart_status || null,
+    timeoutSeconds: expiry.timeoutSeconds,
+    secondsRemaining: expiry.secondsRemaining,
+    expiresAt: expiry.expiresAt,
+    serverNow: new Date().toISOString(),
+    total: items.reduce((sum, item) => sum + Number(item.price || 0), 0),
+    items
+  }
+}
+
+export async function getCheckoutCart(owner, locale = 'et') {
+  const cart = await getCurrentCheckoutCart(owner)
+  return await serializeCheckoutCart(cart, locale)
+}
+
+async function countCheckoutCartCategoryItems(cart, categoryId) {
+  if (!categoryId) return 0
+  let count = 0
+  const unknownIds = []
+  for (const item of cart?.cartProducts || []) {
+    const product = item.product
+    if (product && typeof product === 'object') {
+      const productCategoryId = product.product_category?.id || product.product_category || null
+      if (productCategoryId != null) {
+        if (String(productCategoryId) === String(categoryId)) count++
+      } else if (product.id) {
+        unknownIds.push(product.id)
+      }
+    } else if (product) {
+      unknownIds.push(product)
+    }
+  }
+  const ids = [...new Set(unknownIds.map(id => String(id)).filter(Boolean))]
+  if (!ids.length) return count
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  ids.forEach(id => params.append('id_in', id))
+  params.append('product_category', String(categoryId))
+  params.append('_limit', '-1')
+  const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => [])
+  return count + normalizeStrapiList(products).length
+}
+
+function checkoutCategoryCartLimit(category) {
+  return category?.cartLimit != null && category.cartLimit !== '' ? Number(category.cartLimit) : null
+}
+
+async function getAvailableCheckoutProductCount(category, excludedProductIds = []) {
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('code_null', 'false')
+  params.append('reserved_to_null', 'true')
+  params.append('reserved_to_token_null', 'true') // a guest token hold counts as taken
+  params.append('owner_null', 'true')
+  params.append('product_category_null', 'false')
+  params.append('transactions_null', 'true')
+  params.append('active', 'true')
+  if (category?.id) params.append('product_category', category.id)
+  else if (category?.codePrefix) params.append('product_category.codePrefix', category.codePrefix)
+  excludedProductIds.forEach(id => params.append('id_nin', id))
+  try {
+    const count = await $fetch(`${config.strapiUrl}/products/count?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    return Number(count) || 0
+  } catch (error) {
+    const products = await getAvailableCheckoutProducts(category, 1, excludedProductIds)
+    return products.length
+  }
+}
+
+export async function getCheckoutCategoryAvailability(owner, categoryId, codePrefix) {
+  const category = await getProductCategoryByAnyId(categoryId || codePrefix, codePrefix)
+  if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
+  const cart = owner ? await getCurrentCheckoutCart(owner) : null
+  const existingProductIds = (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
+  const cartLimit = checkoutCategoryCartLimit(category)
+  const [availableCount, inCart] = await Promise.all([
+    getAvailableCheckoutProductCount(category, existingProductIds),
+    cartLimit != null ? countCheckoutCartCategoryItems(cart, category.id) : Promise.resolve(0)
+  ])
+
+  const reasons = []
+  if (!isCategoryOnSale(category)) reasons.push('notOnSale')
+  if (getCheckoutProductCurrentPrice(category) == null) reasons.push('noPrice')
+  if (availableCount <= 0) reasons.push('soldOut')
+
+  return { availableCount, cartLimit, inCart, reasons }
+}
+
+// Per-cart async mutex — serializes add/remove/clear within one Node process so that
+// concurrent requests don't overwrite each other (last-write-wins data loss).
+// TODO: if oauth ever runs >1 App Platform instance this mutex won't span processes;
+// escalate to a Postgres advisory lock or optimistic cartUpdatedAt version-check + retry.
+const cartLocks = new Map()
+function withCartLock(key, fn) {
+  const prev = cartLocks.get(key) || Promise.resolve()
+  const next = prev.catch(() => {}).then(fn)
+  cartLocks.set(key, next.finally(() => { if (cartLocks.get(key) === next) cartLocks.delete(key) }))
+  return next
+}
+function ownerLockKey(owner) {
+  if (owner?.userId) return `userId:${owner.userId}`
+  if (owner?.cartToken) return `token:${owner.cartToken}`
+  return 'new'
+}
+
+function wantsMinimalCartMutationResponse(body = {}) {
+  return body.response === 'minimal'
+}
+
+function minimalCartMutationResponse(cart, newToken = null) {
+  const response = {
+    ok: true,
+    cartId: cart?.id || null,
+    itemCount: (cart?.cartProducts || []).length,
+    cartUpdatedAt: cart?.cartUpdatedAt || null
+  }
+  if (newToken) response.newCartToken = newToken
+  return response
+}
+
+export async function addCheckoutCartItem(owner, body = {}) {
+  const quantity = Math.max(1, Math.min(20, Number(body.quantity || 1)))
+  const category = await getProductCategoryByAnyId(body.categoryId || body.codePrefix, body.codePrefix)
+  if (!category?.id) return { code: 400, case: 'noCategoryId' }
+  if (!isCategoryOnSale(category)) return { code: 400, case: 'notOnSale' }
+  const price = getCheckoutProductCurrentPrice(category)
+  if (price === undefined || price === null || Number.isNaN(Number(price))) return { code: 400, case: 'noCurrentPrice' }
+
+  const result = await withCartLock(ownerLockKey(owner), async () => {
+    const { cart, newToken } = await ensureCurrentCheckoutCart(owner, body)
+
+    if ((cart.cartProducts || []).length >= CART_LIMITS.maxItemsPerCart) {
+      return { code: 400, case: 'cartFull' }
+    }
+
+    const categoryCartLimit = checkoutCategoryCartLimit(category)
+    if (categoryCartLimit != null) {
+      const inCategory = await countCheckoutCartCategoryItems(cart, category.id)
+      if (inCategory + quantity > categoryCartLimit) {
+        return { code: 400, case: 'categoryLimit', limit: categoryCartLimit, inCart: inCategory }
+      }
+    }
+
+    const isGuest = !owner?.userId
+    const userId = owner?.userId || null
+    // Guests now reserve too, against their cart token (the adopted one, or the freshly-minted newToken).
+    const guestToken = isGuest ? (owner?.cartToken || newToken) : null
+
+    // Atomically claim/reserve for the owner (user or guest token) — identical handling for both. The
+    // reserved-filter already excludes products this owner is already holding, so no manual exclusion.
+    const acquired = await claimCheckoutProducts({ category, userId, cartToken: guestToken, quantity, price })
+    if (acquired.length < quantity) {
+      await Promise.all(acquired.map(p => clearCheckoutProductReservation(p.id, { userId, cartToken: guestToken }).catch(() => null)))
+      return { code: 404, case: 'noItems', available: acquired.length }
+    }
+
+    const token = await getStrapiAdminToken()
+    const now = new Date().toISOString()
+    const reservedProductIds = acquired.map(p => p.id)
+    const newRows = acquired.map(product => ({
+      product: product.id,
+      priceInCart: price,
+      timeToCart: now
+    }))
+
+    try {
+      const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: {
+          cartProducts: [...(cart.cartProducts || []).map(item => ({
+            id: item.id,
+            product: item.product?.id || item.product,
+            priceInCart: item.priceInCart,
+            timeToCart: item.timeToCart
+          })), ...newRows],
+          cartUpdatedAt: now
+        }
+      })
+
+      if (wantsMinimalCartMutationResponse(body)) {
+        return minimalCartMutationResponse(updated, newToken)
+      }
+
+      const serialized = await serializeCheckoutCart(updated, body.locale || cart.locale || 'et')
+      if (newToken) return { ...serialized, newCartToken: newToken }
+      return serialized
+    } catch (error) {
+      // Release the holds we just took (user or guest token) so a failed cart write doesn't orphan them.
+      await Promise.all(reservedProductIds.map(productId => clearCheckoutProductReservation(productId, { userId, cartToken: guestToken }).catch(() => null)))
+      return { code: 409, case: error.message === 'reservationSaveFailed' ? 'reservationSaveFailed' : 'productUnavailable' }
+    }
+  })
   return result
+}
+
+export async function removeCheckoutCartItem(owner, body = {}) {
+  if (!owner) return { code: 401, case: 'unauthorized' }
+  const result = await withCartLock(ownerLockKey(owner), async () => {
+    const cart = await getCurrentCheckoutCart(owner)
+    if (!cart) return { code: 404, case: 'noCart' }
+
+    const token = await getStrapiAdminToken()
+    const userId = owner.userId || null
+    const removeComponentId = body.componentId != null ? Number(body.componentId) : null
+    const removeProductId = body.productId ? String(body.productId) : null
+    const removeIndex = body.index != null ? Number(body.index) : NaN
+    let removed = false
+    const removedProductIds = []
+    const rows = (cart.cartProducts || []).filter((item, index) => {
+      if (removed) return true
+      if (removeComponentId != null && item.id === removeComponentId) {
+        removed = true
+        removedProductIds.push(item.product?.id || item.product)
+        return false
+      }
+      if (removeProductId && String(item.product?.id || item.product) === removeProductId) {
+        removed = true
+        removedProductIds.push(item.product?.id || item.product)
+        return false
+      }
+      if (Number.isInteger(removeIndex) && index === removeIndex) {
+        removed = true
+        removedProductIds.push(item.product?.id || item.product)
+        return false
+      }
+      return true
+    }).map(item => ({
+      id: item.id,
+      product: item.product?.id || item.product,
+      priceInCart: item.priceInCart,
+      timeToCart: item.timeToCart
+    }))
+
+    // Release the removed products' holds for THIS owner — user or guest token. Guests reserve too
+    // (reserved_to_token), so a userId-only gate leaked guest holds: the row left the cart but the
+    // reservation stayed, and later cart-expiry can't release it (it's no longer in cartProducts).
+    // clearCheckoutProductReservation only clears a hold that matches this owner, so it's safe.
+    const releaseOwner = userId ? { userId } : (owner.cartToken ? { cartToken: owner.cartToken } : null)
+    if (releaseOwner) {
+      await Promise.all(removedProductIds.map(productId => clearCheckoutProductReservation(productId, releaseOwner).catch(() => null)))
+    }
+
+    const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: {
+        cartProducts: rows,
+        cartUpdatedAt: new Date().toISOString()
+      }
+    })
+    if (wantsMinimalCartMutationResponse(body)) {
+      return minimalCartMutationResponse(updated)
+    }
+    return await serializeCheckoutCart(updated, body.locale || cart.locale || 'et')
+  })
+  return result
+}
+
+export async function clearCheckoutCart(owner) {
+  const result = await withCartLock(ownerLockKey(owner), async () => {
+    const cart = await getCurrentCheckoutCart(owner)
+    if (!cart) return { ok: true }
+    const token = await getStrapiAdminToken()
+    // Release holds for user AND guest carts — releaseCheckoutCartReservations reads the cart's own
+    // owner (users_permissions_user or cartToken), so guests' reserved_to_token holds get cleared too.
+    if (owner?.userId || owner?.cartToken) await releaseCheckoutCartReservations(cart)
+    const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: {
+        cartProducts: [],
+        cartUpdatedAt: new Date().toISOString()
+      }
+    })
+    return await serializeCheckoutCart(updated, cart.locale || 'et')
+  })
+  return result
+}
+
+const _lastReservationRefresh = new Map()
+const RESERVATION_REFRESH_INTERVAL_MS = 5 * 60_000
+
+async function refreshHeldCartReservations(owner, cart) {
+  if ((!owner?.userId && !owner?.cartToken) || !cart?.id) return
+  const last = _lastReservationRefresh.get(cart.id) || 0
+  if (Date.now() - last < RESERVATION_REFRESH_INTERVAL_MS) return
+  _lastReservationRefresh.set(cart.id, Date.now())
+  const rows = cart.cartProducts || []
+  const productIds = rows.map(item => item.product?.id || item.product).filter(Boolean)
+  if (!productIds.length) return
+  // Re-stamp the owner's held products (user or guest token) so an active cart's holds stay fresh.
+  await claimCheckoutProducts({ productIds, userId: owner.userId, cartToken: owner.cartToken, price: rows[0]?.priceInCart ?? null }).catch(() => null)
+}
+
+export async function touchCheckoutCartSession(owner, locale = 'et') {
+  if (!owner) return { items: [], total: 0 }
+  const cart = await getCurrentCheckoutCart(owner)
+  if (!cart) return { items: [], total: 0 }
+  const token = await getStrapiAdminToken()
+  const now = new Date().toISOString()
+
+  const updated = await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: { cartUpdatedAt: now }
+  })
+  await refreshHeldCartReservations(owner, updated)
+  return await serializeCheckoutCart(updated, locale || cart.locale || 'et')
+}
+
+export async function reactivateStrandedCheckoutCart(userId) {
+  if (!userId) return null
+  const stranded = await getCurrentCheckoutCart({ userId }, { status: 'checkout_started' })
+  if (!stranded || !(stranded.cartProducts || []).length) return null
+  const token = await getStrapiAdminToken()
+  const activeStatus = await getCartStatus('active')
+  return await $fetch(`${config.strapiUrl}/carts/${stranded.id}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: { cart_status: activeStatus.id, cartUpdatedAt: new Date().toISOString() }
+  }).catch(() => null)
+}
+
+async function getOwnBusinessProfiles(userId) {
+  const token = await getStrapiAdminToken()
+  const params = new URLSearchParams()
+  params.append('_where[user]', userId)
+  params.append('_where[saved_for_reuse_ne]', false)
+  return await $fetch(`${config.strapiUrl}/business-profiles?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+}
+
+export async function getCheckoutContext(userId, locale = 'et') {
+  if (!userId) return { code: 401, case: 'unauthorized' }
+  const [user, initialCart, businessProfiles, paymentMethods] = await Promise.all([
+    getStrapiUser(userId),
+    getCheckoutCart({ userId }, locale),
+    getOwnBusinessProfiles(userId),
+    getPaymentMethods()
+  ])
+
+  let cart = initialCart
+  if (!cart?.items?.length) {
+    const recovered = await reactivateStrandedCheckoutCart(userId)
+    if (recovered) cart = await serializeCheckoutCart(recovered, locale)
+  }
+
+  return {
+    user,
+    profile: user?.user_profile || null,
+    cart,
+    businessProfiles,
+    paymentMethods
+  }
+}
+
+async function createCartMaksekeskusTransaction({ body, userEmail, userId, billingProfileId, orderId, cartId, orderProducts, amount }) {
+  const host = String(config.maksekeskusHost || 'https://api.test.maksekeskus.ee').replace(/\/$/, '')
+  const mkUrl = host.startsWith('http') ? `${host}/v1/transactions` : `https://${host}/v1/transactions`
+  const mkId = config.maksekeskusId
+  const mkSecret = config.maksekeskusSecret
+
+  const postData = {
+    customer: {
+      email: userEmail,
+      ip: body.ip || '',
+      country: 'ee',
+      locale: body.locale || 'et'
+    },
+    transaction: {
+      amount,
+      currency: 'EUR',
+      merchant_data: JSON.stringify({
+        checkoutType: 'cart',
+        userId,
+        cartId,
+        orderId,
+        locale: body.locale || 'et',
+        selectedBillingProfileId: billingProfileId,
+        products: orderProducts,
+        cancel_url: body.cancel_url,
+        return_url: body.return_url
+      }),
+      reference: `order-${orderId}`,
+      transaction_url: {
+        cancel_url: { method: 'POST', url: `${config.strapiUrl}/users-permissions/users/buyproductcb/cancel` },
+        notification_url: { method: 'POST', url: `${config.strapiUrl}/users-permissions/users/buyproductcb/notification` },
+        return_url: { method: 'POST', url: `${config.strapiUrl}/users-permissions/users/buyproductcb/return` }
+      }
+    }
+  }
+
+  try {
+    const response = await $fetch(mkUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${mkId}:${mkSecret}`).toString('base64')}`,
+        'Content-Type': 'application/json'
+      },
+      body: postData
+    })
+    return response
+  } catch (error) {
+    throw error
+  }
+}
+
+export async function payCheckoutCart(userId, body = {}) {
+  if (!userId) return { code: 401, case: 'unauthorized' }
+  if (!body.paymentMethodId) return { code: 400, case: 'noPaymentMethodId' }
+
+  const cart = await getCurrentCheckoutCart({ userId })
+  const cartData = await serializeCheckoutCart(cart, body.locale || 'et')
+  if (!cartData?.items?.length) return { code: 400, case: 'emptyCart' }
+
+  const billingProfileId = await validateCheckoutBusinessProfile(userId, body.billingProfileId || body.buyerBusinessProfileId)
+  if (!billingProfileId) return { code: 400, case: 'invalidBillingProfile' }
+
+  const buyer = await getStrapiUser(userId)
+  const buyerProfile = buyer.user_profile || {}
+  if (!hasCheckoutBuyerProfile(buyerProfile)) {
+    return { code: 400, case: 'buyerProfileIncomplete', missing: missingCheckoutBuyerProfileFields(buyerProfile) }
+  }
+
+  const itemPayload = Array.isArray(body.items) ? body.items : []
+  const token = await getStrapiAdminToken()
+  const reservedProductIds = []
+  const orderProducts = []
+  const componentRows = []
+  const now = new Date().toISOString()
+  let createdOrderId = null
+  let cartMovedToCheckout = false
+  const checkoutError = result => {
+    const error = new Error(result.case || 'checkoutError')
+    error.checkoutResult = result
+    return error
+  }
+
+  try {
+    for (const cartItem of cartData.items) {
+      const submitted = itemPayload.find(item => String(item.productId) === String(cartItem.productId) || Number(item.index) === Number(cartItem.index)) || {}
+      const category = await getProductCategoryByAnyId(cartItem.categoryId)
+      const deliveryLocationId = validateCheckoutDeliveryLocation(category.pickup_locations || [], submitted.pickupLocationId)
+      if (deliveryLocationId === false) throw checkoutError({ code: 400, case: submitted.pickupLocationId ? 'invalidDeliveryLocation' : 'noDeliveryLocation', productId: cartItem.productId })
+
+      const ownerResult = await resolveCheckoutOwner(userId, category, submitted.owner || { mode: 'me' })
+      if (ownerResult.error) throw checkoutError({ code: 400, case: ownerResult.error, missing: ownerResult.missing, productId: cartItem.productId })
+
+      const claimed = await claimCheckoutProducts({ productIds: [cartItem.productId], userId, price: cartItem.price })
+      if (!claimed.length) throw checkoutError({ code: 409, case: 'productUnavailable', productId: cartItem.productId })
+      reservedProductIds.push(cartItem.productId)
+
+      componentRows.push({
+        product: cartItem.productId,
+        priceInCart: cartItem.price,
+        timeToCart: cartItem.timeToCart || now,
+        pickupLocation: deliveryLocationId || null,
+        owner: ownerResult.userId
+      })
+      orderProducts.push({
+        productId: cartItem.productId,
+        categoryId: cartItem.codePrefix,
+        productCategoryId: cartItem.categoryId,
+        productCatSeller: cartItem.sellerBusinessProfileId,
+        deliveryLocationId: deliveryLocationId || null,
+        ownerUserId: ownerResult.userId,
+        ownerMode: ownerResult.mode,
+        ownerSendEmail: ownerResult.sendEmail === true,
+        price: cartItem.price
+      })
+    }
+
+    const pendingStatus = await getOrderStatus('pending_payment')
+    const checkoutStatus = await getCartStatus('checkout_started')
+    const amount = cartData.items.reduce((sum, item) => sum + Number(item.price || 0), 0)
+    const domainId = cart?.domain?.id || cart?.domain || null
+    const order = await $fetch(`${config.strapiUrl}/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: {
+        users_permissions_user: userId,
+        domain: domainId,
+        orderTimeout: '00:30:00',
+        orderCreatedAt: now,
+        orderUpdatedAt: now,
+        orderProducts: componentRows,
+        order_status: pendingStatus.id,
+        orderSum: amount,
+        buyerBusinessProfile: billingProfileId
+      }
+    })
+    createdOrderId = order.id
+
+    await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: {
+        cart_status: checkoutStatus.id,
+        cartUpdatedAt: now
+      }
+    })
+    cartMovedToCheckout = true
+
+    const mkResponse = await createCartMaksekeskusTransaction({
+      body,
+      userId,
+      userEmail: buyerProfile.email || buyer.email,
+      billingProfileId,
+      orderId: order.id,
+      cartId: cart.id,
+      orderProducts,
+      amount
+    })
+
+    const paymentMethod = normalizeCheckoutMethodGroup({
+      banklinks: mkResponse.payment_methods?.banklinks,
+      cards: mkResponse.payment_methods?.cards,
+      other: mkResponse.payment_methods?.other,
+      payLater: mkResponse.payment_methods?.payLater
+    }).find(method => buildMaksekeskusMethodId(method) === body.paymentMethodId)
+
+    if (!paymentMethod) throw checkoutError({ code: 400, case: 'noPaymentMethod' })
+
+    return { url: paymentMethod.url, orderId: order.id }
+  } catch (error) {
+    if (reservedProductIds.length) await refreshCheckoutCartReservations(cart, userId)
+    if (cartMovedToCheckout && cart?.id) {
+      const activeStatus = await getCartStatus('active').catch(() => null)
+      if (activeStatus?.id) {
+        await $fetch(`${config.strapiUrl}/carts/${cart.id}`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: {
+            cart_status: activeStatus.id,
+            cartUpdatedAt: new Date().toISOString()
+          }
+        }).catch(() => null)
+      }
+    }
+    if (createdOrderId) {
+      const failedStatus = await getOrderStatus('payment_failed').catch(() => null)
+      if (failedStatus?.id) {
+        await $fetch(`${config.strapiUrl}/orders/${createdOrderId}`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: {
+            order_status: failedStatus.id,
+            orderUpdatedAt: new Date().toISOString()
+          }
+        }).catch(() => null)
+      }
+    }
+    if (error.checkoutResult) return error.checkoutResult
+    throw error
+  }
 }
 
 export async function roleCheck (body) {
@@ -1251,8 +2845,6 @@ export async function getStrapiCollections(ids, apiEndpoint) {
   return collections
 }
 
-
-
 export async function getStrapiOrganisationByField(field, name) {
   if (!name) return null
   const token = await getStrapiToken()
@@ -1416,9 +3008,7 @@ export async function putStrapiCollection (collectionName, collectionData) {
   return result
 }
 
-
 export async function getUniqSlug(slug, contentTypeUID, field) {
-  //  grep -r -P "^path: " . | grep -v _fetchdir | grep source | awk -F': ' '{print "\""$2"\","}' | uniq
   const reserverdSlugs = [
       "artikkel", "about", "artikl", "intervjuud", "interviews",
       "projects", "industry-projects", "toetajad", "supporters", "supportersru",
@@ -1461,4 +3051,160 @@ export async function getUniqSlug(slug, contentTypeUID, field) {
     console.log('getUniqSlug error:', error)
   }
   return slug
+}
+
+// ── Guest cart claim (WS4) ────────────────────────────────────────────────────
+
+async function deleteGuestCart(cartId) {
+  const token = await getStrapiAdminToken()
+  return $fetch(`${config.strapiUrl}/carts/${cartId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => null)
+}
+
+// Idempotent: safe to call twice (second call is a no-op once the token is cleared).
+// droppedItems: products that were in the guest cart but no longer available.
+// Resolve a (possibly un-populated) cart line's product category.
+async function resolveCartLineCategory(item) {
+  let product = item.product
+  if (!product || typeof product !== 'object') {
+    const pid = item.product?.id || item.product
+    if (!pid) return null
+    product = await getStrapiCollectionItem('products', pid).catch(() => null)
+  }
+  const raw = product?.product_category
+  if (raw && typeof raw === 'object') return raw
+  if (raw) return await getStrapiCollectionItem('product-categories', raw).catch(() => null)
+  return null
+}
+
+async function claimGuestLine(item, userId) {
+  const productId = item.product?.id || item.product
+  if (!productId) return null
+  const category = await resolveCartLineCategory(item)
+  const price = (category && getCheckoutProductCurrentPrice(category)) ?? item.priceInCart
+  // Claim the guest's OWN product by id — after the transfer it's reserved to this user ("mine"), so it
+  // succeeds and the guest keeps that exact product; if it was taken before login the claim fails → drop.
+  const claimed = await claimCheckoutProducts({ productIds: [productId], userId, price })
+  if (!claimed.length) return null
+  return { productId: claimed[0].id, price }
+}
+
+export async function claimGuestCart(userId, cartToken) {
+  if (!userId || !cartToken) return { claimed: false, droppedItems: [] }
+
+  const guestCart = await getCurrentCheckoutCart({ cartToken })
+  if (!guestCart) return { claimed: true, droppedItems: [] }
+
+  const guestProducts = guestCart.cartProducts || []
+  if (!guestProducts.length) {
+    await deleteGuestCart(guestCart.id)
+    return { claimed: true, droppedItems: [] }
+  }
+
+  // Guests now hold their products (reserved_to_token). Move those holds onto the user in one shot, so the
+  // per-line claims below match the user's own reservation ("mine") and keep the guest's EXACT products.
+  // Anything taken before login simply won't transfer and is dropped below.
+  await transferGuestReservations(cartToken, userId).catch(() => null)
+
+  const token = await getStrapiAdminToken()
+  const now = new Date().toISOString()
+  const droppedItems = []
+
+  let userCart = await getCurrentCheckoutCart({ userId })
+
+  if (!userCart) {
+    const stale = await getUserCartAnyStatus(userId)
+    if (stale) userCart = await resetCheckoutCartToActive(stale, { domain: guestCart.domain?.id || guestCart.domain, locale: guestCart.locale })
+  }
+
+  if (!userCart) {
+
+    const validRows = []
+    for (const item of guestProducts) {
+      // Bind this guest line to an actual available product of its category (atomic claim).
+      const bound = await claimGuestLine(item, userId)
+      if (!bound) { droppedItems.push({ productId: item.product?.id || item.product, reason: 'soldOut' }); continue }
+      validRows.push({ id: item.id, product: bound.productId, priceInCart: bound.price, timeToCart: item.timeToCart })
+    }
+
+    await $fetch(`${config.strapiUrl}/carts/${guestCart.id}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: {
+        users_permissions_user: userId,
+        cartToken: null,
+        cartProducts: validRows,
+        cartUpdatedAt: now
+      }
+    })
+  } else {
+    const lineCategories = []
+    for (const item of guestProducts) lineCategories.push({ item, category: await resolveCartLineCategory(item) })
+
+    const catLimit = new Map()
+    const runningCat = new Map()
+    for (const catId of new Set(lineCategories.map(lc => lc.category?.id).filter(Boolean))) {
+      const cat = lineCategories.find(lc => lc.category?.id === catId).category
+      catLimit.set(catId, checkoutCategoryCartLimit(cat))
+      runningCat.set(catId, await countCheckoutCartCategoryItems(userCart, catId))
+    }
+    let totalCount = (userCart.cartProducts || []).length
+
+    const addedRows = []
+    for (const { item, category } of lineCategories) {
+      const pid = item.product?.id || item.product
+      if (!category?.id) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
+      if (totalCount >= CART_LIMITS.maxItemsPerCart) { droppedItems.push({ productId: pid, reason: 'cartFull' }); continue }
+      const limit = catLimit.get(category.id)
+      if (limit != null && (runningCat.get(category.id) || 0) >= limit) { droppedItems.push({ productId: pid, reason: 'cartLimit' }); continue }
+      const price = getCheckoutProductCurrentPrice(category) ?? item.priceInCart
+      const claimed = await claimCheckoutProducts({ productIds: [pid], userId, price }) // keep the guest's own product (transferred above)
+      if (!claimed.length) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
+      addedRows.push({ product: claimed[0].id, priceInCart: price, timeToCart: now })
+      totalCount++
+      runningCat.set(category.id, (runningCat.get(category.id) || 0) + 1)
+    }
+
+    if (addedRows.length) {
+      const existingRows = (userCart.cartProducts || []).map(item => ({
+        id: item.id, product: item.product?.id || item.product,
+        priceInCart: item.priceInCart, timeToCart: item.timeToCart
+      }))
+      await $fetch(`${config.strapiUrl}/carts/${userCart.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: { cartProducts: [...existingRows, ...addedRows], cartUpdatedAt: now }
+      })
+    }
+
+    await deleteGuestCart(guestCart.id)
+  }
+
+  const mergedCart = await getCurrentCheckoutCart({ userId })
+  const cart = await serializeCheckoutCart(mergedCart, 'et')
+  return { claimed: true, cart, droppedItems }
+}
+
+export async function deleteStaleGuestCarts() {
+  const token = await getStrapiAdminToken()
+  const expiredStatus = await getCartStatus('expired')
+  const cutoff = new Date(Date.now() - CART_LIMITS.hardDeleteAfterDays * 24 * 60 * 60_000).toISOString()
+
+  const params = new URLSearchParams()
+  params.append('cart_status', expiredStatus.id)
+  params.append('cartToken_null', 'false')
+  params.append('cartUpdatedAt_lt', cutoff)
+  params.append('_limit', '100')
+
+  const carts = await $fetch(`${config.strapiUrl}/carts?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }).catch(() => [])
+
+  const list = Array.isArray(carts) ? carts : []
+  for (const cart of list) {
+    await deleteGuestCart(cart.id)
+  }
+  return { deleted: list.length }
 }

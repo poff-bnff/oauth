@@ -3,10 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "test": "vitest run",
+    "test:integration": "playwright test -c integration-tests/playwright.config.js",
+    "test:watch": "vitest",
     "lint": "eslint . --ext .vue,.js,.ts --fix --ignore-path .gitignore",
     "dev": "nuxt dev",
+    "dev:local": "set -a; . ./.env.docker.local; set +a; NUXT_BUILD_DIR=.nuxt-local nuxt dev --host 0.0.0.0 --port 3000",
+    "prebuild": "node ./scripts/fetch-checkout-copy.mjs",
     "build": "nuxt build",
+    "pregenerate": "node ./scripts/fetch-checkout-copy.mjs",
     "generate": "nuxt generate",
+    "fetch:checkout-copy": "node ./scripts/fetch-checkout-copy.mjs",
+    "seed:checkout-copy": "node ./scripts/seed-checkout-copy-labels.mjs",
     "preview": "nuxt preview",
     "start": "node .output/server/index.mjs",
     "postinstall": "nuxt prepare",
@@ -17,13 +25,16 @@
     "@nuxtjs/eslint-config": "12.0.0",
     "@nuxtjs/google-fonts": "3.0.0",
     "@nuxtjs/i18n": "8.0.0-beta.10",
+    "@playwright/test": "^1.61.0",
     "autoprefixer": "10.4.14",
     "eslint": "8.39.0",
     "eslint-config-standard": "17.0.0",
+    "fake-indexeddb": "^6.2.5",
     "jsonwebtoken": "9.0.0",
     "nuxt": "3.4.3",
     "postcss": "8.4.23",
-    "tailwindcss": "3.3.2"
+    "tailwindcss": "3.3.2",
+    "vitest": "4.1.8"
   },
   "dependencies": {
     "tablelogger": "^1.0.0"
