@@ -148,7 +148,47 @@ export function checkoutLabelPayload(defaults) {
   }
 }
 
-export async function upsertCheckoutLabelGroup(baseUrl, token, payload) {
+export function mergeCheckoutLabels(existingLabels, seedLabels, { overwrite = false } = {}) {
+  const existing = Array.isArray(existingLabels) ? existingLabels.slice() : []
+  const byName = new Map()
+  for (const label of existing) {
+    const unwrapped = unwrapStrapiEntity(label)
+    if (unwrapped?.name) byName.set(unwrapped.name, label)
+  }
+
+  const nextLabels = existing.slice()
+  const added = []
+  const updated = []
+
+  for (const seed of seedLabels) {
+    const current = byName.get(seed.name)
+    if (!current) {
+      nextLabels.push(seed)
+      added.push(seed.name)
+      continue
+    }
+
+    const unwrapped = unwrapStrapiEntity(current)
+    const merged = overwrite
+      ? { value_en: seed.value_en, value_et: seed.value_et, value_ru: seed.value_ru }
+      : {
+          value_en: unwrapped.value_en || seed.value_en,
+          value_et: unwrapped.value_et || seed.value_et,
+          value_ru: unwrapped.value_ru || seed.value_ru
+        }
+    const changed = ['value_en', 'value_et', 'value_ru'].some(key => merged[key] !== unwrapped[key])
+    if (changed) {
+      Object.assign(current, merged)
+      updated.push(seed.name)
+    }
+  }
+
+  return { nextLabels, added, updated }
+}
+
+export async function upsertCheckoutLabelGroup(baseUrl, token, payload, options = {}) {
+  const overwrite = options.overwrite ?? (process.env.CHECKOUT_COPY_LABELS_OVERWRITE === '1')
+  const dryRun = options.dryRun ?? (process.env.CHECKOUT_COPY_LABELS_DRY_RUN === '1')
   const headers = {
     authorization: `Bearer ${token}`,
     'content-type': 'application/json'
@@ -161,18 +201,35 @@ export async function upsertCheckoutLabelGroup(baseUrl, token, payload) {
       : []
   const existingGroup = groups.map(unwrapStrapiEntity).find(isCheckoutCopyGroup)
 
-  if (existingGroup?.id) {
-    return fetchJson(`${baseUrl}/label-groups/${existingGroup.id}`, {
-      method: 'PUT',
+  if (!existingGroup?.id) {
+    console.log(`Label group "${payload.name}" not found. ${dryRun ? 'Would create' : 'Creating'} with ${payload.label.length} labels.`)
+    if (dryRun) return { name: payload.name, label: payload.label, dryRun: true }
+    return fetchJson(`${baseUrl}/label-groups`, {
+      method: 'POST',
       headers,
       body: JSON.stringify(payload)
     })
   }
 
-  return fetchJson(`${baseUrl}/label-groups`, {
-    method: 'POST',
+  const existingLabels = Array.isArray(existingGroup.label) ? existingGroup.label : []
+  const { nextLabels, added, updated } = mergeCheckoutLabels(existingLabels, payload.label, { overwrite })
+
+  console.log(overwrite ? 'Mode: overwrite existing values' : 'Mode: add missing labels / fill empty values only')
+  console.log(`Existing labels: ${existingLabels.length}`)
+  console.log(`Missing labels ${dryRun ? 'that would be added' : 'added'}: ${added.length ? added.join(', ') : '(none)'}`)
+  console.log(`Labels ${dryRun ? 'that would be updated' : 'updated'}: ${updated.length ? updated.join(', ') : '(none)'}`)
+
+  if (!added.length && !updated.length) {
+    console.log('No changes needed.')
+    return existingGroup
+  }
+
+  if (dryRun) return { ...existingGroup, label: nextLabels, dryRun: true }
+
+  return fetchJson(`${baseUrl}/label-groups/${existingGroup.id}`, {
+    method: 'PUT',
     headers,
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ name: existingGroup.name || payload.name, label: nextLabels })
   })
 }
 
