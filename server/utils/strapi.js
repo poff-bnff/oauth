@@ -2021,6 +2021,19 @@ function normalizeCheckoutMethodGroup(paymentMethods = {}) {
   ].filter(Boolean)
 }
 
+// Money sums must survive Maksekeskus's `###.##` validation. A raw float reduce of
+// three 0.10 items yields 0.30000000000000004, which /v1/transactions rejects with
+// code 1001 ("field: amount, expected: ###.##") — so the customer cannot pay at all.
+export function sumCheckoutPrices(rows = []) {
+  const total = rows.reduce((sum, row) => {
+    const price = Number(row?.price)
+    // A single unparseable price would otherwise poison the whole sum with NaN,
+    // which fails the same validation this function exists to satisfy.
+    return sum + (Number.isFinite(price) ? price : 0)
+  }, 0)
+  return Math.round(total * 100) / 100
+}
+
 async function serializeCheckoutCart(cart, locale = 'et') {
   if (!cart) return null
   const products = cart.cartProducts || []
@@ -2086,7 +2099,7 @@ async function serializeCheckoutCart(cart, locale = 'et') {
     secondsRemaining: expiry.secondsRemaining,
     expiresAt: expiry.expiresAt,
     serverNow: new Date().toISOString(),
-    total: items.reduce((sum, item) => sum + Number(item.price || 0), 0),
+    total: sumCheckoutPrices(items),
     items
   }
 }
@@ -2561,7 +2574,7 @@ export async function payCheckoutCart(userId, body = {}) {
 
     const pendingStatus = await getOrderStatus('pending_payment')
     const checkoutStatus = await getCartStatus('checkout_started')
-    const amount = cartData.items.reduce((sum, item) => sum + Number(item.price || 0), 0)
+    const amount = sumCheckoutPrices(cartData.items)
     const domainId = cart?.domain?.id || cart?.domain || null
     const order = await $fetch(`${config.strapiUrl}/orders`, {
       method: 'POST',
