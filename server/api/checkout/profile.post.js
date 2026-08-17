@@ -1,3 +1,5 @@
+import { userPictureBaseName } from '~/server/utils/userPicture'
+
 export default defineEventHandler(async (event) => {
   const userId = getUserIdFromEvent(event)
   if (!userId) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
@@ -20,7 +22,7 @@ export default defineEventHandler(async (event) => {
       const buffer = Buffer.from(match[2], 'base64')
       if (buffer.length > 0 && buffer.length <= 5 * 1024 * 1024) {
         const ext = (photo.name?.includes('.') ? photo.name.split('.').pop() : '') || match[1].split('/')[1] || 'jpg'
-        const filename = `checkout-buyer-${String(email.trim()).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.${ext}`
+        const filename = `${userPictureBaseName(email.trim(), userId)}.${ext}`
         const pic = await uploadStrapiImage({ name: 'picture', filename, data: buffer }, 'user-profile', profileId)
         if (pic?.id) pictureId = pic.id
       }

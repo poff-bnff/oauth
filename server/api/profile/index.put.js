@@ -1,6 +1,7 @@
 // helpful article: https://www.freecodecamp.org/news/handle-file-uploads-on-the-backend-in-node-js-nuxt/
 
 import { setStrapiUserProfile } from '~/server/utils/strapi'
+import { userPictureBaseName } from '~/server/utils/userPicture'
 
 export default defineEventHandler(async (event) => {
   const body = await readMultipartFormData(event)
@@ -28,12 +29,7 @@ export default defineEventHandler(async (event) => {
     }
   })
 
-  const slugify = str => (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
-  const pictureFileName = [
-    'U',
-    slugify(user.user_profile.email),
-    user.id
-  ].join('_')
+  const pictureFileName = userPictureBaseName(user.user_profile.email, user.id)
 
   // Forward profile to Strapi
 

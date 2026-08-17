@@ -2,6 +2,7 @@ import { URLSearchParams } from 'url'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { CART_LIMITS } from './cartLimits.js'
+import { userPictureBaseName } from './userPicture.js'
 
 const config = useRuntimeConfig()
 
@@ -1377,7 +1378,7 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
 
   const authUser = await authenticateStrapiUser(email)
   const user = await getStrapiUser(authUser.id)
-  const picture = await uploadCheckoutOwnerPhoto(owner.photo, user.user_profile.id, email)
+  const picture = await uploadCheckoutOwnerPhoto(owner.photo, user.user_profile.id, email, user.id)
   if (!picture?.id) return { error: 'ownerPhotoRequired' }
 
   await setStrapiUserProfile(user.user_profile.id, {
@@ -1390,14 +1391,16 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
   return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: false }
 }
 
-async function uploadCheckoutOwnerPhoto(photo, profileId, email) {
+// `userId` is the users-permissions user id, NOT the profile id: the filename convention keys on
+// the user, and the two ids differ.
+async function uploadCheckoutOwnerPhoto(photo, profileId, email, userId) {
   if (!photo?.data) return null
   const match = String(photo.data).match(/^data:([^;]+);base64,(.+)$/)
   if (!match || !match[1].includes('image/')) return null
   const buffer = Buffer.from(match[2], 'base64')
   if (!buffer.length || buffer.length > 5 * 1024 * 1024) return null
   const extension = (photo.name && photo.name.includes('.') ? photo.name.split('.').pop() : '') || match[1].split('/')[1] || 'jpg'
-  const filename = `checkout-owner-${String(email).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.${extension}`
+  const filename = `${userPictureBaseName(email, userId)}.${extension}`
   return await uploadStrapiImage({ name: 'picture', filename, data: buffer }, 'user-profile', profileId)
 }
 
