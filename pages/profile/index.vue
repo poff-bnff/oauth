@@ -5,6 +5,7 @@ import TableLogger from 'tablelogger'
 import { buildCheckoutCopy } from '../../utils/checkoutCopy.js'
 import {
   DEFAULT_PHOTO_RULES,
+  acceptAttributeFor,
   fileToDataUrl,
   getImageDimensions,
   loadPhotoRules,
@@ -95,6 +96,7 @@ logTable.log()
 // same limits, and the strings are already translated into et/en/ru and overridable in Strapi.
 const photoCopy = computed(() => buildCheckoutCopy(locale.value))
 const photoRules = ref(DEFAULT_PHOTO_RULES)
+const photoAccept = computed(() => acceptAttributeFor(photoRules.value))
 const photoError = ref('')
 const crop = reactive({ src: null, name: '', mime: 'image/jpeg' })
 
@@ -296,7 +298,7 @@ watch(
                 <input
                   ref="profilePicInputValue"
                   type="file"
-                  accept="image/*"
+                  :accept="photoAccept"
                   class="w-full form-input"
                   name="picture"
                   @change="onProfilePicChange"

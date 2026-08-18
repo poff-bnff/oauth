@@ -8,6 +8,7 @@ import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComp
 import { savePhoto, deletePhoto } from '../composables/useCheckoutPhotoStore.js'
 import {
   DEFAULT_PHOTO_RULES,
+  acceptAttributeFor,
   fileToDataUrl,
   getImageDimensions,
   loadPhotoRules,
@@ -126,6 +127,8 @@ function toggleOwnerEmail (event, item, index) {
 }
 
 const photoRules = ref(DEFAULT_PHOTO_RULES)
+// Derived from the rules so the picker and the validation cannot disagree.
+const photoAccept = computed(() => acceptAttributeFor(photoRules.value))
 
 // One cropper serves every item, so it has to remember which item opened it — `item`/`index` are
 // kept to resolve the form again on confirm, since the cart can only be edited on another step.
@@ -310,7 +313,7 @@ function validateAndContinue () {
             <label class="span"><span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).email" type="email" autocomplete="email" placeholder="recipient@example.com" required></label>
             <label class="file photo-upload span">
               <span class="field-label">{{ copy.photo }} <span class="required-dot">*</span></span>
-              <input type="file" accept="image/*" @change="handleOwnerPhoto($event, item, index)">
+              <input type="file" :accept="photoAccept" @change="handleOwnerPhoto($event, item, index)">
               <span class="photo-upload-box">
                 <span class="photo-preview">
                   <img v-if="ensureItemForm(item, index).photo" :src="ensureItemForm(item, index).photo.data" :alt="copy.photo">

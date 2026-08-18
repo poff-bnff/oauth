@@ -3,6 +3,7 @@ import { isCheckoutProfileComplete } from '../composables/useCheckoutProgress.js
 import { checkoutErrorMessage } from '../../../utils/checkoutErrors.js'
 import {
   DEFAULT_PHOTO_RULES,
+  acceptAttributeFor,
   fileToDataUrl,
   getImageDimensions,
   loadPhotoRules,
@@ -33,6 +34,8 @@ const hasPicture = computed(() => !!(props.profile?.picture))
 const isProfileComplete = computed(() => isCheckoutProfileComplete(form, hasPicture.value))
 
 const photoRules = ref(DEFAULT_PHOTO_RULES)
+// Derived from the rules so the picker and the validation cannot disagree.
+const photoAccept = computed(() => acceptAttributeFor(photoRules.value))
 const crop = reactive({ src: null, name: '', mime: 'image/jpeg' })
 
 onMounted(async () => {
@@ -139,7 +142,7 @@ async function save () {
       </label>
       <label class="file photo-upload span">
         <span class="field-label">{{ copy.photo }} <span class="required-dot">*</span></span>
-        <input type="file" accept="image/*" @change="handlePhoto">
+        <input type="file" :accept="photoAccept" @change="handlePhoto">
         <span class="photo-upload-box">
           <span class="photo-preview">
             <img v-if="form.photo" :src="form.photo.data" :alt="copy.photo">

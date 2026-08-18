@@ -225,3 +225,31 @@ test('a reload restores the CROPPED gift photo, not the original', async ({ brow
 
   await context.close()
 })
+
+// The bug Jaan found in live testing: image/svg+xml passed the old `image/*` check. Strapi then
+// stores an SVG untouched and generates NO square variants for it, so the avatar looks fine on
+// upload and every page asking for _med_sq gets a 404.
+test('an SVG is refused, and the picker does not offer one', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1005, productId: 7005, title: 'SVG pass', locationId: 505 })]
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+
+  const input = page.locator('.photo-upload input[type="file"]')
+  await expect(input).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp')
+
+  await input.setInputFiles({
+    name: 'logo.svg',
+    mimeType: 'image/svg+xml',
+    buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900"><rect width="900" height="900" fill="red"/></svg>')
+  })
+
+  await expect(page.locator('.photo-error')).toBeVisible()
+  await expect(page.locator('.photo-error')).toContainText('WebP')
+  await expect(page.getByRole('dialog')).toBeHidden()
+
+  await context.close()
+})

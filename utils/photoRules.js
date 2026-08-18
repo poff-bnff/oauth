@@ -15,7 +15,30 @@ export const DEFAULT_PHOTO_RULES = {
   maxOutputSize: 1600,
   minOutputSize: 600,
   maxFileBytes: 5 * 1024 * 1024,
-  aspectRatio: 1
+  aspectRatio: 1,
+  // A WHITELIST, not an `image/*` check. Must stay a subset of `bitmapFormats` in web2021's
+  // extensions/upload/services/image-manipulation.js, because that list gates both the JPEG
+  // conversion AND the generation of the square _sq variants. A format outside it is stored
+  // untouched with no variants — an SVG avatar looks fine on upload and then breaks every page
+  // that asks for _med_sq. tiff/tif are in the server list but excluded here: Chrome and Firefox
+  // cannot decode TIFF in an <img>, so the cropper could never show one.
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp']
+}
+
+// Some browsers report the non-standard `image/jpg`. Treat it as JPEG rather than rejecting a
+// perfectly ordinary photo on a technicality.
+const MIME_ALIASES = { 'image/jpg': 'image/jpeg' }
+
+export function normalizeMimeType (type) {
+  const value = String(type || '').toLowerCase().split(';')[0].trim()
+
+  return MIME_ALIASES[value] || value
+}
+
+// For the <input accept="..."> attribute, so the file picker offers exactly what validation will
+// accept. Derived from the same list on purpose: two hardcoded lists would drift.
+export function acceptAttributeFor (rules) {
+  return normalizeRules(rules).allowedMimeTypes.join(',')
 }
 
 export function normalizeRules (rules) {
@@ -45,8 +68,13 @@ export function loadPhotoRules () {
 export function validateSource (file, dims, rules) {
   const r = normalizeRules(rules)
 
-  if (!file || !String(file.type || '').startsWith('image/')) {
+  if (!file) {
     return { ok: false, reason: 'photoNotImage' }
+  }
+  // Checked before anything else: an SVG passes a naive `image/*` test and is then stored with no
+  // square variants at all, which fails silently rather than loudly.
+  if (!r.allowedMimeTypes.includes(normalizeMimeType(file.type))) {
+    return { ok: false, reason: 'photoWrongFormat' }
   }
   if (file.size > r.maxFileBytes) {
     return { ok: false, reason: 'photoTooLarge' }

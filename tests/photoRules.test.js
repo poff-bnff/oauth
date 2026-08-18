@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import {
   DEFAULT_PHOTO_RULES,
+  acceptAttributeFor,
   croppedFileName,
   minSelectionFor,
+  normalizeMimeType,
   normalizeRules,
   outputSizeFor,
   validateSource
@@ -27,8 +29,36 @@ describe('source validation', () => {
     expect(validateSource(imageFile(), { width: 4032, height: 3024 }, DEFAULT_PHOTO_RULES).ok).toBe(true)
   })
 
+  // The bug that prompted this: image/svg+xml passes a naive `image/*` test, and Strapi then
+  // stores it with NO square variants, because bitmapFormats gates variant generation too. It
+  // looks fine on upload and breaks every page that asks for _med_sq.
+  test('rejects SVG, which a naive image/* check would let through', () => {
+    expect(validateSource(imageFile({ type: 'image/svg+xml', name: 'logo.svg' }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES))
+      .toEqual({ ok: false, reason: 'photoWrongFormat' })
+  })
+
+  test('rejects other formats Strapi would store without variants', () => {
+    for (const type of ['image/gif', 'image/avif', 'image/bmp', 'image/heic', 'image/tiff']) {
+      expect(validateSource(imageFile({ type }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).reason, type)
+        .toBe('photoWrongFormat')
+    }
+  })
+
+  test('accepts the three whitelisted formats', () => {
+    for (const type of ['image/jpeg', 'image/png', 'image/webp']) {
+      expect(validateSource(imageFile({ type }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).ok, type).toBe(true)
+    }
+  })
+
+  // Some browsers report the non-standard image/jpg for an ordinary JPEG.
+  test('accepts the non-standard image/jpg alias', () => {
+    expect(validateSource(imageFile({ type: 'image/jpg' }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).ok).toBe(true)
+    expect(normalizeMimeType('IMAGE/JPG')).toBe('image/jpeg')
+    expect(normalizeMimeType('image/jpeg; charset=binary')).toBe('image/jpeg')
+  })
+
   test('rejects non-images and oversized files', () => {
-    expect(validateSource(imageFile({ type: 'application/pdf' }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).reason).toBe('photoNotImage')
+    expect(validateSource(imageFile({ type: 'application/pdf' }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).reason).toBe('photoWrongFormat')
     expect(validateSource(imageFile({ size: 6 * 1024 * 1024 }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).reason).toBe('photoTooLarge')
   })
 
@@ -60,6 +90,18 @@ describe('output sizing', () => {
     expect(outputSizeFor(900, DEFAULT_PHOTO_RULES)).toBe(900)
     expect(outputSizeFor(600, DEFAULT_PHOTO_RULES)).toBe(600)
     expect(outputSizeFor(1600, DEFAULT_PHOTO_RULES)).toBe(1600)
+  })
+})
+
+describe('accept attribute', () => {
+  // Derived from the same list the validation uses, so the file picker cannot offer something
+  // that is then rejected.
+  test('matches the whitelist', () => {
+    expect(acceptAttributeFor(DEFAULT_PHOTO_RULES)).toBe('image/jpeg,image/png,image/webp')
+  })
+
+  test('follows the endpoint rules', () => {
+    expect(acceptAttributeFor({ ...DEFAULT_PHOTO_RULES, allowedMimeTypes: ['image/png'] })).toBe('image/png')
   })
 })
 
@@ -105,7 +147,7 @@ describe('copy keys the cropper depends on', () => {
   // validateSource returns copy KEYS; a missing translation would render the modal blank.
   test.each(['en', 'et', 'ru'])('%s has every crop and photo string', (locale) => {
     const copy = buildCheckoutCopy(locale, {})
-    for (const key of ['cropTitle', 'cropInstruction', 'cropConfirm', 'cropCancel', 'photoTooSmall', 'photoNotImage', 'photoTooLarge', 'photoWrongSize', 'photoHelp']) {
+    for (const key of ['cropTitle', 'cropInstruction', 'cropConfirm', 'cropCancel', 'photoTooSmall', 'photoNotImage', 'photoWrongFormat', 'photoTooLarge', 'photoWrongSize', 'photoHelp']) {
       expect(copy[key], `${locale}.${key}`).toBeTruthy()
     }
   })
