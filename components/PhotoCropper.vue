@@ -3,6 +3,7 @@ import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 import { outputSizeFor, minSelectionFor, croppedFileName, DEFAULT_PHOTO_RULES } from '../utils/photoRules.js'
 import { measureImageQuality, evaluateImageQuality, hasBlockingFinding } from '../utils/photoQuality.js'
+import { measureFace, evaluateFace } from '../utils/photoFace.js'
 
 // Modal that makes the user choose their own 1:1 crop.
 //
@@ -32,16 +33,21 @@ const busy = ref(false)
 // a blocking finding cannot be, so `acknowledged` never unlocks it.
 const findings = ref([])
 const acknowledged = ref(false)
+// Set while the face model is downloading, so the button can say so rather than appearing frozen
+// for the second or two the 1.5 MB takes on a slow connection.
+const checking = ref(false)
 let cropper = null
 
 const blocked = computed(() => hasBlockingFinding(findings.value))
 const warnings = computed(() => findings.value.filter(f => f.level === 'warn'))
 // Second press confirms past warnings. Re-cropping clears the acknowledgement, so the user is not
 // silently carried past a warning about a DIFFERENT crop.
-const confirmLabel = computed(() =>
-  warnings.value.length && !blocked.value && !acknowledged.value
+const confirmLabel = computed(() => {
+  if (checking.value) return props.copy.qualityChecking || props.copy.cropConfirm
+  return warnings.value.length && !blocked.value && !acknowledged.value
     ? (props.copy.qualityUseAnyway || props.copy.cropConfirm)
-    : props.copy.cropConfirm)
+    : props.copy.cropConfirm
+})
 
 function destroyCropper () {
   if (cropper) {
@@ -110,7 +116,7 @@ watch(() => props.src, async (value) => {
 
 onBeforeUnmount(destroyCropper)
 
-function confirm () {
+async function confirm () {
   if (!cropper || busy.value) return
   busy.value = true
 
@@ -135,9 +141,26 @@ function confirm () {
     // stored, and a photo can easily be sharp overall while the chosen square is not.
     findings.value = evaluateImageQuality(measureImageQuality(canvas), props.rules?.qualityChecks)
 
+    // Tier 1 first, and only continue if it passed: no point downloading 1.5 MB of model to
+    // examine a photo that is already being refused for being blurry.
     if (blocked.value) {
       busy.value = false
       return
+    }
+
+    if (props.rules?.faceChecks?.enabled !== false) {
+      checking.value = true
+      try {
+        const face = await measureFace(canvas, props.rules?.faceChecks)
+        findings.value = [...findings.value, ...evaluateFace(face, props.rules?.faceChecks)]
+      } finally {
+        checking.value = false
+      }
+
+      if (blocked.value) {
+        busy.value = false
+        return
+      }
     }
 
     // Warnings are shown first and confirmed on a second press. Subjective judgements — framing,
@@ -199,7 +222,7 @@ function cancel () {
         <button type="button" class="photo-cropper-cancel" :disabled="busy" @click="cancel">
           {{ copy.cropCancel }}
         </button>
-        <button type="button" class="photo-cropper-confirm" :disabled="busy || blocked" @click="confirm">
+        <button type="button" class="photo-cropper-confirm" :disabled="busy || blocked || checking" @click="confirm">
           {{ confirmLabel }}
         </button>
       </div>

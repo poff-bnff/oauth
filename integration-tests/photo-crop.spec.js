@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
 import { makePng } from './makePng.js'
 
@@ -49,6 +50,18 @@ function checkoutContext (items, profile) {
   }
 }
 
+// Mirrors the served defaults; used when a test needs to override one field without blanking the rest.
+const DEFAULT_RULES_FOR_TEST = {
+  minSourceWidth: 600,
+  minSourceHeight: 600,
+  maxOutputSize: 1600,
+  minOutputSize: 600,
+  maxFileBytes: 5 * 1024 * 1024,
+  aspectRatio: 1,
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  convertibleMimeTypes: ['image/tiff']
+}
+
 async function prepareCheckoutPage ({ browser, items, profile = buyerProfileWithoutPicture, rules = null }) {
   const context = await browser.newContext()
   await context.addCookies([{ name: 'checkout_token', value: 'integration-token', domain: 'localhost', path: '/' }])
@@ -60,9 +73,12 @@ async function prepareCheckoutPage ({ browser, items, profile = buyerProfileWith
   await page.route('**/api/cart/touch', route => route.fulfill({ json: checkoutContext(items, profile).cart }))
   await page.route('**/api/business-profiles/**', route => route.fulfill({ json: invoiceProfile }))
 
-  if (rules) {
-    await page.route('**/api/config/photo-rules', route => route.fulfill({ json: rules }))
-  }
+  // Always mocked, so the tests do not depend on whatever production config happens to be live.
+  // faceChecks defaults OFF because the synthetic fixtures contain no face by construction, and
+  // tier 2 would otherwise block every crop and quality test. The tier-2 tests opt in explicitly.
+  await page.route('**/api/config/photo-rules', route => route.fulfill({
+    json: rules || { ...DEFAULT_RULES_FOR_TEST, faceChecks: { enabled: false } }
+  }))
 
   await page.route('**/api/checkout/profile', async (route) => {
     profileRequests.push(route.request().postDataJSON())
@@ -70,18 +86,6 @@ async function prepareCheckoutPage ({ browser, items, profile = buyerProfileWith
   })
 
   return { context, page, profileRequests }
-}
-
-// Mirrors the served defaults; used when a test needs to override one field without blanking the rest.
-const DEFAULT_RULES_FOR_TEST = {
-  minSourceWidth: 600,
-  minSourceHeight: 600,
-  maxOutputSize: 1600,
-  minOutputSize: 600,
-  maxFileBytes: 5 * 1024 * 1024,
-  aspectRatio: 1,
-  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-  convertibleMimeTypes: ['image/tiff']
 }
 
 const checkoutUrl = () => '/checkout?locale=en&shop_url=http%3A%2F%2Flocalhost%3A4000%2Fen%2Fshop'
@@ -185,7 +189,7 @@ test('rules served by the endpoint override the built-in defaults', async ({ bro
   const { context, page } = await prepareCheckoutPage({
     browser,
     items: [cartItem({ componentId: 1004, productId: 7004, title: 'Rules pass', locationId: 504 })],
-    rules: { minSourceWidth: 1000, minSourceHeight: 1000, maxOutputSize: 800, minOutputSize: 400, maxFileBytes: 5242880, aspectRatio: 1 }
+    rules: { minSourceWidth: 1000, minSourceHeight: 1000, maxOutputSize: 800, minOutputSize: 400, maxFileBytes: 5242880, aspectRatio: 1, faceChecks: { enabled: false } }
   })
 
   await page.goto(checkoutUrl())
@@ -328,7 +332,7 @@ test('the kill switch turns the whole tier off', async ({ browser }) => {
   const { context, page } = await prepareCheckoutPage({
     browser,
     items: [cartItem({ componentId: 1008, productId: 7008, title: 'Kill switch pass', locationId: 508 })],
-    rules: { ...DEFAULT_RULES_FOR_TEST, qualityChecks: { enabled: false } }
+    rules: { ...DEFAULT_RULES_FOR_TEST, qualityChecks: { enabled: false }, faceChecks: { enabled: false } }
   })
 
   await page.goto(checkoutUrl())
@@ -346,6 +350,127 @@ test('the kill switch turns the whole tier off', async ({ browser }) => {
 
   await expect(page.getByRole('dialog')).toBeHidden()
   await expect(page.locator('.photo-cropper-findings')).toHaveCount(0)
+
+  await context.close()
+})
+
+// Tier 2 with the REAL model, in a real browser. Slower than the rest of the suite, but it is the
+// only way to know the 1.5 MB actually loads and that detection runs on a canvas.
+test('tier 2 blocks a photo with no face in it', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1009, productId: 7009, title: 'No face pass', locationId: 509 })],
+    // Opts in: tier 2 is off in the default test config, since the synthetic fixtures have no face.
+    rules: { ...DEFAULT_RULES_FOR_TEST, faceChecks: { enabled: true, blocking: ['faceMissing', 'faceMultiple'] } }
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+
+  // A sharp checkerboard: passes tier 1 comfortably, contains no face whatsoever.
+  await choosePhoto(page, { width: 900, height: 900, name: 'no-face.png', detail: 'sharp' })
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: /Use this photo|Checking photo/ }).click()
+
+  // Generous timeout: this is the download of the model plus a detection pass.
+  await expect(page.locator('.photo-cropper-findings li.block')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('.photo-cropper-findings li.block')).toContainText('face')
+  await expect(page.getByRole('dialog')).toBeVisible()
+
+  await context.close()
+})
+
+test('faceChecks.enabled:false skips the model download entirely', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1010, productId: 7010, title: 'No model pass', locationId: 510 })],
+    rules: { ...DEFAULT_RULES_FOR_TEST, faceChecks: { enabled: false } }
+  })
+
+  const modelRequests = []
+  await page.route('**/face-models/**', (route) => {
+    modelRequests.push(route.request().url())
+    return route.continue()
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+
+  await choosePhoto(page, { width: 900, height: 900, name: 'no-face.png', detail: 'sharp' })
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: 'Use this photo' }).click()
+
+  // Accepted with no face check at all, and crucially nothing was downloaded.
+  await expect(page.getByRole('dialog')).toBeHidden()
+  expect(modelRequests).toEqual([])
+
+  await context.close()
+})
+
+// POSITIVE CONTROL. The "no face" test above would also pass if detection were broken and always
+// returned zero faces, so this proves the detector really does find faces in a photograph.
+//
+// It uses a group photo from the face-api package rather than a committed single-face fixture: a
+// stock photograph of identifiable people is not something to add to this repo. The discrimination
+// is what matters — a broken detector would report faceMissing here, not faceMultiple.
+test('tier 2 detects real faces rather than always reporting none', async ({ browser }) => {
+  const groupPhoto = readFileSync('node_modules/@vladmandic/face-api/demo/sample1.jpg')
+
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1011, productId: 7011, title: 'Group photo pass', locationId: 511 })],
+    // Tier 1 off: sample1 is a dim stock photo that legitimately trips the exposure block, which
+    // would short-circuit before the face check ran and mask the result entirely.
+    rules: {
+      ...DEFAULT_RULES_FOR_TEST,
+      qualityChecks: { enabled: false },
+      faceChecks: { enabled: true, blocking: ['faceMissing', 'faceMultiple'], faceMinHeightRatio: 0, faceMaxHeightRatio: 1, faceMaxCentreOffset: 1, faceMaxTiltDegrees: 90, eyeOpenMinRatio: 0 }
+    }
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+  await page.locator('.photo-upload input[type="file"]').setInputFiles({ name: 'group.jpg', mimeType: 'image/jpeg', buffer: groupPhoto })
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.locator('.photo-cropper-confirm').click()
+
+  const block = page.locator('.photo-cropper-findings li.block')
+  await expect(block).toBeVisible({ timeout: 30000 })
+  // The specific message is the point: it found SEVERAL faces, so detection is working. A dead
+  // detector would say it could not find a face at all.
+  await expect(block).toContainText('more than one')
+  await expect(block).not.toContainText('could not find')
+
+  await context.close()
+})
+
+// And the other half of the proof: a detected face is let THROUGH when only faceMissing blocks.
+test('a photo with faces detected is accepted when only faceMissing blocks', async ({ browser }) => {
+  const groupPhoto = readFileSync('node_modules/@vladmandic/face-api/demo/sample1.jpg')
+
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1012, productId: 7012, title: 'Faces ok pass', locationId: 512 })],
+    rules: {
+      ...DEFAULT_RULES_FOR_TEST,
+      qualityChecks: { enabled: false },
+      faceChecks: { enabled: true, blocking: ['faceMissing'], faceMinHeightRatio: 0, faceMaxHeightRatio: 1, faceMaxCentreOffset: 1, faceMaxTiltDegrees: 90, eyeOpenMinRatio: 0 }
+    }
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+  await page.locator('.photo-upload input[type="file"]').setInputFiles({ name: 'group.jpg', mimeType: 'image/jpeg', buffer: groupPhoto })
+  await expect(page.getByRole('dialog')).toBeVisible()
+
+  // First press shows the multiple-faces WARNING, second accepts it.
+  await page.locator('.photo-cropper-confirm').click()
+  await expect(page.locator('.photo-cropper-findings li.warn')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('.photo-cropper-findings li.block')).toHaveCount(0)
+  await page.locator('.photo-cropper-confirm').click()
+
+  await expect(page.getByRole('dialog')).toBeHidden({ timeout: 15000 })
+  await expect(page.locator('.photo-preview img')).toBeVisible()
 
   await context.close()
 })

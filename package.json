@@ -37,6 +37,7 @@
     "vitest": "4.1.8"
   },
   "dependencies": {
+    "@vladmandic/face-api": "^1.7.15",
     "cropperjs": "^1.6.2",
     "tablelogger": "^1.0.0"
   }

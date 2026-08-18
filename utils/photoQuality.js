@@ -23,13 +23,13 @@ export const DEFAULT_QUALITY_RULES = {
   blocking: ['sharpness', 'exposure'],
   // Laplacian variance. These are STARTING POINTS, not measurements — they need calibrating
   // against real pass photos before anyone should trust them.
-  sharpnessBlockBelow: 40,
-  sharpnessWarnBelow: 120,
+  sharpnessBlockBelow: 6,
+  sharpnessWarnBelow: 70,
   // Share of pixels at the extremes, 0..1.
   clippedHighlightsWarnAbove: 0.15,
   clippedShadowsWarnAbove: 0.25,
   // Mean luminance, 0..255.
-  meanLuminanceMin: 50,
+  meanLuminanceMin: 36,
   meanLuminanceMax: 210
 }
 
