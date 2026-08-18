@@ -284,5 +284,12 @@ function cancel () {
 
 .photo-cropper-cancel { background: transparent; color: #111; }
 .photo-cropper-confirm { background: #111; color: #fff; }
-.photo-cropper-actions button[disabled] { opacity: .5; cursor: default; }
+/* A refused photo must LOOK refused. Greyscale and pointer-events matter because the host pages
+   style their buttons heavily, and opacity alone still read as a live button that ignored clicks. */
+.photo-cropper-actions button[disabled] {
+  opacity: .45;
+  cursor: not-allowed;
+  filter: grayscale(100%);
+  pointer-events: none;
+}
 </style>
