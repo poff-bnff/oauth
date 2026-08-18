@@ -2,6 +2,14 @@
 <script setup>
 import { ref } from 'vue'
 import TableLogger from 'tablelogger'
+import { buildCheckoutCopy } from '../../utils/checkoutCopy.js'
+import {
+  DEFAULT_PHOTO_RULES,
+  fileToDataUrl,
+  getImageDimensions,
+  loadPhotoRules,
+  validateSource
+} from '../../utils/photoRules.js'
 
 const logTable = new TableLogger({
   border: 'single',
@@ -83,37 +91,58 @@ logTable.setRow({ key: 'Firstname', value: firstnameInputValue.value })
 logTable.setRow({ key: 'Lastname', value: lastnameInputValue.value })
 logTable.log()
 
-function onProfilePicChange () {
-  const file = profilePicInputValue.value.files[0]
-  console.log(`onProfilePicChange file name: ${file.name}`)
-  console.log(`onProfilePicChange file type: ${file.type}`)
-  console.log(`onProfilePicChange file size: ${file.size}`)
-  if (!file.type.startsWith('image/')) {
-    console.log('onProfilePicChange file is not an image.')
+// Photo rules and copy are shared with the checkout rather than duplicated here: same U_ upload,
+// same limits, and the strings are already translated into et/en/ru and overridable in Strapi.
+const photoCopy = computed(() => buildCheckoutCopy(locale.value))
+const photoRules = ref(DEFAULT_PHOTO_RULES)
+const photoError = ref('')
+const crop = reactive({ src: null, name: '', mime: 'image/jpeg' })
+
+// The 1:1 result, which is what gets uploaded. The raw file in the DOM input is never submitted —
+// previously it was, even when validation had rejected it.
+const croppedPhoto = ref(null)
+
+onMounted(async () => {
+  photoRules.value = await loadPhotoRules()
+})
+
+async function onProfilePicChange () {
+  const input = profilePicInputValue.value
+  const file = input?.files?.[0]
+  if (!file) return
+
+  photoError.value = ''
+  croppedPhoto.value = null
+
+  const dataUrl = await fileToDataUrl(file)
+  const dims = await getImageDimensions(dataUrl)
+  const check = validateSource(file, dims, photoRules.value)
+
+  if (!check.ok) {
+    // Surfaced to the user, not just logged: the old version console.logged and returned while
+    // leaving the file in the input, so submitProfile() uploaded it anyway.
+    photoError.value = photoCopy.value[check.reason] || photoCopy.value.photoWrongSize
+    input.value = ''
     return
   }
-  if (file.size / 1024 / 1024 > 2) { // 2MB
-    console.log('onProfilePicChange file is too big.')
-    return
-  }
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    const img = new Image()
-    img.onload = () => {
-      console.log(`onProfilePicChange image width: ${img.width}`)
-      console.log(`onProfilePicChange image height: ${img.height}`)
-      if (img.width > 2000 || img.height > 2000) {
-        console.log('onProfilePicChange image should fit in 2000x2000.')
-        return
-      }
-      console.log('onProfilePicChange image is ok.')
-      submitButton.disabled = false
-      const profilePicThumbnail = document.getElementById('profilePicThumbnail')
-      profilePicThumbnail.src = e.target.result
-    }
-    img.src = e.target.result
-  }
-  reader.readAsDataURL(file)
+
+  crop.name = file.name
+  crop.mime = file.type
+  crop.src = dataUrl
+  input.value = ''
+}
+
+function onCropped (result) {
+  croppedPhoto.value = result
+  photoError.value = ''
+  crop.src = null
+
+  const thumbnail = document.getElementById('profilePicThumbnail')
+  if (thumbnail) thumbnail.src = result.data
+}
+
+function onCropCancel () {
+  crop.src = null
 }
 
 function submitProfile () {
@@ -123,8 +152,10 @@ function submitProfile () {
 
   console.log(`submitProfile: ${firstnameInputValue.value} ${lastnameInputValue.value}`)
   const formData = new FormData()
-  if (profilePicInputValue.value.files[0]) {
-    formData.append('picture', profilePicInputValue.value.files[0])
+  // The cropped blob, never profilePicInputValue.files[0] — uploading the raw file would both skip
+  // the crop the user just chose and resurrect a file that validation may have rejected.
+  if (croppedPhoto.value?.blob) {
+    formData.append('picture', croppedPhoto.value.blob, croppedPhoto.value.name)
   }
   const headers = { authorization: `Bearer ${jwtCookie.value}` }
   // const userData = {
@@ -265,10 +296,17 @@ watch(
                 <input
                   ref="profilePicInputValue"
                   type="file"
+                  accept="image/*"
                   class="w-full form-input"
                   name="picture"
                   @change="onProfilePicChange"
                 >
+                <p class="text-sm opacity-75 mt-1">
+                  {{ photoCopy.photoHelp }}
+                </p>
+                <p v-if="photoError" class="text-sm text-red-600 mt-1" role="alert">
+                  {{ photoError }}
+                </p>
               </td>
             </tr>
             <!-- submit -->
@@ -288,6 +326,17 @@ watch(
         </table>
       </form>
     </div>
+
+    <PhotoCropper
+      :src="crop.src"
+      :file-name="crop.name"
+      :mime-type="crop.mime"
+      :rules="photoRules"
+      :copy="photoCopy"
+      variant="profile"
+      @cropped="onCropped"
+      @cancel="onCropCancel"
+    />
   </main>
 </template>
 

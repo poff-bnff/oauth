@@ -6,6 +6,13 @@
 <script setup>
 import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete } from '../composables/useCheckoutProgress.js'
 import { savePhoto, deletePhoto } from '../composables/useCheckoutPhotoStore.js'
+import {
+  DEFAULT_PHOTO_RULES,
+  fileToDataUrl,
+  getImageDimensions,
+  loadPhotoRules,
+  validateSource
+} from '../../../utils/photoRules.js'
 
 const props = defineProps({
   cart: { type: Object, required: true },
@@ -118,25 +125,18 @@ function toggleOwnerEmail (event, item, index) {
   emit('progress')
 }
 
-function fileToDataUrl (file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
+const photoRules = ref(DEFAULT_PHOTO_RULES)
 
-function getImageDimensions (src) {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
-    img.onerror = () => resolve(null)
-    img.src = src
-  })
-}
+// One cropper serves every item, so it has to remember which item opened it — `item`/`index` are
+// kept to resolve the form again on confirm, since the cart can only be edited on another step.
+const crop = reactive({ src: null, name: '', mime: 'image/jpeg', key: null, item: null, index: -1 })
 
-// Same rules as the userprofile photo upload: image type, max 5 MB, 600×600–3000×3000 px.
+onMounted(async () => {
+  photoRules.value = await loadPhotoRules()
+})
+
+// Photo rules are shared with the buyer's own photo; only the 1:1 crop is ever stored, never the
+// file the user picked.
 async function handleOwnerPhoto (event, item, index) {
   const input = event.target
   const file = input.files?.[0]
@@ -152,19 +152,46 @@ async function handleOwnerPhoto (event, item, index) {
     deletePhoto(key)
   }
 
-  if (!file.type.startsWith('image/')) return reject(props.copy.photoNotImage)
-  if (file.size > 5 * 1024 * 1024) return reject(props.copy.photoTooLarge)
-
   const dataUrl = await fileToDataUrl(file)
   const dims = await getImageDimensions(dataUrl)
-  if (!dims || dims.width < 600 || dims.width > 3000 || dims.height < 600 || dims.height > 3000) {
-    return reject(props.copy.photoWrongSize)
-  }
+  const check = validateSource(file, dims, photoRules.value)
+
+  if (!check.ok) return reject(props.copy[check.reason] || props.copy.photoWrongSize)
 
   form.photoError = ''
-  form.photoName = file.name
-  form.photo = { name: file.name, data: dataUrl }
-  await savePhoto(key, { name: file.name, data: dataUrl })
+  crop.name = file.name
+  crop.mime = file.type
+  crop.key = key
+  crop.item = item
+  crop.index = index
+  crop.src = dataUrl
+
+  // Cleared so reselecting the same file still fires `change` after a cancelled crop.
+  input.value = ''
+}
+
+async function onOwnerPhotoCropped (result) {
+  if (!crop.item) return
+  const form = ensureItemForm(crop.item, crop.index)
+  const key = crop.key
+
+  form.photoError = ''
+  form.photoName = result.name
+  form.photo = { name: result.name, data: result.data }
+
+  crop.src = null
+  crop.item = null
+
+  // MUST mirror the cropped version into IndexedDB. sessionStorage progress snapshots strip photos
+  // (serializableCheckoutItemForm), so this store is what a mid-checkout reload restores from —
+  // saving the original here would silently resurrect the uncropped image at payment time.
+  await savePhoto(key, { name: result.name, data: result.data })
+  emit('progress')
+}
+
+function onOwnerPhotoCropCancel () {
+  crop.src = null
+  crop.item = null
 }
 
 function validateAndContinue () {
@@ -314,5 +341,18 @@ function validateAndContinue () {
         {{ copy.continue }} →
       </button>
     </div>
+
+    <!-- One cropper for all items, rendered outside the per-item <label> — a click inside a label
+         reopens the file picker. -->
+    <PhotoCropper
+      :src="crop.src"
+      :file-name="crop.name"
+      :mime-type="crop.mime"
+      :rules="photoRules"
+      :copy="copy"
+      variant="checkout"
+      @cropped="onOwnerPhotoCropped"
+      @cancel="onOwnerPhotoCropCancel"
+    />
   </div>
 </template>

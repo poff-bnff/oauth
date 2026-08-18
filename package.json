@@ -37,6 +37,7 @@
     "vitest": "4.1.8"
   },
   "dependencies": {
+    "cropperjs": "^1.6.2",
     "tablelogger": "^1.0.0"
   }
 }

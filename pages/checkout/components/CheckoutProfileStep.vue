@@ -1,6 +1,13 @@
 <script setup>
 import { isCheckoutProfileComplete } from '../composables/useCheckoutProgress.js'
 import { checkoutErrorMessage } from '../../../utils/checkoutErrors.js'
+import {
+  DEFAULT_PHOTO_RULES,
+  fileToDataUrl,
+  getImageDimensions,
+  loadPhotoRules,
+  validateSource
+} from '../../../utils/photoRules.js'
 
 const props = defineProps({
   copy: { type: Object, required: true },
@@ -25,24 +32,15 @@ const form = reactive({
 const hasPicture = computed(() => !!(props.profile?.picture))
 const isProfileComplete = computed(() => isCheckoutProfileComplete(form, hasPicture.value))
 
-function fileToDataUrl (file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
+const photoRules = ref(DEFAULT_PHOTO_RULES)
+const crop = reactive({ src: null, name: '', mime: 'image/jpeg' })
 
-function getImageDimensions (src) {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
-    img.onerror = () => resolve(null)
-    img.src = src
-  })
-}
+onMounted(async () => {
+  photoRules.value = await loadPhotoRules()
+})
 
+// The chosen file is never stored as-is: it goes to the cropper, and only the 1:1 result is kept.
+// Otherwise Strapi's `fit: cover` decides the framing on the server and cuts the head off portraits.
 async function handlePhoto (event) {
   const input = event.target
   const file = input.files?.[0]
@@ -55,18 +53,31 @@ async function handlePhoto (event) {
     input.value = ''
   }
 
-  if (!file.type.startsWith('image/')) return reject(props.copy.photoNotImage)
-  if (file.size > 5 * 1024 * 1024) return reject(props.copy.photoTooLarge)
-
   const dataUrl = await fileToDataUrl(file)
   const dims = await getImageDimensions(dataUrl)
-  if (!dims || dims.width < 600 || dims.width > 3000 || dims.height < 600 || dims.height > 3000) {
-    return reject(props.copy.photoWrongSize)
-  }
+  const check = validateSource(file, dims, photoRules.value)
+
+  if (!check.ok) return reject(props.copy[check.reason] || props.copy.photoWrongSize)
 
   form.photoError = ''
-  form.photoName = file.name
-  form.photo = { name: file.name, data: dataUrl }
+  crop.name = file.name
+  crop.mime = file.type
+  crop.src = dataUrl
+
+  // Cleared so picking the same file again still fires `change` — otherwise a user who cancels the
+  // cropper cannot reselect the photo they just chose.
+  input.value = ''
+}
+
+function onCropped (result) {
+  form.photoError = ''
+  form.photoName = result.name
+  form.photo = { name: result.name, data: result.data }
+  crop.src = null
+}
+
+function onCropCancel () {
+  crop.src = null
 }
 
 async function save () {
@@ -154,5 +165,18 @@ async function save () {
         {{ saving ? copy.savingProfile : copy.saveAndContinue }} →
       </button>
     </div>
+
+    <!-- Deliberately outside the <label> above: any click inside a label re-opens the file
+         picker, so a cropper nested there would reopen it on every drag. -->
+    <PhotoCropper
+      :src="crop.src"
+      :file-name="crop.name"
+      :mime-type="crop.mime"
+      :rules="photoRules"
+      :copy="copy"
+      variant="checkout"
+      @cropped="onCropped"
+      @cancel="onCropCancel"
+    />
   </div>
 </template>
