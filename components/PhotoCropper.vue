@@ -2,6 +2,7 @@
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 import { outputSizeFor, minSelectionFor, croppedFileName, DEFAULT_PHOTO_RULES } from '../utils/photoRules.js'
+import { measureImageQuality, evaluateImageQuality, hasBlockingFinding } from '../utils/photoQuality.js'
 
 // Modal that makes the user choose their own 1:1 crop.
 //
@@ -27,7 +28,20 @@ const emit = defineEmits(['cropped', 'cancel'])
 
 const imageEl = ref(null)
 const busy = ref(false)
+// Quality findings for the crop currently on screen. Warnings are shown once and can be accepted;
+// a blocking finding cannot be, so `acknowledged` never unlocks it.
+const findings = ref([])
+const acknowledged = ref(false)
 let cropper = null
+
+const blocked = computed(() => hasBlockingFinding(findings.value))
+const warnings = computed(() => findings.value.filter(f => f.level === 'warn'))
+// Second press confirms past warnings. Re-cropping clears the acknowledgement, so the user is not
+// silently carried past a warning about a DIFFERENT crop.
+const confirmLabel = computed(() =>
+  warnings.value.length && !blocked.value && !acknowledged.value
+    ? (props.copy.qualityUseAnyway || props.copy.cropConfirm)
+    : props.copy.cropConfirm)
 
 function destroyCropper () {
   if (cropper) {
@@ -75,6 +89,12 @@ function enforceMinimumSelection () {
       height: Math.max(data.height, minimum)
     })
   }
+
+  // Any change to the selection invalidates findings computed for the previous one.
+  if (findings.value.length || acknowledged.value) {
+    findings.value = []
+    acknowledged.value = false
+  }
 }
 
 // The <img> is only in the DOM while `src` is set, so build the cropper after it renders and tear
@@ -107,6 +127,23 @@ function confirm () {
     })
 
     if (!canvas) {
+      busy.value = false
+      return
+    }
+
+    // Measured on the CROPPED canvas, not the source: this is the image that will actually be
+    // stored, and a photo can easily be sharp overall while the chosen square is not.
+    findings.value = evaluateImageQuality(measureImageQuality(canvas), props.rules?.qualityChecks)
+
+    if (blocked.value) {
+      busy.value = false
+      return
+    }
+
+    // Warnings are shown first and confirmed on a second press. Subjective judgements — framing,
+    // lighting — belong to the user, not to a threshold.
+    if (warnings.value.length && !acknowledged.value) {
+      acknowledged.value = true
       busy.value = false
       return
     }
@@ -152,12 +189,18 @@ function cancel () {
         <img ref="imageEl" :src="src" :alt="copy.cropTitle">
       </div>
 
+      <ul v-if="findings.length" class="photo-cropper-findings">
+        <li v-for="finding in findings" :key="finding.rule" :class="finding.level">
+          {{ copy[finding.reason] || finding.reason }}
+        </li>
+      </ul>
+
       <div class="photo-cropper-actions">
         <button type="button" class="photo-cropper-cancel" :disabled="busy" @click="cancel">
           {{ copy.cropCancel }}
         </button>
-        <button type="button" class="photo-cropper-confirm" :disabled="busy" @click="confirm">
-          {{ copy.cropConfirm }}
+        <button type="button" class="photo-cropper-confirm" :disabled="busy || blocked" @click="confirm">
+          {{ confirmLabel }}
         </button>
       </div>
     </div>
@@ -210,6 +253,11 @@ function cancel () {
   cursor: pointer;
   font: inherit;
 }
+
+.photo-cropper-findings { margin: .75rem 0 0; padding: 0; list-style: none; font-size: .875rem; }
+.photo-cropper-findings li { padding: .35rem .5rem; border-radius: .25rem; margin-bottom: .25rem; }
+.photo-cropper-findings li.block { background: #fdecec; color: #b00020; }
+.photo-cropper-findings li.warn { background: #fff6e5; color: #8a5200; }
 
 .photo-cropper-cancel { background: transparent; color: #111; }
 .photo-cropper-confirm { background: #111; color: #fff; }

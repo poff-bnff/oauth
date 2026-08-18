@@ -72,6 +72,18 @@ async function prepareCheckoutPage ({ browser, items, profile = buyerProfileWith
   return { context, page, profileRequests }
 }
 
+// Mirrors the served defaults; used when a test needs to override one field without blanking the rest.
+const DEFAULT_RULES_FOR_TEST = {
+  minSourceWidth: 600,
+  minSourceHeight: 600,
+  maxOutputSize: 1600,
+  minOutputSize: 600,
+  maxFileBytes: 5 * 1024 * 1024,
+  aspectRatio: 1,
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  convertibleMimeTypes: ['image/tiff']
+}
+
 const checkoutUrl = () => '/checkout?locale=en&shop_url=http%3A%2F%2Flocalhost%3A4000%2Fen%2Fshop'
 
 // Measures a data URL in the page, so assertions are about the real decoded pixels.
@@ -84,11 +96,13 @@ function measure (page, dataUrl) {
   }), dataUrl)
 }
 
-async function choosePhoto (page, { width, height, name = 'portrait.png' }) {
+// `detail: 'sharp'` by default: a smooth gradient legitimately reads as blurry to the tier 1
+// check, and these tests are about cropping, not image quality.
+async function choosePhoto (page, { width, height, name = 'portrait.png', detail = 'sharp' }) {
   await page.locator('.photo-upload input[type="file"]').setInputFiles({
     name,
     mimeType: 'image/png',
-    buffer: makePng(width, height)
+    buffer: makePng(width, height, { detail })
   })
 }
 
@@ -251,6 +265,87 @@ test('an SVG is refused, and the picker does not offer one', async ({ browser })
   await expect(page.locator('.photo-error')).toBeVisible()
   await expect(page.locator('.photo-error')).toContainText('WebP')
   await expect(page.getByRole('dialog')).toBeHidden()
+
+  await context.close()
+})
+
+// Tier 1 quality checks, exercised on real pixels in a real canvas — the part the unit tests
+// cannot reach, since measureImageQuality needs a browser.
+test('a blurry photo is blocked and cannot be clicked past', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1006, productId: 7006, title: 'Blur pass', locationId: 506 })]
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+
+  // A near-flat ramp: almost no local contrast, so Laplacian variance sits far below the block
+  // threshold.
+  await page.locator('.photo-upload input[type="file"]').setInputFiles({
+    name: 'blurry.png',
+    mimeType: 'image/png',
+    buffer: makePng(900, 900, { detail: 'blur' })
+  })
+
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: 'Use this photo' }).click()
+
+  await expect(page.locator('.photo-cropper-findings li.block')).toBeVisible()
+  // The cropper stays open and the button is disabled — a block is not acknowledgeable.
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.locator('.photo-cropper-confirm')).toBeDisabled()
+
+  await context.close()
+})
+
+test('a sharp photo passes the quality checks without complaint', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1007, productId: 7007, title: 'Sharp pass', locationId: 507 })]
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+
+  await page.locator('.photo-upload input[type="file"]').setInputFiles({
+    name: 'sharp.png',
+    mimeType: 'image/png',
+    buffer: makePng(900, 900, { detail: 'sharp' })
+  })
+
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: 'Use this photo' }).click()
+
+  // No findings at all, so it is accepted on the first press.
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(page.locator('.photo-preview img')).toBeVisible()
+
+  await context.close()
+})
+
+test('the kill switch turns the whole tier off', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 1008, productId: 7008, title: 'Kill switch pass', locationId: 508 })],
+    rules: { ...DEFAULT_RULES_FOR_TEST, qualityChecks: { enabled: false } }
+  })
+
+  await page.goto(checkoutUrl())
+  await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
+
+  // The same image that was blocked above.
+  await page.locator('.photo-upload input[type="file"]').setInputFiles({
+    name: 'blurry.png',
+    mimeType: 'image/png',
+    buffer: makePng(900, 900, { detail: 'blur' })
+  })
+
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: 'Use this photo' }).click()
+
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(page.locator('.photo-cropper-findings')).toHaveCount(0)
 
   await context.close()
 })

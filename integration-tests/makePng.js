@@ -28,7 +28,12 @@ function chunk (type, data) {
   return Buffer.concat([length, typeAndData, crc])
 }
 
-export function makePng (width, height) {
+// `detail` controls how much high-frequency content the image has, which is what Laplacian
+// variance measures: 'sharp' produces a fine checkerboard (high variance), 'blur' a smooth
+// gradient (near-zero variance). `luma` shifts the whole image brighter or darker for the
+// exposure checks.
+export function makePng (width, height, options = {}) {
+  const { detail = 'gradient', luma = null } = options
   const ihdr = Buffer.alloc(13)
   ihdr.writeUInt32BE(width, 0)
   ihdr.writeUInt32BE(height, 4)
@@ -42,9 +47,24 @@ export function makePng (width, height) {
   for (let y = 0; y < height; y++) {
     raw[pos++] = 0 // filter type: none
     for (let x = 0; x < width; x++) {
-      raw[pos++] = Math.floor((x / width) * 255)
-      raw[pos++] = Math.floor((y / height) * 255)
-      raw[pos++] = 128
+      let r, g, b
+      if (luma !== null) {
+        r = g = b = luma
+      } else if (detail === 'sharp') {
+        // 2px checkerboard: maximum edge energy at every pixel boundary.
+        const on = ((x >> 1) + (y >> 1)) % 2 === 0
+        r = g = b = on ? 245 : 10
+      } else if (detail === 'blur') {
+        // A very smooth ramp: almost no local contrast, so the Laplacian response stays near 0.
+        r = g = b = 100 + Math.floor((x / width) * 20)
+      } else {
+        r = Math.floor((x / width) * 255)
+        g = Math.floor((y / height) * 255)
+        b = 128
+      }
+      raw[pos++] = r
+      raw[pos++] = g
+      raw[pos++] = b
     }
   }
 
