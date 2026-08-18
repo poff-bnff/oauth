@@ -22,7 +22,12 @@ export const DEFAULT_PHOTO_RULES = {
   // untouched with no variants — an SVG avatar looks fine on upload and then breaks every page
   // that asks for _med_sq. tiff/tif are in the server list but excluded here: Chrome and Firefox
   // cannot decode TIFF in an <img>, so the cropper could never show one.
-  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp']
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  // Formats the browser cannot decode but the server can convert to JPEG for us. TIFF is decoded
+  // only by Safari, so without a conversion step it could never reach the cropper. HEIC is
+  // deliberately absent: libheif on the Strapi box has no HEVC decoder, so a conversion attempt
+  // would fail after the upload rather than before it.
+  convertibleMimeTypes: ['image/tiff']
 }
 
 // Some browsers report the non-standard `image/jpg`. Treat it as JPEG rather than rejecting a
@@ -38,7 +43,26 @@ export function normalizeMimeType (type) {
 // For the <input accept="..."> attribute, so the file picker offers exactly what validation will
 // accept. Derived from the same list on purpose: two hardcoded lists would drift.
 export function acceptAttributeFor (rules) {
-  return normalizeRules(rules).allowedMimeTypes.join(',')
+  const r = normalizeRules(rules)
+
+  // Convertible formats are offered too: they are usable, just via a detour through the server.
+  return [...r.allowedMimeTypes, ...(r.convertibleMimeTypes || [])].join(',')
+}
+
+// Sends a format the browser cannot decode to the server and gets a JPEG data URL back.
+// Returns null on any failure, so the caller can fall back to a plain rejection message.
+export async function convertUnsupportedImage (dataUrl) {
+  try {
+    const result = await $fetch('/api/config/photo-convert', {
+      method: 'POST',
+      body: { data: dataUrl }
+    })
+
+    return result?.data || null
+  } catch (err) {
+    console.warn('[photo] conversion failed', err) // eslint-disable-line no-console
+    return null
+  }
 }
 
 export function normalizeRules (rules) {
@@ -73,7 +97,14 @@ export function validateSource (file, dims, rules) {
   }
   // Checked before anything else: an SVG passes a naive `image/*` test and is then stored with no
   // square variants at all, which fails silently rather than loudly.
-  if (!r.allowedMimeTypes.includes(normalizeMimeType(file.type))) {
+  const mimeType = normalizeMimeType(file.type)
+
+  if (!r.allowedMimeTypes.includes(mimeType)) {
+    // Not a rejection: the caller should send it to /api/config/photo-convert and try again with
+    // the JPEG it returns.
+    if ((r.convertibleMimeTypes || []).includes(mimeType)) {
+      return { ok: false, reason: 'photoNeedsConversion', convertible: true }
+    }
     return { ok: false, reason: 'photoWrongFormat' }
   }
   if (file.size > r.maxFileBytes) {
@@ -124,6 +155,16 @@ export function getImageDimensions (src) {
     img.onerror = () => resolve(null)
     img.src = src
   })
+}
+
+// Byte length of a base64 data URL's payload. Needed because after a server-side conversion the
+// only thing we hold is the data URL — and re-checking the size limit against the ORIGINAL file
+// would reject a 10 MB TIFF that became a perfectly acceptable 2 MB JPEG.
+export function dataUrlByteLength (dataUrl) {
+  const base64 = String(dataUrl || '').split(',')[1] || ''
+  const padding = (base64.match(/=+$/) || [''])[0].length
+
+  return Math.max(0, Math.floor(base64.length * 3 / 4) - padding)
 }
 
 export function fileToDataUrl (file) {

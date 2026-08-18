@@ -3,6 +3,7 @@ import {
   DEFAULT_PHOTO_RULES,
   acceptAttributeFor,
   croppedFileName,
+  dataUrlByteLength,
   minSelectionFor,
   normalizeMimeType,
   normalizeRules,
@@ -37,8 +38,9 @@ describe('source validation', () => {
       .toEqual({ ok: false, reason: 'photoWrongFormat' })
   })
 
+  // TIFF moved out of this list: it is now converted server-side rather than refused.
   test('rejects other formats Strapi would store without variants', () => {
-    for (const type of ['image/gif', 'image/avif', 'image/bmp', 'image/heic', 'image/tiff']) {
+    for (const type of ['image/gif', 'image/avif', 'image/bmp', 'image/heic']) {
       expect(validateSource(imageFile({ type }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).reason, type)
         .toBe('photoWrongFormat')
     }
@@ -93,15 +95,62 @@ describe('output sizing', () => {
   })
 })
 
+describe('server-side conversion', () => {
+  // TIFF is decoded only by Safari, so it is sent to the server for conversion instead of being
+  // rejected. The signal is `convertible`, not a plain failure.
+  test('flags TIFF as convertible rather than wrong', () => {
+    const result = validateSource(imageFile({ type: 'image/tiff', name: 'scan.tiff' }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES)
+    expect(result.ok).toBe(false)
+    expect(result.convertible).toBe(true)
+    expect(result.reason).toBe('photoNeedsConversion')
+  })
+
+  // HEIC is NOT convertible: libheif on the Strapi box has no HEVC decoder, so offering to convert
+  // would fail after the upload rather than before it.
+  test('does not offer to convert HEIC', () => {
+    const result = validateSource(imageFile({ type: 'image/heic' }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES)
+    expect(result.convertible).toBeUndefined()
+    expect(result.reason).toBe('photoWrongFormat')
+  })
+
+  // A TIFF is several times the size of the JPEG it becomes, so the 5 MB photo limit must NOT be
+  // applied to the source — that would reject ordinary scans before they were ever converted.
+  // The limit is re-checked against the CONVERTED image instead.
+  test('a large TIFF is offered for conversion rather than rejected on size', () => {
+    const result = validateSource(imageFile({ type: 'image/tiff', size: 20 * 1024 * 1024 }), { width: 900, height: 900 }, DEFAULT_PHOTO_RULES)
+    expect(result.convertible).toBe(true)
+  })
+
+  test('the converted result IS held to the size limit', () => {
+    // Regression: the re-check used to pass the original file.size, so a 10 MB TIFF that became a
+    // 2 MB JPEG was rejected as too large.
+    const smallEnough = dataUrlByteLength('data:image/jpeg;base64,' + 'A'.repeat(1000))
+    expect(validateSource({ type: 'image/jpeg', size: smallEnough }, { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).ok).toBe(true)
+
+    const tooBig = dataUrlByteLength('data:image/jpeg;base64,' + 'A'.repeat(8 * 1024 * 1024))
+    expect(validateSource({ type: 'image/jpeg', size: tooBig }, { width: 900, height: 900 }, DEFAULT_PHOTO_RULES).reason).toBe('photoTooLarge')
+  })
+
+  test('dataUrlByteLength measures the payload, not the string', () => {
+    // 4 base64 chars encode 3 bytes; padding must be subtracted.
+    expect(dataUrlByteLength('data:image/jpeg;base64,' + 'AAAA')).toBe(3)
+    expect(dataUrlByteLength('data:image/jpeg;base64,' + 'AAA=')).toBe(2)
+    expect(dataUrlByteLength('data:image/jpeg;base64,' + 'AA==')).toBe(1)
+    expect(dataUrlByteLength('')).toBe(0)
+    expect(dataUrlByteLength(null)).toBe(0)
+  })
+})
+
 describe('accept attribute', () => {
   // Derived from the same list the validation uses, so the file picker cannot offer something
   // that is then rejected.
   test('matches the whitelist', () => {
-    expect(acceptAttributeFor(DEFAULT_PHOTO_RULES)).toBe('image/jpeg,image/png,image/webp')
+    // Convertible formats are offered too — usable, just via a detour through the server.
+    expect(acceptAttributeFor(DEFAULT_PHOTO_RULES)).toBe('image/jpeg,image/png,image/webp,image/tiff')
   })
 
   test('follows the endpoint rules', () => {
-    expect(acceptAttributeFor({ ...DEFAULT_PHOTO_RULES, allowedMimeTypes: ['image/png'] })).toBe('image/png')
+    expect(acceptAttributeFor({ ...DEFAULT_PHOTO_RULES, allowedMimeTypes: ['image/png'], convertibleMimeTypes: [] })).toBe('image/png')
   })
 })
 
@@ -147,7 +196,7 @@ describe('copy keys the cropper depends on', () => {
   // validateSource returns copy KEYS; a missing translation would render the modal blank.
   test.each(['en', 'et', 'ru'])('%s has every crop and photo string', (locale) => {
     const copy = buildCheckoutCopy(locale, {})
-    for (const key of ['cropTitle', 'cropInstruction', 'cropConfirm', 'cropCancel', 'photoTooSmall', 'photoNotImage', 'photoWrongFormat', 'photoTooLarge', 'photoWrongSize', 'photoHelp']) {
+    for (const key of ['cropTitle', 'cropInstruction', 'cropConfirm', 'cropCancel', 'photoTooSmall', 'photoNotImage', 'photoWrongFormat', 'photoConverting', 'photoNeedsConversion', 'photoTooLarge', 'photoWrongSize', 'photoHelp']) {
       expect(copy[key], `${locale}.${key}`).toBeTruthy()
     }
   })

@@ -4,6 +4,8 @@ import { checkoutErrorMessage } from '../../../utils/checkoutErrors.js'
 import {
   DEFAULT_PHOTO_RULES,
   acceptAttributeFor,
+  convertUnsupportedImage,
+  dataUrlByteLength,
   fileToDataUrl,
   getImageDimensions,
   loadPhotoRules,
@@ -56,15 +58,33 @@ async function handlePhoto (event) {
     input.value = ''
   }
 
-  const dataUrl = await fileToDataUrl(file)
-  const dims = await getImageDimensions(dataUrl)
+  let dataUrl = await fileToDataUrl(file)
+  let dims = await getImageDimensions(dataUrl)
+  let cropMime = file.type
   const check = validateSource(file, dims, photoRules.value)
 
-  if (!check.ok) return reject(props.copy[check.reason] || props.copy.photoWrongSize)
+  if (!check.ok) {
+    // A TIFF is not rejected: the browser cannot decode it, but the server can turn it into a
+    // JPEG the cropper can show. Everything after this point sees an ordinary JPEG.
+    if (!check.convertible) return reject(props.copy[check.reason] || props.copy.photoWrongSize)
+
+    form.photoError = props.copy.photoConverting || ''
+    const converted = await convertUnsupportedImage(dataUrl)
+    if (!converted) return reject(props.copy.photoWrongFormat)
+
+    dataUrl = converted
+    cropMime = 'image/jpeg'
+    dims = await getImageDimensions(dataUrl)
+
+    // Re-checked against the converted image: the source minimum applies to what will actually
+    // be cropped, and conversion caps very large images.
+    const recheck = validateSource({ type: cropMime, size: dataUrlByteLength(dataUrl) }, dims, photoRules.value)
+    if (!recheck.ok) return reject(props.copy[recheck.reason] || props.copy.photoWrongSize)
+  }
 
   form.photoError = ''
   crop.name = file.name
-  crop.mime = file.type
+  crop.mime = cropMime
   crop.src = dataUrl
 
   // Cleared so picking the same file again still fires `change` — otherwise a user who cancels the

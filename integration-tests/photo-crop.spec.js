@@ -239,7 +239,8 @@ test('an SVG is refused, and the picker does not offer one', async ({ browser })
   await expect(page.getByRole('heading', { name: 'Your profile' })).toBeVisible()
 
   const input = page.locator('.photo-upload input[type="file"]')
-  await expect(input).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp')
+  // TIFF is offered because the server converts it; SVG is not offered and not accepted.
+  await expect(input).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp,image/tiff')
 
   await input.setInputFiles({
     name: 'logo.svg',

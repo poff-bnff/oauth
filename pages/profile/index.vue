@@ -6,6 +6,8 @@ import { buildCheckoutCopy } from '../../utils/checkoutCopy.js'
 import {
   DEFAULT_PHOTO_RULES,
   acceptAttributeFor,
+  convertUnsupportedImage,
+  dataUrlByteLength,
   fileToDataUrl,
   getImageDimensions,
   loadPhotoRules,
@@ -116,20 +118,35 @@ async function onProfilePicChange () {
   photoError.value = ''
   croppedPhoto.value = null
 
-  const dataUrl = await fileToDataUrl(file)
-  const dims = await getImageDimensions(dataUrl)
+  let dataUrl = await fileToDataUrl(file)
+  let dims = await getImageDimensions(dataUrl)
+  let cropMime = file.type
   const check = validateSource(file, dims, photoRules.value)
 
-  if (!check.ok) {
+  const fail = (reason) => {
     // Surfaced to the user, not just logged: the old version console.logged and returned while
     // leaving the file in the input, so submitProfile() uploaded it anyway.
-    photoError.value = photoCopy.value[check.reason] || photoCopy.value.photoWrongSize
+    photoError.value = photoCopy.value[reason] || photoCopy.value.photoWrongSize
     input.value = ''
-    return
+  }
+
+  if (!check.ok) {
+    // TIFF is converted server-side rather than refused; the cropper only sees the JPEG.
+    if (!check.convertible) return fail(check.reason)
+
+    const converted = await convertUnsupportedImage(dataUrl)
+    if (!converted) return fail('photoWrongFormat')
+
+    dataUrl = converted
+    cropMime = 'image/jpeg'
+    dims = await getImageDimensions(dataUrl)
+
+    const recheck = validateSource({ type: cropMime, size: dataUrlByteLength(dataUrl) }, dims, photoRules.value)
+    if (!recheck.ok) return fail(recheck.reason)
   }
 
   crop.name = file.name
-  crop.mime = file.type
+  crop.mime = cropMime
   crop.src = dataUrl
   input.value = ''
 }
