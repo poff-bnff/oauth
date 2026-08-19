@@ -1237,6 +1237,29 @@ function missingOwnerProfileFields(profile = {}) {
   return ['email', 'firstName', 'lastName', 'picture'].filter(field => !profile[field])
 }
 
+// Which fields of an EXISTING recipient's profile may be filled from a buyer's gift form.
+//
+// Only blanks. A buyer must never be able to change the name or photo on someone else's account
+// from their own checkout — but filling an empty one is different, since a pass cannot exist
+// without a photo and the recipient can change it afterwards.
+//
+// Exported for testing: this is a privacy rule, not an implementation detail.
+export function ownerProfileFieldsToFill(profile, submitted) {
+  const current = profile || {}
+  const given = submitted || {}
+  const updates = {}
+
+  // Whitespace counts as blank: Strapi happily stores '   ', and a profile holding that is empty
+  // in every sense the customer cares about.
+  const blank = value => !String(value == null ? '' : value).trim()
+
+  for (const field of ['firstName', 'lastName', 'email']) {
+    if (blank(current[field]) && !blank(given[field])) updates[field] = given[field]
+  }
+
+  return updates
+}
+
 function normalizeCheckoutEmail(value) {
   return String(value || '').trim().toLowerCase()
 }
@@ -1368,8 +1391,37 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
 
   if (existingUser) {
     const user = await getStrapiUser(existingUser.id)
-    const missing = missingOwnerProfileFields(user.user_profile || {})
-    if (missing.length) return { error: 'ownerProfileIncomplete', missing }
+    const profile = user.user_profile || null
+    const missing = missingOwnerProfileFields(profile || {})
+
+    if (!missing.length) {
+      return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: true }
+    }
+
+    // The recipient has an account but an empty profile — typically an OAuth login that never
+    // filled anything in. Rather than refusing the sale, complete it from the details the buyer
+    // already supplied: the checkout form demands name, email and photo for every gift, so they
+    // are always to hand.
+    //
+    // ONLY blank fields are filled, never overwritten. A buyer must not be able to change the name
+    // or photo on someone else's account from their own checkout; filling a blank one is different,
+    // since the pass cannot exist without a photo and the recipient can change it later.
+    if (!profile) return { error: 'ownerProfileIncomplete', missing }
+    if (missing.includes('picture') && !owner.hasPhoto && !owner.photo?.data) {
+      return { error: 'ownerPhotoRequired' }
+    }
+    if (options.dryRun) return { mode: 'gift', existing: true }
+
+    const updates = ownerProfileFieldsToFill(profile, { firstName, lastName, email })
+
+    if (!profile.picture) {
+      const picture = await uploadCheckoutOwnerPhoto(owner.photo, profile.id, email, user.id)
+      if (!picture?.id) return { error: 'ownerPhotoRequired' }
+      updates.picture = picture.id
+    }
+
+    await setStrapiUserProfile(profile.id, updates)
+
     return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: true }
   }
 
