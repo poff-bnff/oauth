@@ -801,7 +801,8 @@ async function pay () {
     }
   } catch (err) {
     console.warn('[checkout] payment start failed', err) // eslint-disable-line no-console
-    error.value = checkoutErrorMessage(err, copy.value, copy.value.checkoutPaymentFailed)
+    // Cart items let the message name the product the problem is about, rather than "this item".
+    error.value = checkoutErrorMessage(err, copy.value, copy.value.checkoutPaymentFailed, { items: cart.value?.items })
   } finally {
     paying.value = false
   }

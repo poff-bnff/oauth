@@ -2576,7 +2576,11 @@ export async function payCheckoutCart(userId, body = {}) {
   const buyer = await getStrapiUser(userId)
   const buyerProfile = buyer.user_profile || {}
   if (!hasCheckoutBuyerProfile(buyerProfile)) {
-    return { code: 400, case: 'buyerProfileIncomplete', missing: missingCheckoutBuyerProfileFields(buyerProfile) }
+    const missing = missingCheckoutBuyerProfileFields(buyerProfile)
+    // Returned rather than thrown, so it never reaches checkoutError's logging below.
+    // eslint-disable-next-line no-console
+    console.warn('[checkout] refused:', JSON.stringify({ case: 'buyerProfileIncomplete', missing, userId }))
+    return { code: 400, case: 'buyerProfileIncomplete', missing }
   }
 
   const itemPayload = Array.isArray(body.items) ? body.items : []
@@ -2587,7 +2591,18 @@ export async function payCheckoutCart(userId, body = {}) {
   const now = new Date().toISOString()
   let createdOrderId = null
   let cartMovedToCheckout = false
-  const checkoutError = result => {
+  const checkoutError = (result) => {
+    // Logged server-side as well as returned, so a refused checkout can be diagnosed from the
+    // application log instead of asking the customer to open developer tools — which is exactly
+    // what it took to find an ownerProfileIncomplete on 2026-08-19.
+    // eslint-disable-next-line no-console
+    console.warn('[checkout] refused:', JSON.stringify({
+      case: result.case,
+      productId: result.productId,
+      missing: result.missing,
+      userId
+    }))
+
     const error = new Error(result.case || 'checkoutError')
     error.checkoutResult = result
     return error
