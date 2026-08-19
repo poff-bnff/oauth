@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { DEFAULT_FACE_RULES, evaluateFace, normalizeFaceRules } from '../utils/photoFace.js'
+// Shared between both tiers, so the cropper can ask one question of the combined findings.
+import { hasBlockingFinding } from '../utils/photoQuality.js'
 import { buildCheckoutCopy } from '../utils/checkoutCopy.js'
 
 // measureFace needs a canvas and the model, so it is exercised in the browser tests. The verdict
@@ -12,7 +14,8 @@ const oneGoodFace = {
   centreOffsetX: 0.02,
   tiltDegrees: 2,
   leftEyeRatio: 0.3,
-  rightEyeRatio: 0.3
+  rightEyeRatio: 0.3,
+  eyeContrastRatio: 0.8
 }
 
 describe('face verdicts', () => {
@@ -74,6 +77,41 @@ describe('face verdicts', () => {
   })
 })
 
+describe('covered eyes / sunglasses', () => {
+  // Warns rather than blocks: the threshold is uncalibrated, and telling a real customer their
+  // face is hidden when it is not is a worse conversation than "your photo is blurry".
+  test('flat eye regions are flagged, as a warning', () => {
+    const findings = evaluateFace({ ...oneGoodFace, eyeContrastRatio: 0.1 }, DEFAULT_FACE_RULES)
+    const covered = findings.find(f => f.rule === 'eyesCovered')
+    expect(covered).toBeDefined()
+    expect(covered.level).toBe('warn')
+    expect(hasBlockingFinding(findings)).toBe(false)
+  })
+
+  test('normal eyes are not flagged', () => {
+    expect(evaluateFace(oneGoodFace, DEFAULT_FACE_RULES).find(f => f.rule === 'eyesCovered')).toBeUndefined()
+  })
+
+  // Null means the eye region was too small to measure, which is not evidence of anything. Treating
+  // it as "covered" would flag every small or distant face.
+  test('an unmeasurable eye region says nothing', () => {
+    expect(evaluateFace({ ...oneGoodFace, eyeContrastRatio: null }, DEFAULT_FACE_RULES)
+      .find(f => f.rule === 'eyesCovered')).toBeUndefined()
+    expect(evaluateFace({ ...oneGoodFace, eyeContrastRatio: undefined }, DEFAULT_FACE_RULES)
+      .find(f => f.rule === 'eyesCovered')).toBeUndefined()
+  })
+
+  test('it can be promoted to blocking once calibrated', () => {
+    const strict = { ...DEFAULT_FACE_RULES, blocking: [...DEFAULT_FACE_RULES.blocking, 'eyesCovered'] }
+    expect(evaluateFace({ ...oneGoodFace, eyeContrastRatio: 0.1 }, strict)
+      .find(f => f.rule === 'eyesCovered').level).toBe('block')
+  })
+
+  test('it is NOT blocking by default', () => {
+    expect(DEFAULT_FACE_RULES.blocking).not.toContain('eyesCovered')
+  })
+})
+
 describe('failing safe', () => {
   // The single most important behaviour here: infrastructure trouble must never present itself to
   // the customer as a problem with their photo.
@@ -110,7 +148,7 @@ describe('copy for every face finding', () => {
   test.each(['en', 'et', 'ru'])('%s has every face string', (locale) => {
     const copy = buildCheckoutCopy(locale, {})
     for (const key of ['qualityChecking', 'faceNotFound', 'faceMoreThanOne', 'faceTooSmall',
-      'faceTooLarge', 'faceNotCentred', 'faceTilted', 'faceEyesClosed']) {
+      'faceTooLarge', 'faceNotCentred', 'faceTilted', 'faceEyesClosed', 'faceEyesCovered']) {
       expect(copy[key], `${locale}.${key}`).toBeTruthy()
     }
   })

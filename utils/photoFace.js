@@ -25,6 +25,15 @@ export const DEFAULT_FACE_RULES = {
   faceMaxTiltDegrees: 12,
   // Eye aspect ratio below which an eye reads as closed.
   eyeOpenMinRatio: 0.15,
+  // Sunglasses/occlusion. The signal is UNIFORMITY, not darkness: a real eye has a bright sclera
+  // immediately beside a dark iris, so it has strong local contrast in a small area, whereas a lens
+  // is flat. Darkness alone would track skin tone and side lighting, and would disproportionately
+  // flag people with darker or deep-set eyes — a fairness problem before it is a support problem.
+  //
+  // Measured as the eye region's own p95-p5 luminance spread divided by the face's, so it does not
+  // simply follow exposure. Starting point only; calibrate against real photos before trusting it,
+  // and note it will struggle with mirrored lenses and heavy shadow across the eyes.
+  eyeContrastMinRatio: 0.35,
   // Deliberately ASYMMETRIC confidence, and both directions fail toward letting the customer
   // through: a weak detection still counts as "a face is present", so an awkwardly-lit face is not
   // refused, while only confident detections count toward "more than one face", so a spurious blob
@@ -96,6 +105,36 @@ export function loadFaceApi (modelUrl = '/face-models') {
 
 const degrees = radians => radians * 180 / Math.PI
 
+// Luminance spread of a landmark region, expressed as p95 - p5 so a single specular highlight or
+// one dark lash does not dominate. Returns null when the region is too small to judge.
+function luminanceSpread (context, points, padding = 0.15) {
+  if (!points || !points.length) return null
+
+  const xs = points.map(p => p.x)
+  const ys = points.map(p => p.y)
+  const padX = (Math.max(...xs) - Math.min(...xs)) * padding
+  const padY = (Math.max(...ys) - Math.min(...ys)) * padding
+
+  const x = Math.max(0, Math.floor(Math.min(...xs) - padX))
+  const y = Math.max(0, Math.floor(Math.min(...ys) - padY))
+  const width = Math.min(context.canvas.width - x, Math.ceil(Math.max(...xs) - Math.min(...xs) + padX * 2))
+  const height = Math.min(context.canvas.height - y, Math.ceil(Math.max(...ys) - Math.min(...ys) + padY * 2))
+
+  if (width < 4 || height < 4) return null
+
+  const { data } = context.getImageData(x, y, width, height)
+  const values = []
+
+  for (let i = 0; i < data.length; i += 4) {
+    values.push(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2])
+  }
+
+  values.sort((a, b) => a - b)
+  const at = q => values[Math.min(values.length - 1, Math.floor(values.length * q))]
+
+  return at(0.95) - at(0.05)
+}
+
 // Mean distance between the vertical pairs of an eye's 6 landmarks, over its width. A closed eye
 // collapses vertically while staying the same width, so the ratio drops sharply.
 function eyeAspectRatio (eye) {
@@ -140,10 +179,21 @@ export async function measureFace (canvas, rules, modelUrl) {
   const leftCentre = centre(leftEye)
   const rightCentre = centre(rightEye)
 
+  // Eye contrast relative to the whole face, so the measure survives a dark or bright photo.
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  const faceSpread = luminanceSpread(context, landmarks.positions, 0)
+  const eyeSpread = [leftEye, rightEye]
+    .map(eye => luminanceSpread(context, eye))
+    .filter(v => typeof v === 'number')
+  const eyeContrastRatio = (faceSpread && eyeSpread.length)
+    ? (eyeSpread.reduce((a, b) => a + b, 0) / eyeSpread.length) / faceSpread
+    : null
+
   return {
     faceCount: detections.length,
     confidentFaceCount: confident.length,
     score: primary.detection.score,
+    eyeContrastRatio,
     heightRatio: box.height / canvas.height,
     // Signed, so a caller could tell left from right; the rule uses the magnitude.
     centreOffsetX: ((box.x + box.width / 2) - canvas.width / 2) / canvas.width,
@@ -191,6 +241,13 @@ export function evaluateFace (measurements, rules) {
   const eyes = [measurements.leftEyeRatio, measurements.rightEyeRatio].filter(v => typeof v === 'number')
   if (eyes.length === 2 && eyes.every(v => v < r.eyeOpenMinRatio)) {
     findings.push({ rule: 'eyesClosed', level: levelFor('eyesClosed'), reason: 'faceEyesClosed' })
+  }
+
+  // Flat eye regions suggest sunglasses or something else covering the eyes. Null means the region
+  // was too small to judge, which is not evidence of anything.
+  if (typeof measurements.eyeContrastRatio === 'number' &&
+      measurements.eyeContrastRatio < r.eyeContrastMinRatio) {
+    findings.push({ rule: 'eyesCovered', level: levelFor('eyesCovered'), reason: 'faceEyesCovered' })
   }
 
   return findings
