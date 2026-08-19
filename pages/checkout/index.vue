@@ -1078,6 +1078,7 @@ watch(sessionRemainingSeconds, (seconds) => {
               :removing-component-ids="removingComponentIds"
               :locale="locale"
               :copy="copy"
+              :auth-headers="authHeaders"
               @update:open-item-key="openItemKey = $event"
               @error="error = $event"
               @continue="step = 2"

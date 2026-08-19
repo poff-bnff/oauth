@@ -167,6 +167,10 @@
     "checkoutOwnerProfileIncomplete": "The recipient of %ITEM% is missing %MISSING% and we could not add it for them.",
     "checkoutOwnerPhotoRequired": "%ITEM% is a gift — please add a photo of the person receiving it.",
     "checkoutInvalidOwner": "Please check the recipient details for %ITEM%.",
+    "confirmEmail": "Confirm email",
+    "emailMismatch": "The two email addresses do not match.",
+    "checkingRecipient": "Checking…",
+    "recipientOnFile": "We already have this on file for the recipient, so you do not need to enter it:",
     "checkoutNoDeliveryLocation": "Please choose a pickup location for %ITEM%.",
     "checkoutInvalidDeliveryLocation": "That pickup location is not available for %ITEM%. Please choose another.",
     "fieldEmail": "an email address",
@@ -345,6 +349,10 @@
     "checkoutOwnerProfileIncomplete": "Toote %ITEM% saajal on puudu %MISSING% ja me ei saanud seda tema eest lisada.",
     "checkoutOwnerPhotoRequired": "%ITEM% on kingitus — palun lisa saaja foto.",
     "checkoutInvalidOwner": "Palun kontrolli toote %ITEM% saaja andmeid.",
+    "confirmEmail": "Kinnita e-posti aadress",
+    "emailMismatch": "E-posti aadressid ei kattu.",
+    "checkingRecipient": "Kontrollin…",
+    "recipientOnFile": "Need andmed on saaja kohta juba olemas, sul ei ole vaja neid sisestada:",
     "checkoutNoDeliveryLocation": "Palun vali tootele %ITEM% kättesaamise koht.",
     "checkoutInvalidDeliveryLocation": "See kättesaamise koht ei ole tootele %ITEM% saadaval. Palun vali teine.",
     "fieldEmail": "e-posti aadress",
@@ -531,6 +539,10 @@
     "fieldPhoto": "фото",
     "fieldSomeDetails": "некоторые данные",
     "thisItem": "этот товар",
-    "checkoutItemUnavailable": "Один или несколько товаров больше недоступны. Проверьте корзину и попробуйте снова."
+    "checkoutItemUnavailable": "Один или несколько товаров больше недоступны. Проверьте корзину и попробуйте снова.",
+    "confirmEmail": "Подтвердите email",
+    "emailMismatch": "Адреса email не совпадают.",
+    "checkingRecipient": "Проверяем…",
+    "recipientOnFile": "Эти данные у получателя уже есть, вводить их не нужно:"
   }
 }

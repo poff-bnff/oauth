@@ -220,7 +220,7 @@ test('a reload restores the CROPPED gift photo, not the original', async ({ brow
   await page.getByRole('button', { name: 'As a gift' }).click()
   await page.getByLabel('First name *').fill('Gift')
   await page.getByLabel('Last name *').fill('Person')
-  await page.getByLabel('Email *').fill('gift@example.test')
+  await page.getByLabel('Email *', { exact: true }).fill('gift@example.test')
 
   // Portrait source, so "square" is proof the crop survived rather than a coincidence.
   await choosePhoto(page, { width: 900, height: 1200, name: 'gift.png' })
@@ -471,6 +471,85 @@ test('a photo with faces detected is accepted when only faceMissing blocks', asy
 
   await expect(page.getByRole('dialog')).toBeHidden({ timeout: 15000 })
   await expect(page.locator('.photo-preview img')).toBeVisible()
+
+  await context.close()
+})
+
+// Gifting to someone whose account already holds details: the buyer is asked only for what is
+// missing, and never shown what is there.
+test('a recipient with a photo on file is not asked for one', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 5001, productId: 9501, title: 'Gift pass', locationId: 901, transferable: true })],
+    profile: { ...buyerProfileWithoutPicture, picture: 'https://assets.example.test/buyer.jpg' }
+  })
+
+  // The recipient already has everything.
+  await page.route('**/api/checkout/owner/lookup', route => route.fulfill({
+    json: { existing: true, onFile: ['firstName', 'lastName', 'picture'], missing: [] }
+  }))
+
+  await page.goto(checkoutUrl())
+  await page.getByRole('button', { name: /Pickup 901/ }).click()
+  await page.getByRole('button', { name: 'As a gift' }).click()
+
+  // Email comes first now; the lookup fires on blur.
+  await page.getByLabel('Email *', { exact: true }).fill('known@example.test')
+  await page.getByLabel('Confirm email *').fill('known@example.test')
+
+  await expect(page.getByText(/already have this on file/)).toBeVisible()
+  // Asked for nothing else — and shown none of it.
+  await expect(page.locator('.owner-form .photo-upload')).toHaveCount(0)
+  await expect(page.getByLabel('First name *')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Continue/ })).toBeEnabled()
+
+  await context.close()
+})
+
+test('a recipient missing only a photo is asked only for the photo', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 5002, productId: 9502, title: 'Gift pass', locationId: 902, transferable: true })],
+    profile: { ...buyerProfileWithoutPicture, picture: 'https://assets.example.test/buyer.jpg' },
+    rules: { ...DEFAULT_RULES_FOR_TEST, faceChecks: { enabled: false } }
+  })
+
+  await page.route('**/api/checkout/owner/lookup', route => route.fulfill({
+    json: { existing: true, onFile: ['firstName', 'lastName'], missing: ['picture'] }
+  }))
+
+  await page.goto(checkoutUrl())
+  await page.getByRole('button', { name: /Pickup 902/ }).click()
+  await page.getByRole('button', { name: 'As a gift' }).click()
+  await page.getByLabel('Email *', { exact: true }).fill('halfway@example.test')
+  await page.getByLabel('Confirm email *').fill('halfway@example.test')
+
+  await expect(page.getByLabel('First name *')).toHaveCount(0)
+  await expect(page.locator('.owner-form .photo-upload')).toBeVisible()
+
+  await context.close()
+})
+
+// The typo guard. Without it a mistyped address landing on a real account would pass silently.
+test('mismatched email addresses block the item', async ({ browser }) => {
+  const { context, page } = await prepareCheckoutPage({
+    browser,
+    items: [cartItem({ componentId: 5003, productId: 9503, title: 'Gift pass', locationId: 903, transferable: true })],
+    profile: { ...buyerProfileWithoutPicture, picture: 'https://assets.example.test/buyer.jpg' }
+  })
+
+  await page.route('**/api/checkout/owner/lookup', route => route.fulfill({
+    json: { existing: true, onFile: ['firstName', 'lastName', 'picture'], missing: [] }
+  }))
+
+  await page.goto(checkoutUrl())
+  await page.getByRole('button', { name: /Pickup 903/ }).click()
+  await page.getByRole('button', { name: 'As a gift' }).click()
+  await page.getByLabel('Email *', { exact: true }).fill('right@example.test')
+  await page.getByLabel('Confirm email *').fill('wrogn@example.test')
+
+  await expect(page.getByText(/do not match/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /Continue/ })).toBeDisabled()
 
   await context.close()
 })

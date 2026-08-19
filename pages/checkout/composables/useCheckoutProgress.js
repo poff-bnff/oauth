@@ -23,17 +23,38 @@ export function emptyCheckoutItemForm () {
     photo: null,
     photoName: '',
     photoError: '',
-    sendEmail: true
+    sendEmail: true,
+    // Typo guard. A mistyped address that happens to belong to a real account would otherwise sail
+    // through as "details already on file" and send the pass to a stranger.
+    emailConfirm: '',
+    // What the recipient's account already holds, from /api/checkout/owner/lookup. FIELD NAMES
+    // ONLY — a buyer has no business seeing someone else's name or photo, only knowing not to
+    // type them.
+    ownerOnFile: null
   }
 }
 
+// Fields the buyer must still supply. Everything when nothing is known about the recipient, which
+// keeps the old behaviour whenever the lookup has not run or failed.
+export function giftFieldsStillNeeded (form = {}) {
+  const onFile = form.ownerOnFile
+  if (!onFile || !Array.isArray(onFile.onFile)) return ['firstName', 'lastName', 'picture']
+
+  return ['firstName', 'lastName', 'picture'].filter(field => !onFile.onFile.includes(field))
+}
+
 export function isGiftOwnerComplete (form = {}) {
-  return !!(
-    (form.firstName || '').trim() &&
-    (form.lastName || '').trim() &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((form.email || '').trim()) &&
-    form.photo
-  )
+  const email = (form.email || '').trim()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return false
+  // Compared case-insensitively: nobody should be blocked because they capitalised one of them.
+  if (email.toLowerCase() !== (form.emailConfirm || '').trim().toLowerCase()) return false
+
+  const needed = giftFieldsStillNeeded(form)
+  if (needed.includes('firstName') && !(form.firstName || '').trim()) return false
+  if (needed.includes('lastName') && !(form.lastName || '').trim()) return false
+  if (needed.includes('picture') && !form.photo) return false
+
+  return true
 }
 
 export function isCheckoutItemComplete (item = {}, form = {}) {
@@ -72,6 +93,8 @@ export function findCompatibleSavedForm (source, item, index = 0) {
 }
 
 export function serializableCheckoutItemForm (form = {}) {
+  // ownerOnFile is kept: it holds field NAMES only, no personal data, and re-running the lookup
+  // after every reload would be needless traffic against a rate-limited endpoint.
   return { ...form, photo: null, photoName: '', photoError: '' }
 }
 

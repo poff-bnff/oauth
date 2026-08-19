@@ -191,9 +191,11 @@ test('restores the gift notification checkbox after immediate reload', async ({ 
   await openCheckout(page)
   await page.getByRole('button', { name: /Pickup 801/ }).click()
   await page.getByRole('button', { name: 'As a gift' }).click()
+  // Email is asked first now, and 'Email *' would also match 'Confirm email *' without exact.
+  await page.getByLabel('Email *', { exact: true }).fill('gift@example.test')
+  await page.getByLabel('Confirm email *').fill('gift@example.test')
   await page.getByLabel('First name *').fill('Gift')
   await page.getByLabel('Last name *').fill('Person')
-  await page.getByLabel('Email *').fill('gift@example.test')
   await page.getByLabel("Don't send notification email").check()
 
   await page.reload()

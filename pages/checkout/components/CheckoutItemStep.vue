@@ -4,7 +4,7 @@
   this component mutates them directly (same reactive instance as the parent).
 -->
 <script setup>
-import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete } from '../composables/useCheckoutProgress.js'
+import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete, giftFieldsStillNeeded } from '../composables/useCheckoutProgress.js'
 import { savePhoto, deletePhoto } from '../composables/useCheckoutPhotoStore.js'
 import {
   DEFAULT_PHOTO_RULES,
@@ -24,7 +24,9 @@ const props = defineProps({
   brokenImages: { type: Object, required: true }, // reactive — direct mutation is intentional
   removingComponentIds: { type: Object, default: () => new Set() },
   locale: { type: String, default: 'en' },
-  copy: { type: Object, required: true }
+  copy: { type: Object, required: true },
+  // Needed for the recipient lookup: the endpoint authenticates the buyer by bearer token.
+  authHeaders: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits(['update:openItemKey', 'continue', 'error', 'remove', 'progress'])
@@ -121,6 +123,63 @@ function setPickupLocation (item, index, locationId) {
 function setOwnerMode (item, index, mode) {
   ensureItemForm(item, index).ownerMode = mode
   emit('progress')
+}
+
+// Asks what the recipient's account already holds, so the form can request only what is missing
+// and say the rest is on file without showing it.
+//
+// On blur rather than per keystroke: fewer requests, no half-typed addresses reaching the server,
+// and the endpoint is rate-limited per buyer to blunt address enumeration.
+async function lookupOwner (item, index) {
+  const form = ensureItemForm(item, index)
+  const email = (form.email || '').trim().toLowerCase()
+
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    form.ownerOnFile = null
+    return
+  }
+  // Already answered for this address.
+  if (form.ownerOnFile && form.ownerOnFile.email === email) return
+
+  form.ownerLookupPending = true
+  try {
+    const result = await $fetch('/api/checkout/owner/lookup', {
+      method: 'POST',
+      headers: { ...props.authHeaders, 'Content-Type': 'application/json' },
+      body: { email }
+    })
+    form.ownerOnFile = { email, ...result }
+  } catch (err) {
+    // A failed or throttled lookup must not block the sale: fall back to asking for everything,
+    // which is exactly how the form behaved before this existed.
+    console.warn('[checkout] owner lookup failed', err) // eslint-disable-line no-console
+    form.ownerOnFile = null
+  } finally {
+    form.ownerLookupPending = false
+    emit('progress')
+  }
+}
+
+// Which fields the buyer must still fill for this recipient.
+function giftNeeds (item, index, field) {
+  return giftFieldsStillNeeded(ensureItemForm(item, index)).includes(field)
+}
+
+const ON_FILE_FIELD_LABELS = { firstName: 'fieldFirstName', lastName: 'fieldLastName', picture: 'fieldPhoto' }
+function onFileFieldLabel (field) {
+  return ON_FILE_FIELD_LABELS[field] || field
+}
+
+function giftOnFile (item, index) {
+  const onFile = ensureItemForm(item, index).ownerOnFile
+  return (onFile && onFile.onFile) || []
+}
+
+function giftEmailMismatch (item, index) {
+  const form = ensureItemForm(item, index)
+  const email = (form.email || '').trim().toLowerCase()
+  const confirm = (form.emailConfirm || '').trim().toLowerCase()
+  return !!(email && confirm && email !== confirm)
 }
 
 function toggleOwnerEmail (event, item, index) {
@@ -325,10 +384,47 @@ function validateAndContinue () {
             </button>
           </div>
           <div v-if="ensureItemForm(item, index).ownerMode === 'gift'" class="form-grid owner-form">
-            <label><span class="field-label">{{ copy.firstName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).firstName" autocomplete="given-name" required></label>
-            <label><span class="field-label">{{ copy.lastName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).lastName" autocomplete="family-name" required></label>
-            <label class="span"><span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).email" type="email" autocomplete="email" placeholder="recipient@example.com" required></label>
-            <label class="file photo-upload span">
+            <!-- Email first: what the recipient already has on file decides which fields below
+                 are even shown, so nothing else can be asked until it is known. -->
+            <label class="span">
+              <span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span>
+              <input
+                v-model.trim="ensureItemForm(item, index).email"
+                type="email"
+                autocomplete="off"
+                placeholder="recipient@example.com"
+                required
+                @blur="lookupOwner(item, index)"
+              >
+            </label>
+            <!-- Typed twice on purpose. A mistyped address that happens to belong to a real
+                 account would otherwise pass silently as "details on file" and send the pass to a
+                 stranger — and a pass is personal, so that is not easily undone. -->
+            <label class="span">
+              <span class="field-label">{{ copy.confirmEmail }} <span class="required-dot">*</span></span>
+              <input
+                v-model.trim="ensureItemForm(item, index).emailConfirm"
+                type="email"
+                autocomplete="off"
+                required
+              >
+              <small v-if="giftEmailMismatch(item, index)" class="photo-error" role="alert">{{ copy.emailMismatch }}</small>
+            </label>
+
+            <p v-if="ensureItemForm(item, index).ownerLookupPending" class="span owner-lookup">
+              {{ copy.checkingRecipient }}
+            </p>
+
+            <!-- Says WHAT is on file, never the values: the buyer needs to know not to type them,
+                 not who the account belongs to. -->
+            <p v-else-if="giftOnFile(item, index).length" class="span owner-on-file">
+              {{ copy.recipientOnFile }}
+              <strong>{{ giftOnFile(item, index).map(f => copy[onFileFieldLabel(f)] || f).join(', ') }}</strong>
+            </p>
+
+            <label v-if="giftNeeds(item, index, 'firstName')"><span class="field-label">{{ copy.firstName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).firstName" autocomplete="off" required></label>
+            <label v-if="giftNeeds(item, index, 'lastName')"><span class="field-label">{{ copy.lastName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).lastName" autocomplete="off" required></label>
+            <label v-if="giftNeeds(item, index, 'picture')" class="file photo-upload span">
               <span class="field-label">{{ copy.photo }} <span class="required-dot">*</span></span>
               <input type="file" :accept="photoAccept" @change="handleOwnerPhoto($event, item, index)">
               <span class="photo-upload-box">

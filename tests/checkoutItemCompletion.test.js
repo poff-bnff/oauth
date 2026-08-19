@@ -12,6 +12,9 @@ const giftForm = (over = {}) => ({
   firstName: 'Ada',
   lastName: 'Lovelace',
   email: 'ada@example.com',
+  // Typed twice since 2026-08-19: a mistyped address landing on a real account would otherwise
+  // pass silently as "details on file" and send the pass to a stranger.
+  emailConfirm: 'ada@example.com',
   photo: { name: 'a.jpg', data: 'data:image/jpeg;base64,xxx' },
   ...over
 })
@@ -34,6 +37,44 @@ describe('isGiftOwnerComplete', () => {
   })
   it('is false with an invalid email', () => {
     expect(isGiftOwnerComplete(giftForm({ email: 'not-an-email' }))).toBe(false)
+  })
+
+  it('is false when the confirmation does not match', () => {
+    expect(isGiftOwnerComplete(giftForm({ emailConfirm: 'typo@example.com' }))).toBe(false)
+    expect(isGiftOwnerComplete(giftForm({ emailConfirm: '' }))).toBe(false)
+  })
+
+  it('ignores case when comparing the two addresses', () => {
+    // Nobody should be blocked because they capitalised one of them.
+    expect(isGiftOwnerComplete(giftForm({ emailConfirm: 'Ada@Example.com' }))).toBe(true)
+  })
+})
+
+// The recipient's account may already hold some of this. The buyer is asked only for what is
+// missing, and never shown what is there.
+describe('a recipient with details already on file', () => {
+  const withOnFile = (onFile, over = {}) => giftForm({ ownerOnFile: { email: 'ada@example.com', existing: true, onFile }, ...over })
+
+  it('does not require a photo the recipient already has', () => {
+    expect(isGiftOwnerComplete(withOnFile(['picture'], { photo: null }))).toBe(true)
+  })
+
+  it('does not require a name the recipient already has', () => {
+    expect(isGiftOwnerComplete(withOnFile(['firstName', 'lastName'], { firstName: '', lastName: '' }))).toBe(true)
+  })
+
+  it('requires nothing but a matching email when everything is on file', () => {
+    expect(isGiftOwnerComplete(withOnFile(['firstName', 'lastName', 'picture'], { firstName: '', lastName: '', photo: null }))).toBe(true)
+  })
+
+  it('still requires the fields that are NOT on file', () => {
+    expect(isGiftOwnerComplete(withOnFile(['firstName'], { firstName: '', photo: null }))).toBe(false)
+  })
+
+  // The safe default: if the lookup never ran or failed, ask for everything, exactly as before.
+  it('requires everything when nothing is known about the recipient', () => {
+    expect(isGiftOwnerComplete(giftForm({ ownerOnFile: null, photo: null }))).toBe(false)
+    expect(isGiftOwnerComplete(giftForm({ ownerOnFile: { email: 'x', onFile: 'not-an-array' }, photo: null }))).toBe(false)
   })
 })
 
