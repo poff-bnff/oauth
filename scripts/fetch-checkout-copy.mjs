@@ -1,4 +1,5 @@
 import {
+  CHECKOUT_COPY_GROUP_NAMES,
   fetchCheckoutLabelGroups,
   getStrapiAdminToken,
   getStrapiConfig,
@@ -37,7 +38,17 @@ try {
   const overrides = normalizeCheckoutLabelGroups(labelGroups)
 
   await writeCheckoutCopyOverrides(overrides)
-  console.log(`Checkout copy baked from Strapi: ${countLabels(overrides)} labels`)
+  const baked = countLabels(overrides)
+  if (baked === 0) {
+    // A successful fetch that matches no group looks identical to success in the build log. It is
+    // not: it means every string silently falls back to the bundled defaults, and editing labels
+    // in Strapi has no effect on the deployed shop.
+    console.warn('Checkout copy bake found 0 labels — no matching label group in Strapi.')
+    console.warn(`Looked for groups named: ${CHECKOUT_COPY_GROUP_NAMES.join(', ')}`)
+    console.warn('The shop will run on bundled defaults; Strapi label edits will not appear.')
+  } else {
+    console.log(`Checkout copy baked from Strapi: ${baked} labels`)
+  }
 } catch (error) {
   await writeCheckoutCopyOverrides({})
   console.warn(`Checkout copy bake skipped: ${error.message}`)

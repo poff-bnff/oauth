@@ -9,7 +9,13 @@ const projectRoot = resolve(__dirname, '..')
 
 export const checkoutCopyOutputPath = resolve(projectRoot, 'generated/checkoutCopy.json')
 export const checkoutCopyDefaultsPath = resolve(projectRoot, 'utils/checkoutCopyDefaults.json')
+// The group the labels actually live in is 'checkout' — that is what the seeder fills and what
+// domain_specifics.yaml watches to trigger a shop deploy. It was missing here, so every build
+// fetched successfully, matched no group and baked 0 labels, and the shop ran entirely on the
+// bundled defaults while edits in Strapi appeared to do nothing.
+// The rest are kept as aliases so an environment using an older name still resolves.
 export const CHECKOUT_COPY_GROUP_NAMES = [
+  'checkout',
   'oauthCheckout',
   'oauth-checkout',
   'checkoutCopy',

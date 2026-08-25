@@ -129,3 +129,36 @@ describe('checkout copy Strapi label-group normalization', () => {
     expect(normalized.ru.emptyHint).toBe('English fallback')
   })
 })
+
+// The labels live in a group named 'checkout' — that is what the seeder fills and what
+// domain_specifics.yaml watches for the deploy trigger. Leaving it out of this list made every
+// build bake 0 labels while reporting success, so Strapi edits never reached the shop.
+describe('the label group the shop reads matches the one Strapi fills', () => {
+  test("'checkout' is among the group names looked for", async () => {
+    const { CHECKOUT_COPY_GROUP_NAMES } = await import('../scripts/checkout-copy-strapi.mjs')
+    expect(CHECKOUT_COPY_GROUP_NAMES).toContain('checkout')
+  })
+
+  test('a group named checkout is normalized into per-locale copy', async () => {
+    const { normalizeCheckoutLabelGroups } = await import('../scripts/checkout-copy-strapi.mjs')
+    const overrides = normalizeCheckoutLabelGroups([
+      {
+        name: 'checkout',
+        label: [
+          { name: 'holdCart', value_en: 'We hold your cart.', value_et: 'Hoiame ostukorvi.', value_ru: 'Держим корзину.' }
+        ]
+      }
+    ])
+    expect(overrides.et.holdCart).toBe('Hoiame ostukorvi.')
+    expect(overrides.en.holdCart).toBe('We hold your cart.')
+    expect(overrides.ru.holdCart).toBe('Держим корзину.')
+  })
+
+  test('an unrelated group still yields nothing, so the match stays specific', async () => {
+    const { normalizeCheckoutLabelGroups } = await import('../scripts/checkout-copy-strapi.mjs')
+    const overrides = normalizeCheckoutLabelGroups([
+      { name: 'userprofile', label: [{ name: 'cropTitle', value_et: 'Kärbi' }] }
+    ])
+    expect(Object.values(overrides).every(locale => Object.keys(locale || {}).length === 0)).toBe(true)
+  })
+})
