@@ -1675,13 +1675,16 @@ button.back-button:focus-visible,
   pointer-events: none;
 }
 .owner-status {
-  /* Two lines of the on-file message: the tallest state this slot has to hold. */
+  /* Two lines of the on-file message: the tallest state this slot has to hold. Reserved only
+     while an address is present, so an empty gift form has no stray blank line in it. */
   min-height: 38px;
   margin: 0;
   font-size: 13px;
   line-height: 1.45;
   color: rgba(0,0,0,.6);
 }
+/* A degraded answer is a caveat, not information — it should not read like the calm on-file note. */
+.owner-status-warn { color: #a8641a; }
 .owner-status strong { color: rgba(0,0,0,.78); font-weight: 600; }
 .owner-status-spinner {
   display: inline-block;

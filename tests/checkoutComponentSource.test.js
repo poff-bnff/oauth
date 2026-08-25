@@ -188,7 +188,22 @@ describe('recipient lookup indicator does not reflow the gift form', () => {
   })
 
   test('a stale on-file message cannot show beside a running check', () => {
-    expect(checkoutItemStepSource).toMatch(/ownerLookupPending[\s\S]{0,300}v-else-if="giftOnFile/)
+    // The on-file branch must stay subordinate to the pending branch, never its own v-if.
+    expect(checkoutItemStepSource).toMatch(/v-else-if="giftOnFile\(item, index\)\.length"/)
+    expect(checkoutItemStepSource).not.toMatch(/v-if="giftOnFile\(item, index\)\.length"/)
+  })
+
+  // The endpoint reports every failure as "new user, ask for everything". Safe, but shown as fact
+  // it sends the buyer typing details the recipient's account already holds.
+  test('a degraded lookup is shown as a caveat, not as an answer', () => {
+    expect(checkoutItemStepSource).toContain('giftLookupDegraded')
+    expect(checkoutItemStepSource).toMatch(/recipientCheckThrottled[\s\S]{0,120}recipientCheckFailed/)
+    expect(copyDefaults.et.recipientCheckFailed).toBeTruthy()
+    expect(copyDefaults.et.recipientCheckThrottled).toBeTruthy()
+  })
+
+  test('the status slot is only reserved once an address is present', () => {
+    expect(checkoutItemStepSource).toMatch(/v-if="ensureItemForm\(item, index\)\.email"[\s\S]{0,120}owner-status/)
   })
 
   test('the pending state is announced to screen readers', () => {

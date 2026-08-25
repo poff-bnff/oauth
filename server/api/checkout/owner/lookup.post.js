@@ -17,7 +17,7 @@ import { hitLimit } from '../../../utils/rateLimiter.js'
 
 const PROFILE_FIELDS = ['firstName', 'lastName', 'picture']
 
-const LOOKUPS_PER_WINDOW = 30
+const LOOKUPS_PER_WINDOW = 60
 const WINDOW_MS = 10 * 60 * 1000
 
 const blank = value => !String(value == null ? '' : value).trim()
@@ -30,6 +30,9 @@ export default defineEventHandler(async (event) => {
   // shared office IP should not punish everyone behind it.
   const limit = hitLimit(`ownerlookup:${userId}`, LOOKUPS_PER_WINDOW, WINDOW_MS)
   if (limit.exceeded) {
+    // Visible to the buyer as "could not check, try again shortly" — never as "this recipient is
+    // new", which would send them typing details the account already holds.
+    console.warn(`[checkout] owner lookup throttled for user ${userId}`) // eslint-disable-line no-console
     throw createError({ statusCode: 429, statusMessage: 'Too many lookups', data: { retryAfter: limit.retryAfter } })
   }
 
@@ -64,7 +67,9 @@ export default defineEventHandler(async (event) => {
   } catch (err) {
     // A failed lookup must not block the sale: the checkout falls back to asking for everything,
     // which is exactly how it behaved before this endpoint existed.
-    console.warn('[checkout] owner lookup failed:', err?.message) // eslint-disable-line no-console
+    // Logged with the address masked: this line is for diagnosing lookups that silently degrade,
+    // not for recording who was gifted what.
+    console.warn(`[checkout] owner lookup failed for ${email.replace(/^(.).*(@.*)$/, '$1***$2')}:`, err?.message) // eslint-disable-line no-console
     return { existing: false, onFile: [], missing: PROFILE_FIELDS, degraded: true }
   }
 })

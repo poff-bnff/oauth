@@ -162,9 +162,19 @@ async function lookupOwner (item, index) {
     form.ownerOnFile = { email, ...result }
   } catch (err) {
     // A failed, timed-out or throttled lookup must not block the sale: fall back to asking for
-    // everything, which is exactly how the form behaved before this existed.
+    // everything, which is how the form behaved before this existed — but say so, rather than
+    // letting it look like a confident "this recipient is new".
     console.warn('[checkout] owner lookup failed', err) // eslint-disable-line no-console
-    if (form.ownerLookupFor === email) form.ownerOnFile = null
+    if (form.ownerLookupFor === email) {
+      form.ownerOnFile = {
+        email,
+        existing: false,
+        onFile: [],
+        missing: ['firstName', 'lastName', 'picture'],
+        degraded: true,
+        throttled: err?.statusCode === 429 || err?.response?.status === 429
+      }
+    }
   } finally {
     clearTimeout(timer)
     // Only the newest lookup owns the spinner; a superseded one must not switch it off.
@@ -184,6 +194,12 @@ function giftNeeds (item, index, field) {
 const ON_FILE_FIELD_LABELS = { firstName: 'fieldFirstName', lastName: 'fieldLastName', picture: 'fieldPhoto' }
 function onFileFieldLabel (field) {
   return ON_FILE_FIELD_LABELS[field] || field
+}
+
+// True when the answer is a fallback rather than a real one: the endpoint reports failures as
+// "new user, ask for everything", which is safe but must not be shown as fact.
+function giftLookupDegraded (item, index) {
+  return Boolean(ensureItemForm(item, index).ownerOnFile?.degraded)
 }
 
 function giftOnFile (item, index) {
@@ -442,19 +458,6 @@ function validateAndContinue () {
               </span>
             </label>
 
-            <!-- One status slot for both states, with its height reserved in CSS. Text can appear
-                 and change without moving the fields below, which is what the old bare paragraph
-                 did on every lookup — and unlike a bare spinner it says what is happening, which
-                 matters when Strapi takes several seconds to answer. -->
-            <p class="span owner-status" role="status" aria-live="polite">
-              <template v-if="ensureItemForm(item, index).ownerLookupPending">
-                <span class="owner-status-spinner" aria-hidden="true" />{{ copy.checkingRecipient }}
-              </template>
-              <template v-else-if="giftOnFile(item, index).length">
-                {{ copy.recipientOnFile }}
-                <strong>{{ giftOnFile(item, index).map(f => copy[onFileFieldLabel(f)] || f).join(', ') }}</strong>
-              </template>
-            </p>
             <!-- Typed twice on purpose. A mistyped address that happens to belong to a real
                  account would otherwise pass silently as "details on file" and send the pass to a
                  stranger — and a pass is personal, so that is not easily undone. -->
@@ -468,6 +471,32 @@ function validateAndContinue () {
               >
               <small v-if="giftEmailMismatch(item, index)" class="photo-error" role="alert">{{ copy.emailMismatch }}</small>
             </label>
+
+            <!-- One status slot for every outcome, with its height reserved once an address is
+                 present, so text can appear and change without moving the fields below — the
+                 reflow this all started from. Placed under the address pair because everything it
+                 says is about the recipient those fields identify. -->
+            <p
+              v-if="ensureItemForm(item, index).email"
+              class="span owner-status"
+              :class="{ 'owner-status-warn': giftLookupDegraded(item, index) }"
+              role="status"
+              aria-live="polite"
+            >
+              <template v-if="ensureItemForm(item, index).ownerLookupPending">
+                <span class="owner-status-spinner" aria-hidden="true" />{{ copy.checkingRecipient }}
+              </template>
+              <!-- A lookup that failed, timed out or was throttled must not masquerade as "this
+                   person is new" — that is indistinguishable from a real answer and sends the
+                   buyer off typing details that are already on file. -->
+              <template v-else-if="giftLookupDegraded(item, index)">
+                {{ ensureItemForm(item, index).ownerOnFile?.throttled ? copy.recipientCheckThrottled : copy.recipientCheckFailed }}
+              </template>
+              <template v-else-if="giftOnFile(item, index).length">
+                {{ copy.recipientOnFile }}
+                <strong>{{ giftOnFile(item, index).map(f => copy[onFileFieldLabel(f)] || f).join(', ') }}</strong>
+              </template>
+            </p>
 
             <label v-if="giftNeeds(item, index, 'firstName')"><span class="field-label">{{ copy.firstName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).firstName" autocomplete="off" required></label>
             <label v-if="giftNeeds(item, index, 'lastName')"><span class="field-label">{{ copy.lastName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).lastName" autocomplete="off" required></label>

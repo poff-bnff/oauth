@@ -179,7 +179,9 @@
     "fieldPhoto": "a photo",
     "fieldSomeDetails": "some details",
     "thisItem": "this item",
-    "checkoutItemUnavailable": "One or more items are no longer available. Please review your cart and try again."
+    "checkoutItemUnavailable": "One or more items are no longer available. Please review your cart and try again.",
+    "recipientCheckFailed": "We could not check this recipient just now, so please fill in all the fields below.",
+    "recipientCheckThrottled": "Too many checks in a short time. Wait a moment and re-enter the address, or fill in all the fields below."
   },
   "et": {
     "secureCheckout": "Turvaline ostuvorm",
@@ -361,7 +363,9 @@
     "fieldPhoto": "foto",
     "fieldSomeDetails": "mõned andmed",
     "thisItem": "see toode",
-    "checkoutItemUnavailable": "Üks või mitu toodet ei ole enam saadaval. Palun vaata ostukorv üle ja proovi uuesti."
+    "checkoutItemUnavailable": "Üks või mitu toodet ei ole enam saadaval. Palun vaata ostukorv üle ja proovi uuesti.",
+    "recipientCheckFailed": "Saaja andmeid ei õnnestunud praegu kontrollida, palun täida kõik allolevad väljad.",
+    "recipientCheckThrottled": "Liiga palju kontrolle lühikese aja jooksul. Oota hetk ja sisesta aadress uuesti või täida kõik väljad."
   },
   "ru": {
     "secureCheckout": "Безопасное оформление",
@@ -543,6 +547,8 @@
     "confirmEmail": "Подтвердите email",
     "emailMismatch": "Адреса email не совпадают.",
     "checkingRecipient": "Проверяем данные получателя…",
-    "recipientOnFile": "Эти данные у получателя уже есть, вводить их не нужно:"
+    "recipientOnFile": "Эти данные у получателя уже есть, вводить их не нужно:",
+    "recipientCheckFailed": "Сейчас не удалось проверить получателя, пожалуйста, заполните все поля ниже.",
+    "recipientCheckThrottled": "Слишком много проверок за короткое время. Подождите немного и введите адрес снова или заполните все поля."
   }
 }
