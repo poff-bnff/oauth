@@ -166,3 +166,22 @@ describe('checkout auth gating — unauthenticated/expired sessions go to login'
     expect(indexSource).toContain('v-if="!cart.items.length && token"')
   })
 })
+
+describe('recipient lookup indicator does not reflow the gift form', () => {
+  const checkoutCss = read('../pages/checkout/checkout.css')
+
+  // The indicator used to be its own <p class="span"> in the form grid, so starting and finishing
+  // a lookup moved the first-name and last-name fields under the buyer's cursor.
+  test('the pending state is not rendered as a grid cell', () => {
+    expect(checkoutItemStepSource).not.toMatch(/<p[^>]*class="span[^"]*"[^>]*>\s*\{\{\s*copy\.checkingRecipient/)
+  })
+
+  test('the spinner is inside the email field and takes it out of flow', () => {
+    expect(checkoutItemStepSource).toMatch(/owner-email-input[\s\S]{0,800}owner-lookup-spinner/)
+    expect(checkoutCss).toMatch(/\.owner-lookup-spinner\s*\{[^}]*position:\s*absolute/)
+  })
+
+  test('the pending state is still announced to screen readers', () => {
+    expect(checkoutItemStepSource).toMatch(/aria-live="polite"[\s\S]{0,200}copy\.checkingRecipient/)
+  })
+})

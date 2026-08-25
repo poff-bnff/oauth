@@ -1655,3 +1655,31 @@ button.back-button:focus-visible,
   color: #f5a623;
   text-decoration: none;
 }
+
+/* Recipient lookup — the pending indicator sits inside the email field rather than on a line of
+   its own, because a separate line took a grid cell and shunted the name fields on every lookup. */
+.owner-email-input { position: relative; display: block; }
+.owner-email-input input { width: 100%; padding-right: 34px; }
+.owner-lookup-spinner {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border: 2px solid rgba(0,0,0,.16);
+  border-top-color: rgba(0,0,0,.5);
+  border-radius: 50%;
+  animation: cart-spin .8s linear infinite;
+  pointer-events: none;
+}
+.owner-on-file {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(0,0,0,.6);
+}
+.owner-on-file strong { color: rgba(0,0,0,.78); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) {
+  .owner-lookup-spinner { animation-duration: 2.4s; }
+}

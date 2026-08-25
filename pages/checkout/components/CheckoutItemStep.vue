@@ -386,16 +386,25 @@ function validateAndContinue () {
           <div v-if="ensureItemForm(item, index).ownerMode === 'gift'" class="form-grid owner-form">
             <!-- Email first: what the recipient already has on file decides which fields below
                  are even shown, so nothing else can be asked until it is known. -->
-            <label class="span">
+            <label class="span owner-email-field">
               <span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span>
-              <input
-                v-model.trim="ensureItemForm(item, index).email"
-                type="email"
-                autocomplete="off"
-                placeholder="recipient@example.com"
-                required
-                @blur="lookupOwner(item, index)"
-              >
+              <span class="owner-email-input">
+                <input
+                  v-model.trim="ensureItemForm(item, index).email"
+                  type="email"
+                  autocomplete="off"
+                  placeholder="recipient@example.com"
+                  required
+                  @blur="lookupOwner(item, index)"
+                >
+                <!-- Inside the field on purpose: a separate line took a grid cell and shunted the
+                     name fields sideways every time a lookup started and finished. -->
+                <span v-if="ensureItemForm(item, index).ownerLookupPending" class="owner-lookup-spinner" aria-hidden="true" />
+              </span>
+              <!-- Announced to screen readers, which get nothing from a spinning border. -->
+              <span class="sr-only" role="status" aria-live="polite">
+                {{ ensureItemForm(item, index).ownerLookupPending ? copy.checkingRecipient : '' }}
+              </span>
             </label>
             <!-- Typed twice on purpose. A mistyped address that happens to belong to a real
                  account would otherwise pass silently as "details on file" and send the pass to a
@@ -411,13 +420,9 @@ function validateAndContinue () {
               <small v-if="giftEmailMismatch(item, index)" class="photo-error" role="alert">{{ copy.emailMismatch }}</small>
             </label>
 
-            <p v-if="ensureItemForm(item, index).ownerLookupPending" class="span owner-lookup">
-              {{ copy.checkingRecipient }}
-            </p>
-
             <!-- Says WHAT is on file, never the values: the buyer needs to know not to type them,
                  not who the account belongs to. -->
-            <p v-else-if="giftOnFile(item, index).length" class="span owner-on-file">
+            <p v-if="giftOnFile(item, index).length" class="span owner-on-file">
               {{ copy.recipientOnFile }}
               <strong>{{ giftOnFile(item, index).map(f => copy[onFileFieldLabel(f)] || f).join(', ') }}</strong>
             </p>
