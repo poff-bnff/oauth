@@ -131,12 +131,13 @@ function setOwnerMode (item, index, mode) {
 // On blur rather than per keystroke: fewer requests, no half-typed addresses reaching the server,
 // and the endpoint is rate-limited per buyer to blunt address enumeration.
 const OWNER_LOOKUP_TIMEOUT_MS = 10000
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
 async function lookupOwner (item, index) {
   const form = ensureItemForm(item, index)
   const email = (form.email || '').trim().toLowerCase()
 
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+  if (!EMAIL_PATTERN.test(email)) {
     form.ownerOnFile = null
     return
   }
@@ -205,6 +206,12 @@ function giftLookupDegraded (item, index) {
 function giftOnFile (item, index) {
   const onFile = ensureItemForm(item, index).ownerOnFile
   return (onFile && onFile.onFile) || []
+}
+
+// Plausible enough to be worth confirming — deliberately the same test the lookup uses, so the
+// confirmation field and the check appear together rather than one before the other.
+function giftEmailLooksValid (item, index) {
+  return EMAIL_PATTERN.test((ensureItemForm(item, index).email || '').trim().toLowerCase())
 }
 
 function giftEmailMismatch (item, index) {
@@ -461,7 +468,7 @@ function validateAndContinue () {
             <!-- Typed twice on purpose. A mistyped address that happens to belong to a real
                  account would otherwise pass silently as "details on file" and send the pass to a
                  stranger — and a pass is personal, so that is not easily undone. -->
-            <label class="span">
+            <label v-if="giftEmailLooksValid(item, index)" class="span">
               <span class="field-label">{{ copy.confirmEmail }} <span class="required-dot">*</span></span>
               <input
                 v-model.trim="ensureItemForm(item, index).emailConfirm"

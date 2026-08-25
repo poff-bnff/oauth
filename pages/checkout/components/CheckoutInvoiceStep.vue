@@ -13,7 +13,10 @@ defineProps({
   organisationProfiles: { type: Array, required: true },
   selectedBillingProfile: { type: Object, default: null },
   saveAsInvoiceProfile: { type: Boolean, required: true },
-  savingInvoiceProfile: { type: Boolean, required: true }
+  savingInvoiceProfile: { type: Boolean, required: true },
+  // The saved-profile list could not be read. Distinct from having none: showing "no saved
+  // profiles" when we simply could not ask makes a customer think theirs was deleted.
+  profilesUnavailable: { type: Boolean, default: false }
 })
 
 defineEmits([
@@ -25,7 +28,8 @@ defineEmits([
   'save-selected',
   'update:saveAsInvoiceProfile',
   'update:invoiceFormType',
-  'back'
+  'back',
+  'retry-profiles'
 ])
 
 function profileTitle (profile) {
@@ -101,6 +105,10 @@ function isOrganisationProfile (profile) {
           </button>
         </div>
         <button class="add-row" type="button" @click="$emit('start-form', 'organisation', 'me')"><span>+</span>{{ copy.addOrganisation }}</button>
+        <p v-if="profilesUnavailable" class="profiles-unavailable">
+          {{ copy.savedProfilesUnavailable }}
+          <button type="button" class="link-button" @click="$emit('retry-profiles')">{{ copy.tryAgain }}</button>
+        </p>
       </div>
 
       <!-- Edit selected profile -->

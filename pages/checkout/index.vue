@@ -100,6 +100,8 @@ const invoiceForm = reactive({
 // ── Derived from context ──────────────────────────────────────────────────────
 const cart = computed(() => context.value?.cart || { items: [], total: 0 })
 const profiles = computed(() => context.value?.businessProfiles || [])
+// True when the list could not be read — distinct from a genuinely empty list.
+const profilesUnavailable = computed(() => context.value?.businessProfilesUnavailable === true)
 const personalProfiles = computed(() => profiles.value.filter(p => !isOrganisationProfile(p)))
 const organisationProfiles = computed(() => profiles.value.filter(p => isOrganisationProfile(p)))
 const paymentMethodGroups = computed(() => {
@@ -607,8 +609,15 @@ function startInvoiceForm (type, target = invoiceFor.value) {
 async function refreshBusinessProfiles () {
   try {
     const profiles = await $fetch('/api/business-profiles', { headers: authHeaders.value })
-    if (context.value) context.value = { ...context.value, businessProfiles: Array.isArray(profiles) ? profiles : [] }
-  } catch { /* keep the existing list on failure */ }
+    // A non-array is a failed read, not an empty account — see getOwnBusinessProfiles.
+    if (!Array.isArray(profiles)) throw new Error('unexpected response')
+    if (context.value) context.value = { ...context.value, businessProfiles: profiles, businessProfilesUnavailable: false }
+  } catch (err) {
+    // Keep whatever list is already on screen, and say the refresh failed rather than letting a
+    // saved profile appear to have been deleted.
+    console.warn('[checkout] business profile refresh failed', err) // eslint-disable-line no-console
+    if (context.value) context.value = { ...context.value, businessProfilesUnavailable: true }
+  }
 }
 
 async function saveInvoiceProfile (options = {}) {
@@ -1098,6 +1107,8 @@ watch(sessionRemainingSeconds, (seconds) => {
               :selected-billing-profile="selectedBillingProfile"
               :save-as-invoice-profile="saveAsInvoiceProfile"
               :saving-invoice-profile="savingInvoiceProfile"
+              :profiles-unavailable="profilesUnavailable"
+              @retry-profiles="refreshBusinessProfiles"
               @select-profile="selectProfile"
               @select-invoice-for="selectInvoiceFor"
               @start-form="startInvoiceForm"

@@ -181,7 +181,8 @@
     "thisItem": "this item",
     "checkoutItemUnavailable": "One or more items are no longer available. Please review your cart and try again.",
     "recipientCheckFailed": "We could not check this recipient just now, so please fill in all the fields below.",
-    "recipientCheckThrottled": "Too many checks in a short time. Wait a moment and re-enter the address, or fill in all the fields below."
+    "recipientCheckThrottled": "Too many checks in a short time. Wait a moment and re-enter the address, or fill in all the fields below.",
+    "savedProfilesUnavailable": "We could not load your saved invoice profiles just now. Any profile you have saved is still there."
   },
   "et": {
     "secureCheckout": "Turvaline ostuvorm",
@@ -365,7 +366,8 @@
     "thisItem": "see toode",
     "checkoutItemUnavailable": "Üks või mitu toodet ei ole enam saadaval. Palun vaata ostukorv üle ja proovi uuesti.",
     "recipientCheckFailed": "Saaja andmeid ei õnnestunud praegu kontrollida, palun täida kõik allolevad väljad.",
-    "recipientCheckThrottled": "Liiga palju kontrolle lühikese aja jooksul. Oota hetk ja sisesta aadress uuesti või täida kõik väljad."
+    "recipientCheckThrottled": "Liiga palju kontrolle lühikese aja jooksul. Oota hetk ja sisesta aadress uuesti või täida kõik väljad.",
+    "savedProfilesUnavailable": "Sinu salvestatud arveprofiile ei õnnestunud praegu laadida. Varem salvestatud profiilid on alles."
   },
   "ru": {
     "secureCheckout": "Безопасное оформление",
@@ -549,6 +551,7 @@
     "checkingRecipient": "Проверяем данные получателя…",
     "recipientOnFile": "Эти данные у получателя уже есть, вводить их не нужно:",
     "recipientCheckFailed": "Сейчас не удалось проверить получателя, пожалуйста, заполните все поля ниже.",
-    "recipientCheckThrottled": "Слишком много проверок за короткое время. Подождите немного и введите адрес снова или заполните все поля."
+    "recipientCheckThrottled": "Слишком много проверок за короткое время. Подождите немного и введите адрес снова или заполните все поля.",
+    "savedProfilesUnavailable": "Сейчас не удалось загрузить ваши сохранённые профили. Ранее сохранённые профили никуда не делись."
   }
 }

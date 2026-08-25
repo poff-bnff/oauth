@@ -2540,14 +2540,36 @@ export async function reactivateStrandedCheckoutCart(userId) {
   }).catch(() => null)
 }
 
+// Returns the user's saved invoice profiles, or null when they could not be read.
+//
+// null and [] mean different things and must not be conflated: [] is "you have never saved one",
+// null is "we could not ask". Rendering the second as the first is how a customer's company
+// profile appeared to vanish mid-checkout — it was there the whole time, and came back on its own
+// once Strapi was less busy.
 async function getOwnBusinessProfiles(userId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_where[user]', userId)
   params.append('_where[saved_for_reuse_ne]', false)
-  return await $fetch(`${config.strapiUrl}/business-profiles?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
+  const url = `${config.strapiUrl}/business-profiles?${params.toString()}`
+
+  // One retry, because the failure we saw was transient and load-related. Anything worse than a
+  // blip should surface to the user rather than be papered over with more retries.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const profiles = await $fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (Array.isArray(profiles)) return profiles
+      // Strapi can answer 200 with an error body; treating that as "no profiles" is the bug.
+      throw new Error(`expected an array, got ${typeof profiles}`)
+    } catch (err) {
+      if (attempt === 0) {
+        await new Promise(resolve => setTimeout(resolve, 400))
+        continue
+      }
+      console.warn(`[checkout] business profiles unreadable for user ${userId}:`, err?.message)
+      return null
+    }
+  }
 }
 
 export async function getCheckoutContext(userId, locale = 'et') {
@@ -2569,7 +2591,10 @@ export async function getCheckoutContext(userId, locale = 'et') {
     user,
     profile: user?.user_profile || null,
     cart,
-    businessProfiles,
+    // The list stays an array for every consumer; the flag carries the distinction so the UI can
+    // say "could not load" instead of presenting an empty list as fact.
+    businessProfiles: Array.isArray(businessProfiles) ? businessProfiles : [],
+    businessProfilesUnavailable: businessProfiles === null,
     paymentMethods
   }
 }
