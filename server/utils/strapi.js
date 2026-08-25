@@ -1372,16 +1372,50 @@ export async function validateCheckoutOwner(userId, categoryId, owner = {}) {
   return { ok: true, mode: result.mode, existing: result.existing === true }
 }
 
+// Local part masked: enough to tell two recipients apart in a log without writing customer
+// addresses into it in full.
+function maskEmail (value) {
+  const [local, domain] = String(value || '').split('@')
+  if (!domain) return '(none)'
+  return `${local.slice(0, 1)}***@${domain}`
+}
+
 async function resolveCheckoutOwner(userId, productCategory, owner = {}, options = {}) {
+  // Traces every decision on the gift path, so one reproduction explains itself in the runtime log
+  // instead of needing a devtools session. Deliberately unconditional: this path has now produced
+  // two hard-to-see failures, and the cost is a couple of lines per gifted item.
+  const trace = (step, detail) => {
+    // eslint-disable-next-line no-console
+    console.log('[checkout] owner:', JSON.stringify({ step, dryRun: !!options.dryRun, ...detail }))
+  }
+
   const mode = owner.mode === 'gift' ? 'gift' : 'me'
   if (mode === 'me') return { userId, mode: 'me', sendEmail: false }
 
-  if (productCategory?.transferable !== true) return { error: 'invalidOwner' }
+  if (productCategory?.transferable !== true) {
+    trace('rejected', { why: 'categoryNotTransferable', categoryId: productCategory?.id })
+    return { error: 'invalidOwner' }
+  }
 
   const email = normalizeCheckoutEmail(owner.email)
   const firstName = String(owner.firstName || '').trim()
   const lastName = String(owner.lastName || '').trim()
-  if (!firstName || !lastName || !validCheckoutEmail(email)) return { error: 'invalidOwner' }
+
+  // Only the email is required unconditionally. The name is NOT checked here: since the checkout
+  // began asking only for what a recipient is missing, a buyer gifting to someone who already has
+  // a name on file legitimately sends none — and checking it up here rejected them with
+  // 'invalidOwner' before the code ever looked at who the recipient was.
+  if (!validCheckoutEmail(email)) {
+    trace('rejected', { why: 'invalidEmail', email: maskEmail(email) })
+    return { error: 'invalidOwner' }
+  }
+
+  trace('start', {
+    email: maskEmail(email),
+    gaveFirstName: !!firstName,
+    gaveLastName: !!lastName,
+    gavePhoto: !!(owner.hasPhoto || owner.photo?.data)
+  })
 
   const token = await getStrapiAdminToken()
   const existingUsers = await $fetch(`${config.strapiUrl}/users?email=${encodeURIComponent(email)}`, {
@@ -1394,7 +1428,10 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
     const profile = user.user_profile || null
     const missing = missingOwnerProfileFields(profile || {})
 
+    trace('existingUser', { userId: user.id, hasProfile: !!profile, missing })
+
     if (!missing.length) {
+      trace('accepted', { why: 'profileAlreadyComplete', userId: user.id })
       return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: true }
     }
 
@@ -1406,8 +1443,23 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
     // ONLY blank fields are filled, never overwritten. A buyer must not be able to change the name
     // or photo on someone else's account from their own checkout; filling a blank one is different,
     // since the pass cannot exist without a photo and the recipient can change it later.
-    if (!profile) return { error: 'ownerProfileIncomplete', missing }
+    if (!profile) {
+      trace('rejected', { why: 'noProfileRow', userId: user.id, missing })
+      return { error: 'ownerProfileIncomplete', missing }
+    }
+
+    // Each field is required only if the recipient does not already have it — mirroring what the
+    // form asked the buyer for.
+    if (missing.includes('firstName') && !firstName) {
+      trace('rejected', { why: 'firstNameNeededButNotGiven', userId: user.id })
+      return { error: 'invalidOwner' }
+    }
+    if (missing.includes('lastName') && !lastName) {
+      trace('rejected', { why: 'lastNameNeededButNotGiven', userId: user.id })
+      return { error: 'invalidOwner' }
+    }
     if (missing.includes('picture') && !owner.hasPhoto && !owner.photo?.data) {
+      trace('rejected', { why: 'photoNeededButNotGiven', userId: user.id })
       return { error: 'ownerPhotoRequired' }
     }
     if (options.dryRun) return { mode: 'gift', existing: true }
@@ -1421,11 +1473,21 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
     }
 
     await setStrapiUserProfile(profile.id, updates)
+    trace('accepted', { why: 'filledBlankFields', userId: user.id, filled: Object.keys(updates) })
 
     return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: true }
   }
 
-  if (!owner.hasPhoto && !owner.photo?.data) return { error: 'ownerPhotoRequired' }
+  // No account: nothing is on file, so the buyer must supply all of it.
+  trace('newRecipient', { email: maskEmail(email) })
+  if (!firstName || !lastName) {
+    trace('rejected', { why: 'newRecipientNeedsName' })
+    return { error: 'invalidOwner' }
+  }
+  if (!owner.hasPhoto && !owner.photo?.data) {
+    trace('rejected', { why: 'newRecipientNeedsPhoto' })
+    return { error: 'ownerPhotoRequired' }
+  }
   if (options.dryRun) return { mode: 'gift', existing: false }
 
   const authUser = await authenticateStrapiUser(email)
@@ -1440,6 +1502,7 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
     picture: picture.id
   })
 
+  trace('accepted', { why: 'createdRecipient', userId: user.id })
   return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: false }
 }
 

@@ -46,3 +46,41 @@ describe('completing an existing gift recipient\'s profile', () => {
     expect(ownerProfileFieldsToFill({}, { ...submitted, picture: 99 }).picture).toBeUndefined()
   })
 })
+
+// The bug that reached production on 2026-08-19. The checkout began asking only for what a
+// recipient was missing, so a buyer gifting to someone who already had a name legitimately sent
+// none — and the server still demanded firstName/lastName up front, rejecting them with
+// 'invalidOwner' before it had even looked at who the recipient was.
+//
+// resolveCheckoutOwner talks to Strapi, so the rule is asserted here as the decision table it
+// implements. The point is that a required field must depend on what the recipient is MISSING.
+describe('which fields the server may demand of a gift buyer', () => {
+  const required = (missing, given) => {
+    if (missing.includes('firstName') && !given.firstName) return 'invalidOwner'
+    if (missing.includes('lastName') && !given.lastName) return 'invalidOwner'
+    if (missing.includes('picture') && !given.photo) return 'ownerPhotoRequired'
+    return null
+  }
+
+  test('a recipient with a name on file needs none from the buyer', () => {
+    expect(required(['picture'], { firstName: '', lastName: '', photo: true })).toBeNull()
+  })
+
+  test('a recipient with everything on file needs nothing at all', () => {
+    expect(required([], { firstName: '', lastName: '', photo: null })).toBeNull()
+  })
+
+  test('a recipient missing a name still needs one', () => {
+    expect(required(['firstName', 'lastName'], { firstName: '', lastName: '', photo: true })).toBe('invalidOwner')
+  })
+
+  test('a recipient missing a photo still needs one', () => {
+    expect(required(['picture'], { firstName: 'A', lastName: 'B', photo: null })).toBe('ownerPhotoRequired')
+  })
+
+  test('a brand-new recipient needs all of it', () => {
+    const missing = ['firstName', 'lastName', 'picture']
+    expect(required(missing, { firstName: '', lastName: '', photo: null })).toBe('invalidOwner')
+    expect(required(missing, { firstName: 'A', lastName: 'B', photo: true })).toBeNull()
+  })
+})
