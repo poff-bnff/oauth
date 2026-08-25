@@ -29,7 +29,9 @@ describe('checkout progress compatibility restore', () => {
     const savedForms = { '7255-0': form }
 
     expect(findCompatibleSavedForm(savedForms, ITEM_A, 0)).toEqual(form)
-    expect(matchCheckoutProgressForms(savedForms, [ITEM_A])).toEqual([['component:100', form]])
+    // The third element is the key the form was found under — what a photo saved under the old key
+    // has to be migrated from.
+    expect(matchCheckoutProgressForms(savedForms, [ITEM_A])).toEqual([['component:100', form, '7255-0']])
   })
 
   it('restores a legacy form after an earlier item was removed and the remaining row index shifted', () => {
@@ -42,7 +44,7 @@ describe('checkout progress compatibility restore', () => {
     // ITEM_B is now the first remaining row. The old key was 7256-1; current legacy key would
     // be 7256-0, so productId-only migration is needed.
     expect(matchCheckoutProgressForms(savedFormsBeforeRemoval, [{ ...ITEM_B, index: 0 }]))
-      .toEqual([['component:101', form]])
+      .toEqual([['component:101', form, '7256-1']])
   })
 
   it('does not use productId-only migration when duplicate products would be ambiguous', () => {
@@ -111,5 +113,24 @@ describe('checkout progress snapshot', () => {
       photoName: '',
       photoError: ''
     })
+  })
+})
+
+// A gift photo lives in IndexedDB keyed by item, while the form is matched across item identity
+// changes. Without the key it was saved under, the photo cannot follow the form: the buyer is told
+// to upload again for no reason, and prunePhotosExcept then deletes the orphan for good.
+describe('a restored form reports the key its photo was stored under', () => {
+  it('reports the old key when the item has been re-keyed', () => {
+    const form = { ...emptyCheckoutItemForm(), ownerMode: 'gift' }
+    const [[currentKey, , savedKey]] = matchCheckoutProgressForms({ '7255-0': form }, [ITEM_A])
+    expect(currentKey).toBe('component:100')
+    expect(savedKey).toBe('7255-0')
+    expect(savedKey).not.toBe(currentKey)
+  })
+
+  it('reports the same key when nothing moved, so no migration is attempted', () => {
+    const form = { ...emptyCheckoutItemForm(), ownerMode: 'gift' }
+    const [[currentKey, , savedKey]] = matchCheckoutProgressForms({ 'component:100': form }, [ITEM_A])
+    expect(savedKey).toBe(currentKey)
   })
 })

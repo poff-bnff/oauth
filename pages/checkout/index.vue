@@ -16,9 +16,10 @@ import {
   findCompatibleSavedForm,
   itemKey,
   isCheckoutItemComplete,
-  matchCheckoutProgressForms
+  matchCheckoutProgressForms,
+  giftFieldsStillNeeded
 } from './composables/useCheckoutProgress.js'
-import { getPhoto, deletePhoto, clearAllPhotos, prunePhotosExcept } from './composables/useCheckoutPhotoStore.js'
+import { getPhoto, savePhoto, deletePhoto, clearAllPhotos, prunePhotosExcept } from './composables/useCheckoutPhotoStore.js'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const route = useRoute()
@@ -280,12 +281,13 @@ async function restoreCheckoutProgress (signature) {
       return
     }
 
-    for (const [k, f] of matchedForms) {
+    for (const [k, f, savedKey] of matchedForms) {
       itemForms[k] = {
         pickupLocationId: '', ownerMode: '', firstName: '', lastName: '', email: '',
         sendEmail: true, ...f, photo: null, photoName: '', photoError: ''
       }
-      if (f.ownerMode === 'gift') giftKeys.push(k)
+      // savedKey is kept so the photo can follow the form when the item changed identity.
+      if (f.ownerMode === 'gift') giftKeys.push({ key: k, savedKey })
     }
     Object.assign(invoiceForm, saved.invoiceForm || {})
     if (saved.selectedBillingProfileId != null) selectedBillingProfileId.value = saved.selectedBillingProfileId
@@ -296,19 +298,37 @@ async function restoreCheckoutProgress (signature) {
     if (saved.openItemKey && currentKeys.has(saved.openItemKey)) openItemKey.value = saved.openItemKey
     savedStep = Number(saved.step) || step.value
     step.value = Math.min(savedStep, maxStep.value)
-    restoredWithoutPhoto.value = giftKeys.length > 0
+    // Set once the photos have been looked for — announcing a lost photo before checking, and for
+    // recipients who never needed one, is how this cried wolf.
+    restoredWithoutPhoto.value = false
   } catch { /* corrupt — ignore */ }
 
   try {
     if (giftKeys.length) {
-      await Promise.all(giftKeys.map(async (k) => {
-        const stored = await getPhoto(k)
-        if (stored?.data && itemForms[k]) {
-          itemForms[k].photo = { name: stored.name || '', data: stored.data }
-          itemForms[k].photoName = stored.name || ''
+      await Promise.all(giftKeys.map(async ({ key, savedKey }) => {
+        let stored = await getPhoto(key)
+        // A cart item can come back with a new identity — a component id changes when the cart is
+        // re-saved or recovered. The form follows it, via findCompatibleSavedFormEntry; the photo
+        // has to follow too, or the buyer is told to upload again for no reason and the orphaned
+        // photo is then pruned, losing it for good.
+        if (!stored?.data && savedKey && savedKey !== key) {
+          stored = await getPhoto(savedKey)
+          if (stored?.data) {
+            await savePhoto(key, stored)
+            await deletePhoto(savedKey)
+          }
+        }
+        if (stored?.data && itemForms[key]) {
+          itemForms[key].photo = { name: stored.name || '', data: stored.data }
+          itemForms[key].photoName = stored.name || ''
         }
       }))
-      restoredWithoutPhoto.value = giftKeys.some(k => itemForms[k] && !itemForms[k].photo)
+      // Only a photo this item still needs counts as lost. A recipient whose account already has
+      // one is never asked for a photo, so its absence is not a missing upload.
+      restoredWithoutPhoto.value = giftKeys.some(({ key }) => {
+        const form = itemForms[key]
+        return form && !form.photo && giftFieldsStillNeeded(form).includes('picture')
+      })
       if (savedStep != null) step.value = Math.min(savedStep, maxStep.value)
     }
     if (currentKeys) prunePhotosExcept([...currentKeys])

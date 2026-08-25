@@ -92,13 +92,16 @@ export function isCheckoutProfileComplete (form = {}, hasPicture = false) {
   )
 }
 
-export function findCompatibleSavedForm (source, item, index = 0) {
+// Returns { key, form }: the form AND the key it was stored under, which are not always the same.
+// Callers that hold anything else keyed by item — the gift photos in IndexedDB — need the old key
+// to follow the form across an item identity change.
+export function findCompatibleSavedFormEntry (source, item, index = 0) {
   if (!source || !item) return null
   const key = itemKey(item, index)
-  if (source[key]) return source[key]
+  if (source[key]) return { key, form: source[key] }
 
   const previousKey = legacyItemKey(item, index)
-  if (source[previousKey]) return source[previousKey]
+  if (source[previousKey]) return { key: previousKey, form: source[previousKey] }
 
   // Migration for progress saved before componentId keys existed. If an earlier item was
   // removed, the remaining item's old productId-index key no longer matches its current index.
@@ -106,7 +109,11 @@ export function findCompatibleSavedForm (source, item, index = 0) {
   // each other's owner/pickup data.
   const productPrefix = `${item.productId}-`
   const productMatches = Object.entries(source).filter(([savedKey]) => savedKey.startsWith(productPrefix))
-  return productMatches.length === 1 ? productMatches[0][1] : null
+  return productMatches.length === 1 ? { key: productMatches[0][0], form: productMatches[0][1] } : null
+}
+
+export function findCompatibleSavedForm (source, item, index = 0) {
+  return findCompatibleSavedFormEntry(source, item, index)?.form || null
 }
 
 export function serializableCheckoutItemForm (form = {}) {
@@ -157,12 +164,14 @@ export function buildCheckoutProgressSnapshot ({
   }
 }
 
+// Each entry is [currentKey, form, savedKey]. savedKey differs from currentKey whenever the item
+// changed identity, and anything else stored under the old key has to be migrated, not dropped.
 export function matchCheckoutProgressForms (savedForms = {}, currentItems = []) {
   const matchedForms = []
   for (const [index, item] of currentItems.entries()) {
     const key = itemKey(item, index)
-    const form = findCompatibleSavedForm(savedForms, item, index)
-    if (form) matchedForms.push([key, form])
+    const entry = findCompatibleSavedFormEntry(savedForms, item, index)
+    if (entry) matchedForms.push([key, entry.form, entry.key])
   }
   return matchedForms
 }

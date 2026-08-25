@@ -216,3 +216,17 @@ describe('recipient lookup indicator does not reflow the gift form', () => {
     expect(checkoutItemStepSource).toMatch(/AbortController[\s\S]{0,300}signal: abort\.signal/)
   })
 })
+
+describe('a restored gift photo follows its item, and is only reported lost when needed', () => {
+  test('the photo is looked for under the key it was saved under', () => {
+    expect(indexSource).toMatch(/savedKey !== key[\s\S]{0,200}getPhoto\(savedKey\)/)
+    expect(indexSource).toMatch(/savePhoto\(key, stored\)[\s\S]{0,80}deletePhoto\(savedKey\)/)
+  })
+
+  // It used to announce a lost photo for every gift item, before looking, including recipients
+  // whose account already has one and who are never asked for a photo at all.
+  test('the lost-photo notice depends on the item still needing a photo', () => {
+    expect(indexSource).toMatch(/giftFieldsStillNeeded\(form\)\.includes\('picture'\)/)
+    expect(indexSource).not.toMatch(/restoredWithoutPhoto\.value = giftKeys\.length > 0/)
+  })
+})
