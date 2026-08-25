@@ -169,7 +169,7 @@
     "checkoutInvalidOwner": "Please check the recipient details for %ITEM%.",
     "confirmEmail": "Confirm email",
     "emailMismatch": "The two email addresses do not match.",
-    "checkingRecipient": "Checking…",
+    "checkingRecipient": "Checking the recipient's details…",
     "recipientOnFile": "We already have this on file for the recipient, so you do not need to enter it:",
     "checkoutNoDeliveryLocation": "Please choose a pickup location for %ITEM%.",
     "checkoutInvalidDeliveryLocation": "That pickup location is not available for %ITEM%. Please choose another.",
@@ -351,7 +351,7 @@
     "checkoutInvalidOwner": "Palun kontrolli toote %ITEM% saaja andmeid.",
     "confirmEmail": "Kinnita e-posti aadress",
     "emailMismatch": "E-posti aadressid ei kattu.",
-    "checkingRecipient": "Kontrollin…",
+    "checkingRecipient": "Kontrollin saaja andmeid…",
     "recipientOnFile": "Need andmed on saaja kohta juba olemas, sul ei ole vaja neid sisestada:",
     "checkoutNoDeliveryLocation": "Palun vali tootele %ITEM% kättesaamise koht.",
     "checkoutInvalidDeliveryLocation": "See kättesaamise koht ei ole tootele %ITEM% saadaval. Palun vali teine.",
@@ -542,7 +542,7 @@
     "checkoutItemUnavailable": "Один или несколько товаров больше недоступны. Проверьте корзину и попробуйте снова.",
     "confirmEmail": "Подтвердите email",
     "emailMismatch": "Адреса email не совпадают.",
-    "checkingRecipient": "Проверяем…",
+    "checkingRecipient": "Проверяем данные получателя…",
     "recipientOnFile": "Эти данные у получателя уже есть, вводить их не нужно:"
   }
 }

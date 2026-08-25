@@ -30,8 +30,25 @@ export function emptyCheckoutItemForm () {
     // What the recipient's account already holds, from /api/checkout/owner/lookup. FIELD NAMES
     // ONLY — a buyer has no business seeing someone else's name or photo, only knowing not to
     // type them.
-    ownerOnFile: null
+    ownerOnFile: null,
+    // Which address the in-flight lookup is for, so a duplicate blur cannot start a second one
+    // and a superseded response cannot overwrite a newer answer.
+    ownerLookupFor: '',
+    ownerLookupPending: false
   }
+}
+
+// Whether a lookup for `email` should actually be sent.
+//
+// Extracted from the component because this is where the bug lived: Safari fires blur more than
+// once (moving to the next field, autofill, window blur), and without the in-flight check two
+// requests raced — the first cleared the pending flag while the second was still running, leaving
+// a spinner turning next to an answer that had already arrived.
+export function shouldLookupOwner (form, email) {
+  if (!email) return false
+  if (form.ownerOnFile && form.ownerOnFile.email === email) return false // already answered
+  if (form.ownerLookupPending && form.ownerLookupFor === email) return false // already asking
+  return true
 }
 
 // Fields the buyer must still supply. Everything when nothing is known about the recipient, which

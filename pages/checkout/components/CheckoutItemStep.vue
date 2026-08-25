@@ -4,7 +4,7 @@
   this component mutates them directly (same reactive instance as the parent).
 -->
 <script setup>
-import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete, giftFieldsStillNeeded } from '../composables/useCheckoutProgress.js'
+import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete, giftFieldsStillNeeded, shouldLookupOwner } from '../composables/useCheckoutProgress.js'
 import { savePhoto, deletePhoto } from '../composables/useCheckoutPhotoStore.js'
 import {
   DEFAULT_PHOTO_RULES,
@@ -130,6 +130,8 @@ function setOwnerMode (item, index, mode) {
 //
 // On blur rather than per keystroke: fewer requests, no half-typed addresses reaching the server,
 // and the endpoint is rate-limited per buyer to blunt address enumeration.
+const OWNER_LOOKUP_TIMEOUT_MS = 10000
+
 async function lookupOwner (item, index) {
   const form = ensureItemForm(item, index)
   const email = (form.email || '').trim().toLowerCase()
@@ -138,25 +140,39 @@ async function lookupOwner (item, index) {
     form.ownerOnFile = null
     return
   }
-  // Already answered for this address.
-  if (form.ownerOnFile && form.ownerOnFile.email === email) return
+  if (!shouldLookupOwner(form, email)) return
 
   form.ownerLookupPending = true
+  form.ownerLookupFor = email
+
+  // Strapi answering slowly must not leave the buyer watching a spinner with no way out: on
+  // timeout the form falls back to asking for every field, which the server re-validates anyway.
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), OWNER_LOOKUP_TIMEOUT_MS)
+
   try {
     const result = await $fetch('/api/checkout/owner/lookup', {
       method: 'POST',
       headers: { ...props.authHeaders, 'Content-Type': 'application/json' },
-      body: { email }
+      body: { email },
+      signal: abort.signal
     })
+    // A newer address was entered while this was in flight — that answer wins.
+    if (form.ownerLookupFor !== email) return
     form.ownerOnFile = { email, ...result }
   } catch (err) {
-    // A failed or throttled lookup must not block the sale: fall back to asking for everything,
-    // which is exactly how the form behaved before this existed.
+    // A failed, timed-out or throttled lookup must not block the sale: fall back to asking for
+    // everything, which is exactly how the form behaved before this existed.
     console.warn('[checkout] owner lookup failed', err) // eslint-disable-line no-console
-    form.ownerOnFile = null
+    if (form.ownerLookupFor === email) form.ownerOnFile = null
   } finally {
-    form.ownerLookupPending = false
-    emit('progress')
+    clearTimeout(timer)
+    // Only the newest lookup owns the spinner; a superseded one must not switch it off.
+    if (form.ownerLookupFor === email) {
+      form.ownerLookupPending = false
+      form.ownerLookupFor = ''
+      emit('progress')
+    }
   }
 }
 
@@ -339,10 +355,33 @@ function validateAndContinue () {
           :disabled="removingComponentIds.has(item.componentId) || removingComponentIds.size > 0"
           @click="emit('remove', { item, index })"
         >
-          <svg v-if="removingComponentIds.has(item.componentId)" class="item-remove-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg
+            v-if="removingComponentIds.has(item.componentId)"
+            class="item-remove-spinner"
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
             <circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10" />
           </svg>
-          <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg
+            v-else
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
             <path d="M10 11v6" />
@@ -401,11 +440,21 @@ function validateAndContinue () {
                      name fields sideways every time a lookup started and finished. -->
                 <span v-if="ensureItemForm(item, index).ownerLookupPending" class="owner-lookup-spinner" aria-hidden="true" />
               </span>
-              <!-- Announced to screen readers, which get nothing from a spinning border. -->
-              <span class="sr-only" role="status" aria-live="polite">
-                {{ ensureItemForm(item, index).ownerLookupPending ? copy.checkingRecipient : '' }}
-              </span>
             </label>
+
+            <!-- One status slot for both states, with its height reserved in CSS. Text can appear
+                 and change without moving the fields below, which is what the old bare paragraph
+                 did on every lookup — and unlike a bare spinner it says what is happening, which
+                 matters when Strapi takes several seconds to answer. -->
+            <p class="span owner-status" role="status" aria-live="polite">
+              <template v-if="ensureItemForm(item, index).ownerLookupPending">
+                <span class="owner-status-spinner" aria-hidden="true" />{{ copy.checkingRecipient }}
+              </template>
+              <template v-else-if="giftOnFile(item, index).length">
+                {{ copy.recipientOnFile }}
+                <strong>{{ giftOnFile(item, index).map(f => copy[onFileFieldLabel(f)] || f).join(', ') }}</strong>
+              </template>
+            </p>
             <!-- Typed twice on purpose. A mistyped address that happens to belong to a real
                  account would otherwise pass silently as "details on file" and send the pass to a
                  stranger — and a pass is personal, so that is not easily undone. -->
@@ -419,13 +468,6 @@ function validateAndContinue () {
               >
               <small v-if="giftEmailMismatch(item, index)" class="photo-error" role="alert">{{ copy.emailMismatch }}</small>
             </label>
-
-            <!-- Says WHAT is on file, never the values: the buyer needs to know not to type them,
-                 not who the account belongs to. -->
-            <p v-if="giftOnFile(item, index).length" class="span owner-on-file">
-              {{ copy.recipientOnFile }}
-              <strong>{{ giftOnFile(item, index).map(f => copy[onFileFieldLabel(f)] || f).join(', ') }}</strong>
-            </p>
 
             <label v-if="giftNeeds(item, index, 'firstName')"><span class="field-label">{{ copy.firstName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).firstName" autocomplete="off" required></label>
             <label v-if="giftNeeds(item, index, 'lastName')"><span class="field-label">{{ copy.lastName }} <span class="required-dot">*</span></span><input v-model.trim="ensureItemForm(item, index).lastName" autocomplete="off" required></label>

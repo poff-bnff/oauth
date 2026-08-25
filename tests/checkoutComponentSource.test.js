@@ -181,7 +181,23 @@ describe('recipient lookup indicator does not reflow the gift form', () => {
     expect(checkoutCss).toMatch(/\.owner-lookup-spinner\s*\{[^}]*position:\s*absolute/)
   })
 
-  test('the pending state is still announced to screen readers', () => {
-    expect(checkoutItemStepSource).toMatch(/aria-live="polite"[\s\S]{0,200}copy\.checkingRecipient/)
+  // Both states share one slot whose height is reserved, so switching between them cannot move
+  // the fields below.
+  test('the status slot reserves its height', () => {
+    expect(checkoutCss).toMatch(/\.owner-status\s*\{[^}]*min-height/)
+  })
+
+  test('a stale on-file message cannot show beside a running check', () => {
+    expect(checkoutItemStepSource).toMatch(/ownerLookupPending[\s\S]{0,300}v-else-if="giftOnFile/)
+  })
+
+  test('the pending state is announced to screen readers', () => {
+    expect(checkoutItemStepSource).toMatch(/aria-live="polite"[\s\S]{0,300}copy\.checkingRecipient/)
+  })
+
+  // A hung Strapi must not leave a spinner turning with no way out.
+  test('the lookup is bounded by a timeout that falls back to asking for everything', () => {
+    expect(checkoutItemStepSource).toContain('OWNER_LOOKUP_TIMEOUT_MS')
+    expect(checkoutItemStepSource).toMatch(/AbortController[\s\S]{0,300}signal: abort\.signal/)
   })
 })

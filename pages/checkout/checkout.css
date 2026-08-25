@@ -1656,30 +1656,44 @@ button.back-button:focus-visible,
   text-decoration: none;
 }
 
-/* Recipient lookup — the pending indicator sits inside the email field rather than on a line of
-   its own, because a separate line took a grid cell and shunted the name fields on every lookup. */
+/* Recipient lookup. The status text lives in a slot whose height is reserved, so it can appear,
+   change and clear without moving the name fields below it — a plain paragraph shifted them twice
+   on every email blur. The in-field spinner marks WHICH field is being checked. */
 .owner-email-input { position: relative; display: block; }
-.owner-email-input input { width: 100%; padding-right: 34px; }
+.owner-email-input input { width: 100%; padding-right: 38px; }
 .owner-lookup-spinner {
   position: absolute;
-  right: 11px;
+  right: 12px;
   top: 50%;
-  width: 14px;
-  height: 14px;
-  margin-top: -7px;
-  border: 2px solid rgba(0,0,0,.16);
-  border-top-color: rgba(0,0,0,.5);
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border: 2px solid rgba(245,166,35,.28);
+  border-top-color: #f5a623;
   border-radius: 50%;
-  animation: cart-spin .8s linear infinite;
+  animation: cart-spin .7s linear infinite;
   pointer-events: none;
 }
-.owner-on-file {
+.owner-status {
+  /* Two lines of the on-file message: the tallest state this slot has to hold. */
+  min-height: 38px;
   margin: 0;
   font-size: 13px;
   line-height: 1.45;
   color: rgba(0,0,0,.6);
 }
-.owner-on-file strong { color: rgba(0,0,0,.78); font-weight: 600; }
+.owner-status strong { color: rgba(0,0,0,.78); font-weight: 600; }
+.owner-status-spinner {
+  display: inline-block;
+  vertical-align: -2px;
+  width: 12px;
+  height: 12px;
+  margin-right: 7px;
+  border: 2px solid rgba(245,166,35,.28);
+  border-top-color: #f5a623;
+  border-radius: 50%;
+  animation: cart-spin .7s linear infinite;
+}
 @media (prefers-reduced-motion: reduce) {
-  .owner-lookup-spinner { animation-duration: 2.4s; }
+  .owner-lookup-spinner, .owner-status-spinner { animation-duration: 2.4s; }
 }
