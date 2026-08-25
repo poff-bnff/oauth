@@ -199,6 +199,13 @@ function onFileFieldLabel (field) {
 
 // True when the answer is a fallback rather than a real one: the endpoint reports failures as
 // "new user, ask for everything", which is safe but must not be shown as fact.
+// Whether the slot has anything to show. Nothing to say for a recipient with no account yet, and
+// an empty reserved band above the name fields reads as a broken layout.
+function giftHasStatus (item, index) {
+  const form = ensureItemForm(item, index)
+  return Boolean(form.ownerLookupPending || form.ownerOnFile?.degraded || giftOnFile(item, index).length)
+}
+
 function giftLookupDegraded (item, index) {
   return Boolean(ensureItemForm(item, index).ownerOnFile?.degraded)
 }
@@ -479,12 +486,15 @@ function validateAndContinue () {
               <small v-if="giftEmailMismatch(item, index)" class="photo-error" role="alert">{{ copy.emailMismatch }}</small>
             </label>
 
-            <!-- One status slot for every outcome, with its height reserved once an address is
-                 present, so text can appear and change without moving the fields below — the
-                 reflow this all started from. Placed under the address pair because everything it
-                 says is about the recipient those fields identify. -->
+            <!-- One status slot for every outcome, placed under the address pair because everything
+                 it says is about the recipient those fields identify.
+                 Present only when it has something to say, but keeping a fixed height while it is:
+                 the spinner and the longer on-file message must not shove the fields between
+                 themselves. The remaining move — when the answer arrives and this collapses — lands
+                 on the same tick as the name and photo fields appearing or disappearing, so it adds
+                 no jump that is not already happening. -->
             <p
-              v-if="ensureItemForm(item, index).email"
+              v-if="giftHasStatus(item, index)"
               class="owner-status"
               :class="{ 'owner-status-warn': giftLookupDegraded(item, index) }"
               role="status"

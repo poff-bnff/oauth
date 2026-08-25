@@ -202,8 +202,11 @@ describe('recipient lookup indicator does not reflow the gift form', () => {
     expect(copyDefaults.et.recipientCheckThrottled).toBeTruthy()
   })
 
-  test('the status slot is only reserved once an address is present', () => {
-    expect(checkoutItemStepSource).toMatch(/v-if="ensureItemForm\(item, index\)\.email"[\s\S]{0,120}owner-status/)
+  // An empty band above the name fields read as a broken layout, so the slot is present only when
+  // it has something to say — while keeping a fixed height whenever it is.
+  test('the status slot collapses when there is no message', () => {
+    expect(checkoutItemStepSource).toMatch(/v-if="giftHasStatus\(item, index\)"[\s\S]{0,160}owner-status/)
+    expect(checkoutItemStepSource).toMatch(/ownerLookupPending \|\| form\.ownerOnFile\?\.degraded \|\| giftOnFile/)
   })
 
   test('the pending state is announced to screen readers', () => {
