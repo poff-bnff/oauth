@@ -1674,6 +1674,9 @@ button.back-button:focus-visible,
   animation: cart-spin .7s linear infinite;
   pointer-events: none;
 }
+/* The grid's span helper is `label.span` — it does not match a <p>, so this needs its own rule.
+   Without it the status sat in one column and shoved the name fields out of line. */
+.checkout-page .owner-status { grid-column: 1 / -1; }
 .owner-status {
   /* Two lines of the on-file message: the tallest state this slot has to hold. Reserved only
      while an address is present, so an empty gift form has no stray blank line in it. */

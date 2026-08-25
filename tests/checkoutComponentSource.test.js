@@ -230,3 +230,10 @@ describe('a restored gift photo follows its item, and is only reported lost when
     expect(indexSource).not.toMatch(/restoredWithoutPhoto\.value = giftKeys\.length > 0/)
   })
 })
+
+// `.checkout-page label.span` matches labels only. The status line is a <p>, so it needs its own
+// full-width rule — without it, it takes a single grid cell and displaces the name fields.
+test('the status line spans the form grid', () => {
+  const checkoutCss = read('../pages/checkout/checkout.css')
+  expect(checkoutCss).toMatch(/\.checkout-page \.owner-status\s*\{[^}]*grid-column:\s*1 \/ -1/)
+})

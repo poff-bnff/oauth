@@ -485,7 +485,7 @@ function validateAndContinue () {
                  says is about the recipient those fields identify. -->
             <p
               v-if="ensureItemForm(item, index).email"
-              class="span owner-status"
+              class="owner-status"
               :class="{ 'owner-status-warn': giftLookupDegraded(item, index) }"
               role="status"
               aria-live="polite"
