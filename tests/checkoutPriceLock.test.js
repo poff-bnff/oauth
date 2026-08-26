@@ -24,3 +24,35 @@ describe('the basket price is a lock, not a snapshot to be refreshed', () => {
     expect(strapiSource).toMatch(/row\.priceInCart \|\| getCheckoutProductCurrentPrice\(category\)/)
   })
 })
+
+// hall and town are relations; with one level of population they arrive as bare ids. Rendering
+// them put raw numbers into the pickup names a buyer chooses between ("Fotografiska, 22").
+describe('pickup location names contain no relation ids', () => {
+  test('non-string values are dropped rather than rendered', () => {
+    expect(strapiSource).toMatch(/if \(typeof value !== 'string'\) return ''/)
+  })
+
+  test('the non-existent city field is no longer read', () => {
+    expect(strapiSource).not.toMatch(/checkoutLocalizedText\(location\.city, locale\)/)
+    expect(strapiSource).toMatch(/checkoutLocalizedText\(location\.town, locale\)/)
+  })
+})
+
+// Paying moves the cart to checkout_started; the Maksekeskus callback converts it moments later.
+// In that window the buyer is usually back on the site, and the stranded-cart recovery treated
+// their completed purchase as an abandoned basket and restored it.
+describe('a just-paid cart is not resurrected as a stranded one', () => {
+  test('recovery checks whether the products have been sold', () => {
+    expect(strapiSource).toMatch(/if \(await checkoutCartAlreadySold\(stranded\)\) return null/)
+  })
+
+  test('an unreadable check refuses to reactivate rather than guessing', () => {
+    const fn = strapiSource.slice(strapiSource.indexOf('async function checkoutCartAlreadySold'))
+    expect(fn).toMatch(/if \(!Array\.isArray\(products\)\) return true/)
+    expect(fn.slice(0, fn.indexOf('export async function'))).toMatch(/catch[\s\S]*?return true/)
+  })
+
+  test('a sold product is one with an owner or a transaction', () => {
+    expect(strapiSource).toMatch(/product\?\.owner \|\| \(Array\.isArray\(product\?\.transactions\)/)
+  })
+})

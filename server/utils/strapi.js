@@ -2090,6 +2090,9 @@ function checkoutCategoryTitle(category, locale = 'et') {
 function checkoutLocalizedText(value, locale = 'et') {
   if (!value) return ''
   if (typeof value === 'object') return value[locale] || value.et || value.en || value.ru || ''
+  // A number here is an unpopulated relation id, not a label. Returning it put raw ids into the
+  // pickup-location names shown at checkout ("Fotografiska, 22").
+  if (typeof value !== 'string') return ''
   return value
 }
 
@@ -2121,8 +2124,12 @@ function checkoutCategoryImageUrl(category, locale = 'et') {
 function normalizeCheckoutLocation(location, locale = 'et') {
   if (!location) return null
   const name = checkoutLocalizedText(location.name, locale) || location.name_et || location.name_en || ''
+  // hall and town are relations on the location, and product-categories are fetched with one level
+  // of population, so they arrive as bare ids and contribute nothing readable. They are kept here
+  // for the case where a populated object does arrive; checkoutLocalizedText drops the ids.
+  // ('city' does not exist on the model at all — the field is 'town'.)
   const hall = checkoutLocalizedText(location.hall, locale)
-  const city = checkoutLocalizedText(location.city, locale)
+  const city = checkoutLocalizedText(location.town, locale)
   return {
     id: location.id,
     name: [name, hall, city].filter(Boolean).join(', '),
@@ -2527,10 +2534,43 @@ export async function touchCheckoutCartSession(owner, locale = 'et') {
   return await serializeCheckoutCart(updated, locale || cart.locale || 'et')
 }
 
+// Whether this cart's products have already been sold — which means the cart was paid for, not
+// abandoned. Returns true when it cannot tell: failing to recover a stranded cart is a small
+// inconvenience, putting a completed purchase back in someone's basket is not.
+async function checkoutCartAlreadySold(cart) {
+  const ids = (cart.cartProducts || [])
+    .map(row => (row.product && typeof row.product === 'object') ? row.product.id : row.product)
+    .filter(id => id != null)
+  if (!ids.length) return false
+
+  try {
+    const token = await getStrapiAdminToken()
+    const params = new URLSearchParams()
+    ids.forEach(id => params.append('id_in', id))
+    params.append('_limit', String(ids.length))
+    const products = await $fetch(`${config.strapiUrl}/products?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!Array.isArray(products)) return true
+    return products.some(product => product?.owner || (Array.isArray(product?.transactions) && product.transactions.length))
+  } catch (err) {
+    console.warn('[checkout] could not check whether a stranded cart was already sold:', err?.message) // eslint-disable-line no-console
+    return true
+  }
+}
+
 export async function reactivateStrandedCheckoutCart(userId) {
   if (!userId) return null
   const stranded = await getCurrentCheckoutCart({ userId }, { status: 'checkout_started' })
   if (!stranded || !(stranded.cartProducts || []).length) return null
+
+  // A cart that has just been paid for sits in checkout_started until the Maksekeskus callback
+  // converts it — server-to-server, and the buyer is usually back on the site first. Reactivating
+  // it during that window put the completed purchase back in their basket and left checkout unable
+  // to load, since those products are now sold. It cleared itself once the callback landed, which
+  // is why it looked like a 30-60 second caching problem.
+  if (await checkoutCartAlreadySold(stranded)) return null
+
   const token = await getStrapiAdminToken()
   const activeStatus = await getCartStatus('active')
   return await $fetch(`${config.strapiUrl}/carts/${stranded.id}`, {
