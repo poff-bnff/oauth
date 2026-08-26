@@ -3254,7 +3254,10 @@ async function claimGuestLine(item, userId) {
   const productId = item.product?.id || item.product
   if (!productId) return null
   const category = await resolveCartLineCategory(item)
-  const price = (category && getCheckoutProductCurrentPrice(category)) ?? item.priceInCart
+  // The price the guest added at wins: adding to the basket locks what they are entitled to pay,
+  // and logging in is not a repricing event. Current price is only a fallback for a line that
+  // never recorded one. Same precedence as serializeCheckoutCart.
+  const price = item.priceInCart ?? (category && getCheckoutProductCurrentPrice(category))
   // Claim the guest's OWN product by id — after the transfer it's reserved to this user ("mine"), so it
   // succeeds and the guest keeps that exact product; if it was taken before login the claim fails → drop.
   const claimed = await claimCheckoutProducts({ productIds: [productId], userId, price })
@@ -3330,7 +3333,8 @@ export async function claimGuestCart(userId, cartToken) {
       if (totalCount >= CART_LIMITS.maxItemsPerCart) { droppedItems.push({ productId: pid, reason: 'cartFull' }); continue }
       const limit = catLimit.get(category.id)
       if (limit != null && (runningCat.get(category.id) || 0) >= limit) { droppedItems.push({ productId: pid, reason: 'cartLimit' }); continue }
-      const price = getCheckoutProductCurrentPrice(category) ?? item.priceInCart
+      // As above: a guest keeps the price they added at when their cart is merged on login.
+      const price = item.priceInCart ?? getCheckoutProductCurrentPrice(category)
       const claimed = await claimCheckoutProducts({ productIds: [pid], userId, price }) // keep the guest's own product (transferred above)
       if (!claimed.length) { droppedItems.push({ productId: pid, reason: 'soldOut' }); continue }
       addedRows.push({ product: claimed[0].id, priceInCart: price, timeToCart: now })
