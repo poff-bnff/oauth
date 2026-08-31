@@ -56,3 +56,26 @@ describe('a just-paid cart is not resurrected as a stranded one', () => {
     expect(strapiSource).toMatch(/product\?\.owner \|\| \(Array\.isArray\(product\?\.transactions\)/)
   })
 })
+
+// Every cart and order in production was stamped "Kinoff": the lookup used url_contains, and
+// "poff.ee" is a substring of kinoff.poff.ee, industry.poff.ee, shorts.poff.ee and four more.
+// With _limit=1 and no sort, whichever row Postgres returned first won.
+describe('the shop domain is resolved exactly, never by substring', () => {
+  test('no substring matching is used for the domain', () => {
+    // Match the query form, not the word — the comment above the function names the old
+    // parameter to explain what went wrong, and should not fail its own test.
+    expect(strapiSource).not.toMatch(/append\([^)]*url_contains/)
+    expect(strapiSource).not.toMatch(/append\([^)]*name_contains/)
+  })
+
+  test('url is matched exactly, with name as a fallback', () => {
+    const fn = strapiSource.slice(strapiSource.indexOf('async function resolveCheckoutDomainId'))
+    expect(fn).toMatch(/lookup\('url', host\)/)
+    expect(fn).toMatch(/lookup\('name', domainName\)/)
+  })
+
+  test('an unmatched host yields null rather than a guess', () => {
+    const fn = strapiSource.slice(strapiSource.indexOf('async function resolveCheckoutDomainId'))
+    expect(fn).toMatch(/\|\| null/)
+  })
+})

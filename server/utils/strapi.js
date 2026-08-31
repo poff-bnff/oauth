@@ -1699,17 +1699,31 @@ async function getOrderStatus(name) {
 async function resolveCheckoutDomainId(domainName) {
   if (!domainName) return null
   const token = await getStrapiAdminToken()
-  const host = String(domainName).replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-  const params = new URLSearchParams()
-  params.append('_limit', '1')
-  params.append('_where[_or][0][url_contains]', host)
-  params.append('_where[_or][1][name_contains]', host)
+  const host = String(domainName)
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/^www\./, '')
+    .toLowerCase()
 
-  try {
+  // Exact match, deliberately. This was `url_contains`, which for "poff.ee" matched seven
+  // domains — kinoff.poff.ee, industry.poff.ee, shorts.poff.ee and the rest all contain it —
+  // and `_limit=1` with no sort took whichever row Postgres happened to return first. Every
+  // cart and order was stamped Kinoff.
+  const lookup = async (field, value) => {
+    const params = new URLSearchParams()
+    params.append('_limit', '1')
+    params.append(field, value)
     const domains = await $fetch(`${config.strapiUrl}/domains?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
     return Array.isArray(domains) && domains[0] ? domains[0].id : null
+  }
+
+  try {
+    // url is the canonical identifier; name ("PÖFF", "Kinoff") is a fallback for callers that
+    // pass a label rather than a host. No substring matching in either case: a wrong domain is
+    // worse than none, because it is silently wrong on every order.
+    return (await lookup('url', host)) || (await lookup('name', domainName)) || null
   } catch (error) {
     console.warn('checkout domain resolve failed', error.message) // eslint-disable-line no-console
     return null
