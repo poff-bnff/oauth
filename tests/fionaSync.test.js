@@ -263,6 +263,21 @@ describe('runSync', () => {
     expect(stats.profiles).toEqual({ created: 1, updated: 0 })
   })
 
+  it('reports how many resolved users were unconfirmed or came without the confirmed field', async () => {
+    strapi.state.users.set(601, { id: 601, email: 'mari@example.com', person: null, user_roles: [], confirmed: false })
+    strapi.state.users.set(602, { id: 602, email: 'jaan@example.com', person: null, user_roles: [] })
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc1', 'fp1', BADGE_TEAM, 'Created', { badges: [{ badgeId: BADGE_TEAM, badgeName: '', statusText: 'Created' }] }),
+      accreditation('acc2', 'fp2', BADGE_TEAM, 'Created', { badges: [{ badgeId: BADGE_TEAM, badgeName: '', statusText: 'Created' }] })
+    ))
+    fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com', myPoffUserId: '601' })
+    fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', myPoffUserId: '602' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.users).toMatchObject({ unconfirmedSeen: 1, confirmedFieldMissing: 1 })
+  })
+
   it('confirms an existing unconfirmed user it links to a synced person', async () => {
     strapi.state.users.set(601, { id: 601, email: 'mari@example.com', person: null, user_roles: [], confirmed: false })
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created')))

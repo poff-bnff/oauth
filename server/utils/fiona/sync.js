@@ -53,7 +53,7 @@ function newStats (dryRun, mode) {
     accreditations: { seen: 0, matched: 0, errors: 0 },
     persons: { desired: 0, created: 0, updated: 0, unchanged: 0, downgraded: 0, unpublished: 0, conflicts: 0, skippedNoEmail: 0 },
     editions: { attached: 0, detached: 0 },
-    users: { created: 0, linked: 0, confirmed: 0 },
+    users: { created: 0, linked: 0, confirmed: 0, unconfirmedSeen: 0, confirmedFieldMissing: 0 },
     profiles: { created: 0, updated: 0 },
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
@@ -488,6 +488,10 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       }
       if (!existing && userPersonId) existing = await strapi.findPersonById(userPersonId)
       if (!user && existing?.user) user = await strapi.getUser(relationId(existing.user))
+      if (user) {
+        if (user.confirmed === false) stats.users.unconfirmedSeen++
+        else if (user.confirmed === undefined) stats.users.confirmedFieldMissing++
+      }
 
       const contactEmail = fionaPerson.email || user?.email || null
       if (!contactEmail) {
