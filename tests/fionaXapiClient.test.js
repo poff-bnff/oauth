@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeBadges, normalizeAccreditation, normalizePerson, pickPhotoAttachment } from '../server/utils/fiona/xapiClient.js'
+import { normalizeBadges, normalizeAccreditation, normalizePerson, pickPhotoAttachment, createXapiClient } from '../server/utils/fiona/xapiClient.js'
 
 describe('normalizeBadges', () => {
   it('maps the PascalCase XAPI badge shape to badgeId / badgeName / statusText', () => {
@@ -67,6 +67,23 @@ describe('normalizePerson', () => {
     expect(normalizePerson({ FirstName: 'A', LastName: 'B', Biography: 'bio' }, null)).toEqual({
       firstName: 'A', lastName: 'B', email: null, phone: null, bio: 'bio', country: null
     })
+  })
+})
+
+describe('createXapiClient', () => {
+  it('lists all guestbooks known to the API key as { id, name }', async () => {
+    const calls = []
+    const fetch = (url, options) => {
+      calls.push({ url, options })
+      return [
+        { id: 'gb-1', description: 'Guestbook 2025', createdOn: 'x' },
+        { Id: 'gb-2', Description: 'Guestbook 2026' }
+      ]
+    }
+    const client = createXapiClient({ fetch, apiKey: 'KEY', log: { warn () {} } })
+    expect(await client.listGuestbooks()).toEqual([{ id: 'gb-1', name: 'Guestbook 2025' }, { id: 'gb-2', name: 'Guestbook 2026' }])
+    expect(calls[0].url).toBe('https://poff-xapi.fiona-app.com/api/guestbooks')
+    expect(calls[0].options.headers['X-ApiKey']).toBe('KEY')
   })
 })
 

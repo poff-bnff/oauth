@@ -42,6 +42,7 @@ function newStats (dryRun) {
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
     editionsWithGuestbook: [],
+    knownGuestbooks: null,
     guestbookBadges: {},
     badgeStatuses: {},
     warnings: [],
@@ -103,6 +104,24 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     log.error(line)
   }
   const finish = () => { stats.durationSec = Number(((Date.now() - startedAt) / 1000).toFixed(1)); return stats }
+
+  // A configured guestbook could not be fetched: is its id even known to Fiona?
+  async function explainFailedGuestbooks (failedIds) {
+    let known
+    try {
+      known = await fiona.listGuestbooks()
+    } catch (err) {
+      warn(`could not list Fiona guestbooks: ${describeError(err)}`)
+      return
+    }
+    stats.knownGuestbooks = known
+    const knownList = known.map(guestbook => `${guestbook.name} (${guestbook.id})`).join(', ') || '(none)'
+    for (const id of failedIds) {
+      const match = known.find(guestbook => norm(guestbook.id) === norm(id))
+      if (match) warn(`guestbook ${id} is known to Fiona as "${match.name}" — the error is on Fiona's side, try again later or ask Fiona support`)
+      else warn(`guestbook ${id} is NOT among the guestbooks Fiona knows for this API key: ${knownList} — check guestbook_id on the festival edition`)
+    }
+  }
 
   // Why is no guestbook active? List every edition with a guestbook id and its window.
   async function explainInactiveEditions () {
@@ -168,6 +187,7 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     }
   }
   stats.guestbooks.scanned = scanned.size
+  if (stats.guestbooks.failed) await explainFailedGuestbooks(guestbookIds.filter(id => !scanned.has(id)))
 
   const badgeIdsInScanned = new Set()
   const badgeNamesInScanned = new Set()
