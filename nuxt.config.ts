@@ -47,6 +47,11 @@ export default defineNuxtConfig({
     maksekeskusId: '',
     maksekeskusSecret: '',
     syncSecret: '',  // NUXT_SYNC_SECRET — shared secret for POST /api/sync/fiona
+    fionaClient: 'xapi', // NUXT_FIONA_CLIENT — 'xapi' or 'publication' (Publication API first, XAPI as fallback)
+    fionaPublicationApiKey: '', // NUXT_FIONA_PUBLICATION_API_KEY — Publication API key (`apikey` header)
+    fionaPublicationApiUrl: '', // NUXT_FIONA_PUBLICATION_API_URL — e.g. https://poff-online-api.fiona-online.net/v1
+    syncMaxRemovals: '', // NUXT_SYNC_MAX_REMOVALS — cap on unpublishes per sync run (default 50)
+    syncMaxBuildsPerRun: '', // NUXT_SYNC_MAX_BUILDS_PER_RUN — cap on per-person site builds per run (default 20)
     public: {
       url: '',
       oauthUrl: '',

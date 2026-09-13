@@ -172,7 +172,7 @@ export async function fetchFionaBadges (guestbookId, userId) {
   return finalBadgesArray;
 }
 
-async function getActiveFionaGuestbooks () {
+export async function getActiveFionaGuestbooks () {
   const token = await getStrapiToken()
 
   const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
