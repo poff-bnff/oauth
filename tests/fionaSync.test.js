@@ -576,6 +576,20 @@ describe('runSync', () => {
     expect(stats.dryRun).toBe(true)
     expect(stats.persons.created).toBe(1)
     expect(log.lines.info.join('\n')).toMatch(/would CREATE person fp2/)
+    expect(stats.dryRunActions).toEqual([
+      { action: 'CREATE', fionaPersonId: 'fp2', name: 'Jaan Tamm', level: 2, editionIds: [CG, IND], roleIds: [ROLE_CG], changed: null }
+    ])
+  })
+
+  it('dry run lists downgrade and unpublish actions too', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
+    fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com' })
+    await runSync({}, deps)
+    fiona.state.guestbooks.get(GB).accreditations[0].badges[0].statusText = 'Cancelled'
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.dryRunActions).toEqual([{ action: 'UNPUBLISH', fionaPersonId: 'fp2', personId: 1000, detachEditionIds: [CG, IND], removeRoleIds: [ROLE_CG] }])
   })
 
   it('logs a build instruction instead of triggering builds above the per-run cap', async () => {
