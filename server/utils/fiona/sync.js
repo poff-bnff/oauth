@@ -41,6 +41,7 @@ function newStats (dryRun) {
     profiles: { created: 0 },
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
+    badgeStatuses: {},
     warnings: [],
     errors: 0
   }
@@ -114,11 +115,14 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
 
   const badgeIdsInScanned = new Set()
   const badgeNamesInScanned = new Set()
-  for (const { badges } of scanned.values()) {
+  const badgeNameById = new Map()
+  for (const [guestbookId, { badges }] of scanned) {
     for (const badge of badges) {
       if (badge.id) badgeIdsInScanned.add(norm(badge.id))
       if (badge.name) badgeNamesInScanned.add(norm(badge.name))
+      if (badge.id && badge.name) badgeNameById.set(norm(badge.id), badge.name)
     }
+    log.info(`Guestbook ${guestbookId} badges: ${badges.map(badge => `${badge.name} (${badge.id})`).join(', ') || '(none)'}`)
   }
   const mappedRules = rules.filter(rule =>
     (rule.badgeId && badgeIdsInScanned.has(rule.badgeId)) || (rule.badgeName && badgeNamesInScanned.has(rule.badgeName))
@@ -141,9 +145,21 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
   for (const [guestbookId, { accreditations }] of scanned) {
     stats.accreditations.seen += accreditations.length
     let matched = 0
+    const seenHere = new Map()
     for (const accreditation of accreditations) {
       try {
         const badges = await fiona.getAccreditationBadges(accreditation.id)
+        for (const badge of badges) {
+          const badgeName = badge.badgeName || badgeNameById.get(norm(badge.badgeId)) || '?'
+          const badgeId = badge.badgeId || '?'
+          const label = `${badgeName} (${badgeId})`
+          const status = norm(badge.statusText) || '(no status)'
+          const counts = stats.badgeStatuses[label] || (stats.badgeStatuses[label] = {})
+          counts[status] = (counts[status] || 0) + 1
+          if (!seenHere.has(label)) seenHere.set(label, { badgeName, badgeId, counts: new Map() })
+          const here = seenHere.get(label).counts
+          here.set(status, (here.get(status) || 0) + 1)
+        }
         const evaluation = evaluateBadges(badges, index)
         if (evaluation.level === 0) continue
         const detail = await fiona.getAccreditation(accreditation.id)
@@ -162,6 +178,13 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     }
     stats.accreditations.matched += matched
     log.info(`Guestbook ${guestbookId}: ${accreditations.length} accreditations, ${matched} matched`)
+    for (const { badgeName, badgeId, counts } of seenHere.values()) {
+      const summary = [...counts]
+        .sort((a, b) => b[1] - a[1] || (a[0] > b[0] ? 1 : -1))
+        .map(([status, n]) => `${status}=${n}`)
+        .join(', ')
+      log.info(`Guestbook ${guestbookId} badge "${badgeName}" (${badgeId}) statuses: ${summary}`)
+    }
   }
   stats.persons.desired = desired.size
 

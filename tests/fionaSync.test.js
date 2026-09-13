@@ -407,6 +407,32 @@ describe('runSync', () => {
     expect(log.lines.warn.join('\n')).toMatch(/removal phase skipped/)
   })
 
+  it('logs each scanned guestbook badge list with GUIDs so rules can be filled from real values', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith())
+
+    await runSync({ dryRun: true }, deps)
+
+    expect(log.lines.info.join('\n')).toMatch(/Guestbook guestbook-2025 badges: TEAM \(badge-team-guid\), Industry PRO \(badge-pro-guid\)/)
+  })
+
+  it('counts the badge statuses seen per badge and reports them in stats and the log', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc1', 'fp1', BADGE_PRO, 'Approved'),
+      accreditation('acc2', 'fp2', BADGE_PRO, 'approved'),
+      accreditation('acc3', 'fp3', BADGE_PRO, 'Cancelled'),
+      accreditation('acc4', 'fp4', BADGE_TEAM, 'Created')
+    ))
+    for (const id of ['fp1', 'fp2', 'fp3', 'fp4']) fiona.state.persons.set(id, { firstName: id, lastName: 'x', email: `${id}@x.ee` })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.badgeStatuses).toEqual({
+      'Industry PRO (badge-pro-guid)': { approved: 2, cancelled: 1 },
+      'TEAM (badge-team-guid)': { created: 1 }
+    })
+    expect(log.lines.info.join('\n')).toMatch(/badge "Industry PRO" \(badge-pro-guid\) statuses: approved=2, cancelled=1/)
+  })
+
   it('dry run writes nothing and reports what it would do', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com' })
