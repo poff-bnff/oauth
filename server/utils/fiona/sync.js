@@ -89,10 +89,12 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
   const { rules, warnings } = normalizeRules(await strapi.loadRules())
   warnings.forEach(warn)
   stats.rules.active = rules.length
-  if (!rules.length) {
+  const discoveryOnly = rules.length === 0
+  if (discoveryOnly) {
     warn('no active fiona-sync-rules — nothing to sync, removal phase skipped')
     stats.removals = { skipped: true, reason: 'no active rules' }
-    return finish()
+    if (!dryRun) return finish()
+    log.info('DRY RUN with no rules: scanning the active guestbooks for badge discovery only')
   }
   const index = indexRules(rules)
 
@@ -189,6 +191,7 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     }
   }
   stats.persons.desired = desired.size
+  if (discoveryOnly) return finish()
 
   // 4. Plan removals (from a snapshot taken before any write) ----------------
   const managedPeople = await strapi.findManagedPeople()
