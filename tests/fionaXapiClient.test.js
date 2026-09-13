@@ -29,18 +29,20 @@ describe('normalizeAccreditation', () => {
   it('extracts the person id, the privacy flag and the films', () => {
     const raw = {
       Person: { Description: 'Digna', Id: '6bca9b32' },
+      Guestbook: { Description: 'Gastenboek 2022', Id: 'gb-2022' },
       NoPublicationOfContactDetails: true,
       Films: [{ Description: '127 Hours', Id: 'a7a74176' }]
     }
     expect(normalizeAccreditation(raw)).toEqual({
       personId: '6bca9b32',
+      guestbookId: 'gb-2022',
       noPublicationOfContactDetails: true,
       films: [{ id: 'a7a74176', title: '127 Hours' }]
     })
   })
 
   it('accepts the camelCase variant and defaults the flag to false', () => {
-    expect(normalizeAccreditation({ person: { id: 'p' } })).toEqual({ personId: 'p', noPublicationOfContactDetails: false, films: [] })
+    expect(normalizeAccreditation({ person: { id: 'p' } })).toEqual({ personId: 'p', guestbookId: null, noPublicationOfContactDetails: false, films: [] })
   })
 })
 

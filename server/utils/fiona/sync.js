@@ -3,14 +3,21 @@
  *
  * The Fiona → Strapi accredited-person sync as a desired-state computation.
  *
- * Phases (see the POFF-166 plan):
- *   1. load + normalise the `fiona-sync-rule` records
- *   2. scan the guestbooks of the active festival editions
- *   3. evaluate every accreditation's badges → desired state per Fiona person
- *   4. plan removals for persons the sync manages but no longer wants
- *   5. upsert desired persons (user, user-profile, person, editions, roles)
- *   6. apply the remaining removals (downgrade / unpublish)
- *   7. trigger per-person site builds within the per-run cap
+ * Modes:
+ *   full         scan every accreditation of the active guestbooks, reconcile,
+ *                may downgrade / unpublish persons that stopped matching
+ *   incremental  read the Publication API mutations feed since the job's
+ *                cursor, re-evaluate only the affected accreditations and,
+ *                for affected persons, all their accreditations — so those
+ *                persons are reconciled completely while everyone else is
+ *                left untouched
+ *   auto         decide from the `fiona-sync-job` entry (enabled, interval,
+ *                nightly full-run hour) whether a full, an incremental or no
+ *                run is due — what the cron calls every minute
+ *
+ * Phases: rules → active guestbooks + badge lists → managed-person snapshot →
+ * desired state (full scan or mutations) → removal plan → upserts → remaining
+ * removals → per-person site builds → job state.
  *
  * All external access goes through `deps.fiona` and `deps.strapi` so the
  * whole flow is testable with in-memory fakes. No Nuxt globals here.
@@ -20,6 +27,11 @@ import { normalizeRules, indexRules, evaluateBadges } from './rules.js'
 import { mergeDesired, planRemovals, splitIds } from './desiredState.js'
 import { buildPersonPayload } from './personMapper.js'
 
+export const JOB_KEY = 'accreditations'
+const RELEVANT_ENTITIES = new Set(['Accreditation', 'AccreditationBadge', 'Person'])
+const MUTATION_OVERLAP_MS = 5 * 60 * 1000
+const JOB_TIME_ZONE = 'Europe/Tallinn'
+
 const norm = value => String(value ?? '').trim().toLowerCase()
 const numericSort = list => [...list].sort((a, b) => a - b)
 const uniqueNumbers = list => numericSort(new Set([...list].map(Number)))
@@ -27,10 +39,14 @@ const joinIds = list => [...list].map(String).sort().join(',')
 const relationId = value => (value && typeof value === 'object') ? value.id : value
 const relationIds = list => (Array.isArray(list) ? list : []).map(relationId).filter(id => id !== null && id !== undefined).map(Number)
 const sameIds = (a, b) => joinIds(uniqueNumbers(a)) === joinIds(uniqueNumbers(b))
+const isNotFound = err => err?.statusCode === 404 || err?.status === 404 || err?.response?.status === 404
 
-function newStats (dryRun) {
+function newStats (dryRun, mode) {
   return {
     dryRun,
+    mode,
+    skipped: false,
+    reason: null,
     durationSec: 0,
     guestbooks: { active: 0, scanned: 0, failed: 0 },
     rules: { active: 0, mapped: 0, unmapped: 0 },
@@ -41,6 +57,7 @@ function newStats (dryRun) {
     profiles: { created: 0 },
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
+    incremental: null,
     editionsWithGuestbook: [],
     knownGuestbooks: null,
     guestbookBadges: {},
@@ -86,14 +103,46 @@ function changedFields (existing, payload) {
   return changed
 }
 
-export async function runSync ({ dryRun = false, force = false } = {}, deps) {
+/** Local (Europe/Tallinn) calendar date and hour of an instant. */
+function localDateAndHour (date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: JOB_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23'
+  }).formatToParts(date)
+  const get = type => parts.find(part => part.type === type)?.value
+  return { date: `${get('year')}-${get('month')}-${get('day')}`, hour: Number(get('hour')) }
+}
+
+/** What should an `auto` invocation do, given the job entry? */
+export function decideAutoMode (job, nowDate) {
+  if (!job) return { skipped: true, reason: `no fiona-sync-job entry with key "${JOB_KEY}" — create one in Strapi admin` }
+  if (job.enabled === false) return { skipped: true, reason: 'job is disabled (enabled = false)' }
+
+  const hour = Number(job.full_run_hour)
+  if (job.full_run_hour !== null && job.full_run_hour !== undefined && job.full_run_hour !== '' && Number.isFinite(hour)) {
+    const today = localDateAndHour(nowDate)
+    const lastFull = job.last_full_run_at ? localDateAndHour(new Date(job.last_full_run_at)).date : null
+    if (today.hour >= hour && lastFull !== today.date) return { skipped: false, mode: 'full' }
+  }
+
+  const interval = Number(job.incremental_interval_minutes)
+  if (Number.isFinite(interval) && interval > 0) {
+    const last = job.last_incremental_run_at ? new Date(job.last_incremental_run_at).getTime() : 0
+    const dueAt = last + interval * 60 * 1000
+    if (nowDate.getTime() >= dueAt) return { skipped: false, mode: 'incremental' }
+    return { skipped: true, reason: `not due — next incremental run at ${new Date(dueAt).toISOString()}` }
+  }
+  return { skipped: true, reason: 'not due — incremental runs are off (interval is 0) and no full run is due' }
+}
+
+export async function runSync ({ dryRun = false, force = false, mode = 'full' } = {}, deps) {
   const { fiona, strapi, config = {} } = deps
   const log = deps.log || console
   const now = deps.now || (() => new Date())
   const maxRemovals = Number.isFinite(Number(config.maxRemovals)) && config.maxRemovals !== undefined ? Number(config.maxRemovals) : 50
   const maxBuildsPerRun = Number.isFinite(Number(config.maxBuildsPerRun)) && config.maxBuildsPerRun !== undefined ? Number(config.maxBuildsPerRun) : 20
-  const startedAt = Date.now()
-  const stats = newStats(dryRun)
+  const startedAt = now()
+  const startedMs = Date.now()
+  const stats = newStats(dryRun, mode)
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
@@ -103,58 +152,58 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     if (stats.errorMessages.length < 50) stats.errorMessages.push(line)
     log.error(line)
   }
-  const finish = () => { stats.durationSec = Number(((Date.now() - startedAt) / 1000).toFixed(1)); return stats }
 
-  // A configured guestbook could not be fetched: is its id even known to Fiona?
-  async function explainFailedGuestbooks (failedIds) {
-    let known
+  fiona.resetCache?.()
+
+  // 0. Job entry + mode ------------------------------------------------------
+  let job = null
+  if (typeof strapi.getSyncJob === 'function') {
     try {
-      known = await fiona.listGuestbooks()
+      job = await strapi.getSyncJob(JOB_KEY)
     } catch (err) {
-      warn(`could not list Fiona guestbooks: ${describeError(err)}`)
-      return
-    }
-    stats.knownGuestbooks = known
-    const knownList = known.map(guestbook => `${guestbook.name} (${guestbook.id})`).join(', ') || '(none)'
-    for (const id of failedIds) {
-      const match = known.find(guestbook => norm(guestbook.id) === norm(id))
-      if (match) warn(`guestbook ${id} is known to Fiona as "${match.name}" — the error is on Fiona's side, try again later or ask Fiona support`)
-      else warn(`guestbook ${id} is NOT among the guestbooks Fiona knows for this API key: ${knownList} — check guestbook_id on the festival edition`)
+      fail('could not read the fiona-sync-job entry', err)
     }
   }
+  if (mode === 'auto') {
+    const decision = decideAutoMode(job, startedAt)
+    if (decision.skipped) {
+      stats.skipped = true
+      stats.reason = decision.reason
+      if (!job) warn(decision.reason)
+      else log.info(`auto: ${decision.reason}`)
+      stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
+      return stats
+    }
+    mode = decision.mode
+  }
+  if (mode === 'incremental' && !job?.mutation_cursor) {
+    warn('no mutation cursor yet — running a full sync first')
+    mode = 'full'
+  }
+  stats.mode = mode
 
-  // Why is no guestbook active? List every edition with a guestbook id and its window.
-  async function explainInactiveEditions () {
-    const today = now().toISOString().slice(0, 10)
-    let editions = []
-    try {
-      editions = await strapi.listEditionsWithGuestbook()
-    } catch (err) {
-      warn(`could not list editions with a guestbook id: ${err.message}`)
-      return
+  let scanCompleted = false
+
+  const finish = async ({ save = true } = {}) => {
+    stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
+    if (save && !dryRun && job && typeof strapi.saveSyncJob === 'function') {
+      const patch = {
+        last_stats: stats,
+        last_error: stats.errorMessages[0] || null,
+        [mode === 'full' ? 'last_full_run_at' : 'last_incremental_run_at']: startedAt.toISOString()
+      }
+      if (scanCompleted) patch.mutation_cursor = startedAt.toISOString()
+      try {
+        await strapi.saveSyncJob(job.id, patch)
+      } catch (err) {
+        fail('could not save the fiona-sync-job entry', err)
+      }
     }
-    if (!editions.length) {
-      warn('no festival edition has a guestbook_id — nothing to scan')
-      return
-    }
-    stats.editionsWithGuestbook = editions.map((edition) => {
-      const from = edition.validFrom ? String(edition.validFrom).slice(0, 10) : null
-      const until = edition.validUntil ? String(edition.validUntil).slice(0, 10) : null
-      let reason = null
-      if (!from && !until) reason = 'validFrom and validUntil are not set'
-      else if (!from) reason = 'validFrom is not set'
-      else if (!until) reason = 'validUntil is not set'
-      else if (!(from < today)) reason = `validFrom is not before today (${today})`
-      else if (!(until > today)) reason = `validUntil is not after today (${today})`
-      const active = reason === null
-      const line = `edition #${edition.id} "${edition.name}" guestbook ${edition.guestbookId} validFrom ${edition.validFrom || '-'} validUntil ${edition.validUntil || '-'}`
-      if (active) log.info(`${line} — active`)
-      else warn(`${line} — not active: ${reason}`)
-      return { ...edition, active, reason }
-    })
+    log.info(`✅ Done (${mode}) in ${stats.durationSec}s — ${JSON.stringify({ ...stats, warnings: stats.warnings.length, guestbookBadges: undefined, badgeStatuses: undefined })}`)
+    return stats
   }
 
-  log.info(`▶ Starting Fiona sync${dryRun ? ' (DRY RUN)' : ''} at ${now().toISOString()}`)
+  log.info(`▶ Starting Fiona sync (${mode}${dryRun ? ', DRY RUN' : ''}) at ${startedAt.toISOString()}`)
 
   // 1. Rules -----------------------------------------------------------------
   const { rules, warnings } = normalizeRules(await strapi.loadRules())
@@ -164,35 +213,30 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
   if (discoveryOnly) {
     warn('no active fiona-sync-rules — nothing to sync, removal phase skipped')
     stats.removals = { skipped: true, reason: 'no active rules' }
-    if (!dryRun) return finish()
+    if (!dryRun || mode !== 'full') return await finish()
     log.info('DRY RUN with no rules: scanning the active guestbooks for badge discovery only')
   }
   const index = indexRules(rules)
 
-  // 2. Guestbooks ------------------------------------------------------------
+  // 2. Active guestbooks + their badge lists ---------------------------------
   const guestbookIds = await strapi.getActiveGuestbookIds()
   stats.guestbooks.active = guestbookIds.length
   if (!guestbookIds.length) await explainInactiveEditions()
-  const scanned = new Map()
+  const activeGuestbooks = new Set(guestbookIds)
+
+  const badgeLists = new Map() // guestbookId → [{id, name}] for guestbooks whose badge list loaded
   for (const guestbookId of guestbookIds) {
     try {
-      const [badges, accreditations] = await Promise.all([
-        fiona.listGuestbookBadges(guestbookId),
-        fiona.listAccreditations(guestbookId)
-      ])
-      scanned.set(guestbookId, { badges, accreditations })
+      badgeLists.set(guestbookId, await fiona.listGuestbookBadges(guestbookId))
     } catch (err) {
-      stats.guestbooks.failed++
-      fail(`guestbook ${guestbookId} could not be fetched — its persons are left untouched`, err)
+      fail(`guestbook ${guestbookId} badge list could not be fetched — its persons are left untouched`, err)
     }
   }
-  stats.guestbooks.scanned = scanned.size
-  if (stats.guestbooks.failed) await explainFailedGuestbooks(guestbookIds.filter(id => !scanned.has(id)))
 
   const badgeIdsInScanned = new Set()
   const badgeNamesInScanned = new Set()
   const badgeNameById = new Map()
-  for (const [guestbookId, { badges }] of scanned) {
+  for (const [guestbookId, badges] of badgeLists) {
     for (const badge of badges) {
       if (badge.id) badgeIdsInScanned.add(norm(badge.id))
       if (badge.name) badgeNamesInScanned.add(norm(badge.name))
@@ -207,55 +251,62 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
   stats.rules.mapped = mappedRules.length
   stats.rules.unmapped = rules.length - mappedRules.length
   for (const rule of rules) {
-    const mapped = mappedRules.includes(rule)
     const line = `rule #${rule.id} "${rule.name}" badge ${rule.badgeId || rule.badgeName} sync=[${[...rule.level1].join(', ')}] full=[${[...rule.level2].join(', ')}] editions=[${rule.editionIds.join(', ')}] roles=[${rule.roleIds.join(', ')}]`
-    if (mapped) log.info(line)
+    if (mappedRules.includes(rule)) log.info(line)
     else warn(`${line} — matches no badge in the active guestbooks`)
   }
   const editionIdsInScope = new Set(mappedRules.flatMap(rule => rule.editionIds))
   const roleIdsInScope = new Set(mappedRules.flatMap(rule => rule.roleIds))
 
-  // 3. Desired state ---------------------------------------------------------
+  // 3. Snapshot of the persons the sync manages ------------------------------
+  const managedPeople = await strapi.findManagedPeople()
+  const managedByFionaId = new Map(managedPeople.map(person => [person.fiona_person_id, person]))
+  const managedByAccreditationId = new Map()
+  for (const person of managedPeople) {
+    for (const id of splitIds(person.fiona_accreditation_id)) managedByAccreditationId.set(id, person)
+  }
+
+  // 4. Desired state ---------------------------------------------------------
   const desired = new Map()
   const privacy = new Map()
   const erroredAccreditationIds = new Set()
-  for (const [guestbookId, { accreditations }] of scanned) {
-    stats.accreditations.seen += accreditations.length
-    let matched = 0
-    const seenHere = new Map()
-    for (const accreditation of accreditations) {
-      try {
-        const badges = await fiona.getAccreditationBadges(accreditation.id)
-        for (const badge of badges) {
-          const badgeName = badge.badgeName || badgeNameById.get(norm(badge.badgeId)) || '?'
-          const badgeId = badge.badgeId || '?'
-          const label = `${badgeName} (${badgeId})`
-          const status = norm(badge.statusText) || '(no status)'
-          const counts = stats.badgeStatuses[label] || (stats.badgeStatuses[label] = {})
-          counts[status] = (counts[status] || 0) + 1
-          if (!seenHere.has(label)) seenHere.set(label, { badgeName, badgeId, counts: new Map() })
-          const here = seenHere.get(label).counts
-          here.set(status, (here.get(status) || 0) + 1)
-        }
-        const evaluation = evaluateBadges(badges, index)
-        if (evaluation.level === 0) continue
-        const detail = await fiona.getAccreditation(accreditation.id)
-        if (!detail.personId) {
-          warn(`accreditation ${accreditation.id} has no linked person — skipped`)
-          continue
-        }
-        mergeDesired(desired, detail.personId, { guestbookId, accreditationId: accreditation.id, evaluation })
-        privacy.set(detail.personId, Boolean(privacy.get(detail.personId)) || detail.noPublicationOfContactDetails === true)
-        matched++
-      } catch (err) {
-        stats.accreditations.errors++
-        erroredAccreditationIds.add(String(accreditation.id))
-        fail(`accreditation ${accreditation.id}`, err)
-      }
+  const erroredPersonIds = new Set()
+  const histogram = new Map() // guestbookId → Map(label → { badgeName, badgeId, counts })
+
+  const countBadges = (guestbookId, badges) => {
+    if (!histogram.has(guestbookId)) histogram.set(guestbookId, new Map())
+    const seenHere = histogram.get(guestbookId)
+    for (const badge of badges) {
+      const badgeName = badge.badgeName || badgeNameById.get(norm(badge.badgeId)) || '?'
+      const badgeId = badge.badgeId || '?'
+      const label = `${badgeName} (${badgeId})`
+      const status = norm(badge.statusText) || '(no status)'
+      const counts = stats.badgeStatuses[label] || (stats.badgeStatuses[label] = {})
+      counts[status] = (counts[status] || 0) + 1
+      if (!seenHere.has(label)) seenHere.set(label, { badgeName, badgeId, counts: new Map() })
+      const here = seenHere.get(label).counts
+      here.set(status, (here.get(status) || 0) + 1)
     }
-    stats.accreditations.matched += matched
-    log.info(`Guestbook ${guestbookId}: ${accreditations.length} accreditations, ${matched} matched`)
-    for (const { badgeName, badgeId, counts } of seenHere.values()) {
+  }
+
+  /** Evaluate one accreditation into `desired`. Returns true when it matched a rule. */
+  const evaluateAccreditationInto = async (guestbookId, accreditationId) => {
+    const badges = await fiona.getAccreditationBadges(accreditationId)
+    countBadges(guestbookId, badges)
+    const evaluation = evaluateBadges(badges, index)
+    if (evaluation.level === 0) return false
+    const detail = await fiona.getAccreditation(accreditationId)
+    if (!detail.personId) {
+      warn(`accreditation ${accreditationId} has no linked person — skipped`)
+      return false
+    }
+    mergeDesired(desired, detail.personId, { guestbookId, accreditationId, evaluation })
+    privacy.set(detail.personId, Boolean(privacy.get(detail.personId)) || detail.noPublicationOfContactDetails === true)
+    return true
+  }
+
+  const logHistogram = (guestbookId) => {
+    for (const { badgeName, badgeId, counts } of (histogram.get(guestbookId) || new Map()).values()) {
       const summary = [...counts]
         .sort((a, b) => b[1] - a[1] || (a[0] > b[0] ? 1 : -1))
         .map(([status, n]) => `${status}=${n}`)
@@ -263,21 +314,145 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
       log.info(`Guestbook ${guestbookId} badge "${badgeName}" (${badgeId}) statuses: ${summary}`)
     }
   }
-  stats.persons.desired = desired.size
-  if (discoveryOnly) return finish()
 
-  // 4. Plan removals (from a snapshot taken before any write) ----------------
-  const managedPeople = await strapi.findManagedPeople()
-  const managedByFionaId = new Map(managedPeople.map(person => [person.fiona_person_id, person]))
-  const erroredPersonIds = new Set(
-    managedPeople
-      .filter(person => splitIds(person.fiona_accreditation_id).some(id => erroredAccreditationIds.has(id)))
-      .map(person => person.fiona_person_id)
-  )
+  let scannedGuestbookIds
+  let reconcileManaged = managedPeople
+
+  if (mode === 'full') {
+    scannedGuestbookIds = new Set()
+    for (const guestbookId of guestbookIds) {
+      if (!badgeLists.has(guestbookId)) continue
+      let accreditations
+      try {
+        accreditations = await fiona.listAccreditations(guestbookId)
+      } catch (err) {
+        fail(`guestbook ${guestbookId} could not be fetched — its persons are left untouched`, err)
+        continue
+      }
+      scannedGuestbookIds.add(guestbookId)
+      stats.accreditations.seen += accreditations.length
+      let matched = 0
+      for (const accreditation of accreditations) {
+        try {
+          if (await evaluateAccreditationInto(guestbookId, accreditation.id)) matched++
+        } catch (err) {
+          stats.accreditations.errors++
+          erroredAccreditationIds.add(String(accreditation.id))
+          fail(`accreditation ${accreditation.id}`, err)
+        }
+      }
+      stats.accreditations.matched += matched
+      log.info(`Guestbook ${guestbookId}: ${accreditations.length} accreditations, ${matched} matched`)
+      logHistogram(guestbookId)
+    }
+    stats.guestbooks.scanned = scannedGuestbookIds.size
+    stats.guestbooks.failed = guestbookIds.length - scannedGuestbookIds.size
+    if (stats.guestbooks.failed) await explainFailedGuestbooks(guestbookIds.filter(id => !scannedGuestbookIds.has(id)))
+    scanCompleted = stats.guestbooks.failed === 0
+  } else {
+    // incremental: which accreditations / persons changed since the cursor?
+    const since = new Date(new Date(job.mutation_cursor).getTime() - MUTATION_OVERLAP_MS).toISOString()
+    let mutations
+    try {
+      mutations = await fiona.listMutations(since)
+    } catch (err) {
+      fail(`mutations since ${since} could not be fetched`, err)
+      return await finish()
+    }
+    const relevant = mutations.filter(m => RELEVANT_ENTITIES.has(m.entityName))
+    const affectedAccreditationIds = new Set()
+    const affectedPersonIds = new Set()
+    let unresolvedBadges = 0
+
+    for (const m of relevant) {
+      if (m.entityName === 'Accreditation') {
+        if (m.mutation === 2) {
+          const owner = managedByAccreditationId.get(String(m.entityId))
+          if (owner) affectedPersonIds.add(owner.fiona_person_id)
+        } else {
+          affectedAccreditationIds.add(String(m.entityId))
+        }
+      } else if (m.entityName === 'AccreditationBadge') {
+        try {
+          const { accreditationId } = await fiona.getAccreditationBadgeRecord(m.entityId)
+          if (accreditationId) affectedAccreditationIds.add(String(accreditationId))
+          else unresolvedBadges++
+        } catch (err) {
+          unresolvedBadges++
+          if (!isNotFound(err)) fail(`accreditation badge ${m.entityId}`, err)
+        }
+      } else if (m.entityName === 'Person') {
+        if (managedByFionaId.has(String(m.entityId))) affectedPersonIds.add(String(m.entityId))
+      }
+    }
+
+    for (const accreditationId of affectedAccreditationIds) {
+      try {
+        const detail = await fiona.getAccreditation(accreditationId)
+        if (detail.personId && activeGuestbooks.has(detail.guestbookId)) affectedPersonIds.add(String(detail.personId))
+      } catch (err) {
+        const owner = managedByAccreditationId.get(accreditationId)
+        if (isNotFound(err) && owner) {
+          affectedPersonIds.add(owner.fiona_person_id)
+        } else if (!isNotFound(err)) {
+          stats.accreditations.errors++
+          erroredAccreditationIds.add(accreditationId)
+          fail(`accreditation ${accreditationId}`, err)
+        }
+      }
+    }
+
+    for (const personId of affectedPersonIds) {
+      let accreditations = []
+      try {
+        accreditations = await fiona.getPersonAccreditations(personId)
+      } catch (err) {
+        if (!isNotFound(err)) {
+          erroredPersonIds.add(personId)
+          fail(`person ${personId} accreditations`, err)
+          continue
+        }
+      }
+      for (const accreditation of accreditations.filter(a => activeGuestbooks.has(a.guestbookId))) {
+        stats.accreditations.seen++
+        try {
+          if (await evaluateAccreditationInto(accreditation.guestbookId, accreditation.id)) stats.accreditations.matched++
+        } catch (err) {
+          stats.accreditations.errors++
+          erroredAccreditationIds.add(String(accreditation.id))
+          erroredPersonIds.add(personId)
+          fail(`accreditation ${accreditation.id}`, err)
+        }
+      }
+    }
+    if (unresolvedBadges) warn(`${unresolvedBadges} accreditation-badge mutation(s) could not be resolved to an accreditation — the nightly full run reconciles them`)
+
+    scannedGuestbookIds = new Set(badgeLists.keys())
+    stats.guestbooks.scanned = scannedGuestbookIds.size
+    stats.guestbooks.failed = guestbookIds.length - scannedGuestbookIds.size
+    reconcileManaged = managedPeople.filter(person => affectedPersonIds.has(person.fiona_person_id))
+    stats.incremental = {
+      since,
+      mutations: mutations.length,
+      relevant: relevant.length,
+      accreditations: affectedAccreditationIds.size,
+      persons: affectedPersonIds.size,
+      unresolvedBadges
+    }
+    scanCompleted = true
+    log.info(`Incremental: ${mutations.length} mutations since ${since}, ${relevant.length} relevant, ${affectedAccreditationIds.size} accreditations and ${affectedPersonIds.size} persons re-evaluated`)
+  }
+  stats.persons.desired = desired.size
+  if (discoveryOnly) return await finish()
+
+  // 5. Plan removals (from the snapshot taken before any write) ----------------
+  for (const person of managedPeople) {
+    if (splitIds(person.fiona_accreditation_id).some(id => erroredAccreditationIds.has(id))) erroredPersonIds.add(person.fiona_person_id)
+  }
   const plan = planRemovals({
-    managedPeople,
+    managedPeople: reconcileManaged,
     desired,
-    scannedGuestbookIds: new Set(scanned.keys()),
+    scannedGuestbookIds,
     editionIdsInScope,
     roleIdsInScope,
     erroredPersonIds,
@@ -291,8 +466,9 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
 
   const buildIds = []
 
-  // 5. Upsert desired persons -----------------------------------------------
+  // 6. Upsert desired persons -----------------------------------------------
   for (const [fionaPersonId, want] of desired) {
+    if (erroredPersonIds.has(fionaPersonId)) continue
     try {
       const fionaPerson = await fiona.getPerson(fionaPersonId)
 
@@ -425,7 +601,7 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     }
   }
 
-  // 6. Remaining removals (persons no longer desired) ------------------------
+  // 7. Remaining removals (persons no longer desired) ------------------------
   for (const action of plan.actions) {
     if (desired.has(action.fionaPersonId)) continue
     const person = managedByFionaId.get(action.fionaPersonId)
@@ -463,7 +639,7 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     }
   }
 
-  // 7. Builds ----------------------------------------------------------------
+  // 8. Builds ----------------------------------------------------------------
   stats.build.ids = uniqueNumbers(buildIds)
   if (!dryRun && stats.build.ids.length) {
     if (stats.build.ids.length <= maxBuildsPerRun) {
@@ -480,6 +656,56 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
     }
   }
 
-  log.info(`✅ Done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${JSON.stringify({ ...stats, warnings: stats.warnings.length })}`)
-  return finish()
+  return await finish()
+
+  // ---------------------------------------------------------------------------
+
+  /** A configured guestbook could not be fetched: is its id even known to Fiona? */
+  async function explainFailedGuestbooks (failedIds) {
+    let known
+    try {
+      known = await fiona.listGuestbooks()
+    } catch (err) {
+      warn(`could not list Fiona guestbooks: ${describeError(err)}`)
+      return
+    }
+    stats.knownGuestbooks = known
+    const knownList = known.map(guestbook => `${guestbook.name} (${guestbook.id})`).join(', ') || '(none)'
+    for (const id of failedIds) {
+      const match = known.find(guestbook => norm(guestbook.id) === norm(id))
+      if (match) warn(`guestbook ${id} is known to Fiona as "${match.name}" — the error is on Fiona's side, try again later or ask Fiona support`)
+      else warn(`guestbook ${id} is NOT among the guestbooks Fiona knows for this API key: ${knownList} — check guestbook_id on the festival edition`)
+    }
+  }
+
+  /** Why is no guestbook active? List every edition with a guestbook id and its window. */
+  async function explainInactiveEditions () {
+    const today = now().toISOString().slice(0, 10)
+    let editions = []
+    try {
+      editions = await strapi.listEditionsWithGuestbook()
+    } catch (err) {
+      warn(`could not list editions with a guestbook id: ${err.message}`)
+      return
+    }
+    if (!editions.length) {
+      warn('no festival edition has a guestbook_id — nothing to scan')
+      return
+    }
+    stats.editionsWithGuestbook = editions.map((edition) => {
+      const from = edition.validFrom ? String(edition.validFrom).slice(0, 10) : null
+      const until = edition.validUntil ? String(edition.validUntil).slice(0, 10) : null
+      let reason = null
+      if (!from && !until) reason = 'validFrom and validUntil are not set'
+      else if (!from) reason = 'validFrom is not set'
+      else if (!until) reason = 'validUntil is not set'
+      else if (!(from < today)) reason = `validFrom is not before today (${today})`
+      else if (!(until > today)) reason = `validUntil is not after today (${today})`
+      const active = reason === null
+      const line = `edition #${edition.id} "${edition.name}" guestbook ${edition.guestbookId} validFrom ${edition.validFrom || '-'} validUntil ${edition.validUntil || '-'}`
+      if (active) log.info(`${line} — active`)
+      else warn(`${line} — not active: ${reason}`)
+      return { ...edition, active, reason }
+    })
+  }
 }

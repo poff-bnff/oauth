@@ -9,6 +9,9 @@
  *        -H "Authorization: Bearer <NUXT_SYNC_SECRET value>"
  *
  * Optional body: { "dryRun": true }  — logs intended changes without writing to Strapi.
+ *                { "mode": "full" | "incremental" | "auto" } — default "full"; "auto" lets the
+ *                fiona-sync-job entry decide (what the cron sends every minute).
+ *                { "force": true } — lift the per-run removal cap.
  */
 
 import crypto from 'crypto'
@@ -50,8 +53,9 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event).catch(() => ({}))
   const dryRun = body?.dryRun === true
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
+  const mode = ['full', 'incremental', 'auto'].includes(body?.mode) ? body.mode : 'full'
 
-  const stats = await runFionaSync({ dryRun, force })
+  const stats = await runFionaSync({ dryRun, force, mode })
 
   return { ok: true, stats }
 })

@@ -25,16 +25,17 @@ function fakeFiona () {
     persons: new Map(), // id → { firstName, lastName, email, phone, bio, myPoffUserId, photo }
     failGuestbooks: new Set(),
     failPersons: new Set(),
-    knownGuestbooks: null // null = same as configured guestbooks
+    knownGuestbooks: null, // null = same as configured guestbooks
+    mutations: [] // returned by listMutations regardless of `since`
   }
   const gb = (id) => {
     if (state.failGuestbooks.has(id)) throw new Error(`fiona down for ${id}`)
     return state.guestbooks.get(id) || { badges: [], accreditations: [] }
   }
   const findAcc = (accId) => {
-    for (const g of state.guestbooks.values()) {
+    for (const [gbId, g] of state.guestbooks) {
       const acc = g.accreditations.find(a => a.id === accId)
-      if (acc) return acc
+      if (acc) return { ...acc, guestbookId: gbId }
     }
     throw new Error(`no accreditation ${accId}`)
   }
@@ -48,7 +49,7 @@ function fakeFiona () {
     getAccreditationBadges (accId) { return findAcc(accId).badges },
     getAccreditation (accId) {
       const a = findAcc(accId)
-      return { personId: a.personId, noPublicationOfContactDetails: !!a.noPublicationOfContactDetails, films: [] }
+      return { personId: a.personId, guestbookId: a.guestbookId, noPublicationOfContactDetails: !!a.noPublicationOfContactDetails, films: [] }
     },
     getPerson (personId) {
       if (state.failPersons.has(personId)) throw new Error(`person ${personId} unavailable`)
@@ -57,6 +58,18 @@ function fakeFiona () {
       return { firstName: p.firstName, lastName: p.lastName, email: p.email, phone: p.phone || null, bio: p.bio || null }
     },
     getMyPoffUserId (personId) { return state.persons.get(personId)?.myPoffUserId || null },
+    listMutations (since) { state.lastMutationsSince = since; return [...state.mutations] },
+    getAccreditationBadgeRecord (badgeRecordId) {
+      for (const g of state.guestbooks.values()) {
+        for (const a of g.accreditations) if (a.badges.some(b => b.id === badgeRecordId)) return { accreditationId: a.id }
+      }
+      throw new Error(`no accreditation badge ${badgeRecordId}`)
+    },
+    getPersonAccreditations (personId) {
+      const out = []
+      for (const [gbId, g] of state.guestbooks) for (const a of g.accreditations) if (a.personId === personId) out.push({ id: a.id, guestbookId: gbId })
+      return out
+    },
     getPersonPhoto (personId) {
       const p = state.persons.get(personId)
       return p?.photo ? { buffer: Buffer.from(p.photo), filename: `fiona-person-${personId}.jpg` } : null
@@ -70,6 +83,7 @@ function fakeStrapi () {
     rules: [],
     activeGuestbookIds: [GB],
     editionsWithGuestbook: [],
+    syncJob: null, // { id, key, enabled, incremental_interval_minutes, full_run_hour, mutation_cursor, ... }
     people: new Map(),
     users: new Map(),
     profiles: new Map(), // userId → profile
@@ -85,6 +99,12 @@ function fakeStrapi () {
     loadRules () { return clone(state.rules) },
     getActiveGuestbookIds () { return [...state.activeGuestbookIds] },
     listEditionsWithGuestbook () { return clone(state.editionsWithGuestbook) },
+    getSyncJob (key) { return state.syncJob && state.syncJob.key === key ? clone(state.syncJob) : null },
+    saveSyncJob (id, patch) {
+      Object.assign(state.syncJob, clone(patch))
+      state.writes.push({ op: 'saveSyncJob', id, payload: clone(patch) })
+      return clone(state.syncJob)
+    },
     findManagedPeople () {
       return [...state.people.values()].filter(p => p.fiona_person_id).map(populated)
     },
@@ -585,5 +605,182 @@ describe('runSync', () => {
     expect(stats.build.triggered).toBe(true)
     const touches = strapi.state.writes.filter(w => w.op === 'updatePerson' && w.payload.skipbuild !== true)
     expect(touches).toHaveLength(1)
+  })
+
+  describe('run modes and job state', () => {
+    const job = (overrides = {}) => ({
+      id: 1,
+      key: 'accreditations',
+      enabled: true,
+      incremental_interval_minutes: 15,
+      full_run_hour: 3,
+      mutation_cursor: '2026-09-13T09:00:00.000Z',
+      last_incremental_run_at: '2026-09-13T09:00:00.000Z',
+      last_full_run_at: '2026-09-12T03:00:00.000Z',
+      last_stats: null,
+      last_error: null,
+      ...overrides
+    })
+    const seedTwoLevel2People = () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(
+        accreditation('acc2', 'fp2', BADGE_PRO, 'Paid', { badges: [{ id: 'bad2', badgeId: BADGE_PRO, badgeName: '', statusText: 'Paid' }] }),
+        accreditation('acc7', 'fp7', BADGE_PRO, 'Paid', { badges: [{ id: 'bad7', badgeId: BADGE_PRO, badgeName: '', statusText: 'Paid' }] })
+      ))
+      fiona.state.persons.set('fp2', { firstName: 'A', lastName: 'A', email: 'a@a.ee' })
+      fiona.state.persons.set('fp7', { firstName: 'B', lastName: 'B', email: 'b@b.ee' })
+    }
+
+    it('a full run records the cursor, the full-run time and the stats on the job', async () => {
+      strapi.state.syncJob = job({ mutation_cursor: null, last_full_run_at: null })
+      seedTwoLevel2People()
+
+      const stats = await runSync({ mode: 'full' }, deps)
+
+      expect(stats.mode).toBe('full')
+      expect(strapi.state.syncJob.mutation_cursor).toBe('2026-09-13T10:00:00.000Z')
+      expect(strapi.state.syncJob.last_full_run_at).toBe('2026-09-13T10:00:00.000Z')
+      expect(strapi.state.syncJob.last_stats.persons.created).toBe(2)
+      expect(strapi.state.syncJob.last_error).toBeNull()
+    })
+
+    it('a dry run never touches the job', async () => {
+      strapi.state.syncJob = job()
+      seedTwoLevel2People()
+
+      await runSync({ mode: 'full', dryRun: true }, deps)
+
+      expect(strapi.state.writes.filter(w => w.op === 'saveSyncJob')).toEqual([])
+    })
+
+    it('an incremental run re-evaluates only the mutated accreditations and leaves the others alone', async () => {
+      strapi.state.syncJob = job({ mutation_cursor: null })
+      seedTwoLevel2People()
+      await runSync({ mode: 'full' }, deps)
+      strapi.state.syncJob = job({ mutation_cursor: '2026-09-13T09:50:00.000Z' })
+      // both people lose their badge status in Fiona, but only acc2 is reported as mutated
+      for (const a of fiona.state.guestbooks.get(GB).accreditations) a.badges[0].statusText = 'Cancelled'
+      fiona.state.mutations = [{ entityName: 'Accreditation', entityId: 'acc2', mutation: 1 }]
+
+      const stats = await runSync({ mode: 'incremental' }, deps)
+
+      const people = [...strapi.state.people.values()]
+      const p2 = people.find(p => p.fiona_person_id === 'fp2')
+      const p7 = people.find(p => p.fiona_person_id === 'fp7')
+      expect(p2.show_in_cg_search).toBe(false)
+      expect(p2.festival_editions).toEqual([])
+      expect(p7.show_in_cg_search).not.toBe(false)
+      expect(p7.festival_editions.sort()).toEqual([CG, IND])
+      expect(stats.mode).toBe('incremental')
+      expect(stats.incremental).toMatchObject({ mutations: 1, accreditations: 1, persons: 1 })
+      expect(fiona.state.lastMutationsSince).toBe('2026-09-13T09:45:00.000Z') // cursor minus 5 min overlap
+      expect(strapi.state.syncJob.mutation_cursor).toBe('2026-09-13T10:00:00.000Z')
+      expect(strapi.state.syncJob.last_incremental_run_at).toBe('2026-09-13T10:00:00.000Z')
+    })
+
+    it('an incremental run picks up a new accreditation badge and creates the person', async () => {
+      strapi.state.syncJob = job()
+      seedTwoLevel2People()
+      fiona.state.mutations = [{ entityName: 'AccreditationBadge', entityId: 'bad7', mutation: 0 }]
+
+      const stats = await runSync({ mode: 'incremental' }, deps)
+
+      expect([...strapi.state.people.values()].map(p => p.fiona_person_id)).toEqual(['fp7'])
+      expect(stats.persons.created).toBe(1)
+    })
+
+    it('an incremental run unpublishes a managed person whose Fiona person was deleted', async () => {
+      strapi.state.syncJob = job({ mutation_cursor: null })
+      seedTwoLevel2People()
+      await runSync({ mode: 'full' }, deps)
+      strapi.state.syncJob = job()
+      fiona.state.guestbooks.get(GB).accreditations = fiona.state.guestbooks.get(GB).accreditations.filter(a => a.personId !== 'fp2')
+      fiona.state.persons.delete('fp2')
+      fiona.state.mutations = [{ entityName: 'Person', entityId: 'fp2', mutation: 2 }]
+
+      const stats = await runSync({ mode: 'incremental' }, deps)
+
+      const p2 = [...strapi.state.people.values()].find(p => p.fiona_person_id === 'fp2')
+      expect(p2.show_in_cg_search).toBe(false)
+      expect(stats.persons.unpublished).toBe(1)
+    })
+
+    it('an incremental run without a cursor falls back to a full run', async () => {
+      strapi.state.syncJob = job({ mutation_cursor: null })
+      seedTwoLevel2People()
+
+      const stats = await runSync({ mode: 'incremental' }, deps)
+
+      expect(stats.mode).toBe('full')
+      expect(stats.persons.created).toBe(2)
+      expect(log.lines.warn.join('\n')).toMatch(/no mutation cursor yet/)
+    })
+
+    it('an incremental run ignores mutations of other entity types', async () => {
+      strapi.state.syncJob = job()
+      seedTwoLevel2People()
+      fiona.state.mutations = [{ entityName: 'Film', entityId: 'f1', mutation: 1 }, { entityName: 'Lookup', entityId: 'l1', mutation: 1 }]
+
+      const stats = await runSync({ mode: 'incremental' }, deps)
+
+      expect(stats.incremental).toMatchObject({ mutations: 2, relevant: 0, accreditations: 0, persons: 0 })
+      expect(strapi.state.people.size).toBe(0)
+    })
+
+    it('auto mode: skips when the job is disabled', async () => {
+      strapi.state.syncJob = job({ enabled: false })
+      seedTwoLevel2People()
+
+      const stats = await runSync({ mode: 'auto' }, deps)
+
+      expect(stats.skipped).toBe(true)
+      expect(stats.reason).toMatch(/disabled/)
+      expect(strapi.state.people.size).toBe(0)
+    })
+
+    it('auto mode: skips when the interval has not passed', async () => {
+      strapi.state.syncJob = job({ last_incremental_run_at: '2026-09-13T09:50:00.000Z', incremental_interval_minutes: 15, last_full_run_at: '2026-09-13T03:00:00.000Z' })
+
+      const stats = await runSync({ mode: 'auto' }, deps)
+
+      expect(stats.skipped).toBe(true)
+      expect(stats.reason).toMatch(/not due/)
+    })
+
+    it('auto mode: runs incrementally when the interval has passed', async () => {
+      strapi.state.syncJob = job({ last_incremental_run_at: '2026-09-13T09:40:00.000Z', incremental_interval_minutes: 15, last_full_run_at: '2026-09-13T03:00:00.000Z' })
+      seedTwoLevel2People()
+
+      const stats = await runSync({ mode: 'auto' }, deps)
+
+      expect(stats.mode).toBe('incremental')
+    })
+
+    it('auto mode: runs a full run once a day after the configured hour', async () => {
+      strapi.state.syncJob = job({ last_incremental_run_at: '2026-09-13T09:55:00.000Z', last_full_run_at: '2026-09-12T03:00:00.000Z', full_run_hour: 3 })
+      seedTwoLevel2People()
+
+      const stats = await runSync({ mode: 'auto' }, deps)
+
+      expect(stats.mode).toBe('full')
+      expect(strapi.state.syncJob.last_full_run_at).toBe('2026-09-13T10:00:00.000Z')
+    })
+
+    it('auto mode: skips with a warning when no job entry exists', async () => {
+      strapi.state.syncJob = null
+
+      const stats = await runSync({ mode: 'auto' }, deps)
+
+      expect(stats.skipped).toBe(true)
+      expect(log.lines.warn.join('\n')).toMatch(/no fiona-sync-job entry with key "accreditations"/)
+    })
+
+    it('records the first error message on the job', async () => {
+      strapi.state.syncJob = job({ mutation_cursor: null })
+      fiona.state.failGuestbooks.add(GB)
+
+      await runSync({ mode: 'full' }, deps)
+
+      expect(strapi.state.syncJob.last_error).toMatch(/fiona down/)
+    })
   })
 })

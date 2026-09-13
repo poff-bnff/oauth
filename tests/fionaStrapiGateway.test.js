@@ -47,6 +47,23 @@ describe('createStrapiGateway', () => {
     expect(editions).toEqual([{ id: 86, name: 'PÖFF 29', guestbookId: 'gb-29', validFrom: '2026-01-01T00:00:00.000Z', validUntil: null }])
   })
 
+  it('reads the sync job entry by key and returns null when none exists', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /fiona-sync-jobs?key=accreditations': [{ id: 4, key: 'accreditations', enabled: true }] })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+    expect(await gateway.getSyncJob('accreditations')).toEqual({ id: 4, key: 'accreditations', enabled: true })
+    expect(calls[0].url).toBe(`${STRAPI}/fiona-sync-jobs?key=accreditations&_limit=1`)
+    expect(await gateway.getSyncJob('films')).toBeNull()
+  })
+
+  it('saves a job patch with the admin token', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /fiona-sync-jobs/4': { id: 4 } })
+    await createStrapiGateway({ fetch, ...deps() }).saveSyncJob(4, { mutation_cursor: '2026-09-13T10:00:00.000Z', last_error: null })
+    expect(calls[0].method).toBe('PUT')
+    expect(calls[0].url).toBe(`${STRAPI}/fiona-sync-jobs/4`)
+    expect(calls[0].body).toEqual({ mutation_cursor: '2026-09-13T10:00:00.000Z', last_error: null })
+    expect(calls[0].headers.Authorization).toBe('Bearer ADMIN')
+  })
+
   it('lists managed people by a non-null fiona_person_id', async () => {
     const { fetch, calls } = fakeFetch()
     await createStrapiGateway({ fetch, ...deps() }).findManagedPeople()
