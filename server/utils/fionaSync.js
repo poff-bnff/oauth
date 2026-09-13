@@ -20,7 +20,7 @@
  * server/api/sync/fiona.post.js (POST /api/sync/fiona, bearer NUXT_SYNC_SECRET).
  */
 
-import { getStrapiAdminToken, authenticateStrapiUser, getActiveFionaGuestbooks } from './strapi.js'
+import { getStrapiAdminToken, getActiveFionaGuestbooks } from './strapi.js'
 import { createXapiClient } from './fiona/xapiClient.js'
 import { createPublicationClient } from './fiona/publicationClient.js'
 import { createHybridClient } from './fiona/hybridClient.js'
@@ -70,7 +70,6 @@ function buildDeps () {
     config,
     getAdminToken: getStrapiAdminToken,
     getActiveFionaGuestbooks,
-    authenticateStrapiUser,
     log
   })
   return {

@@ -124,11 +124,15 @@ function fakeStrapi () {
       const u = state.users.get(Number(id))
       return u ? clone(u) : null
     },
+    confirmUser (userId) {
+      state.users.get(Number(userId)).confirmed = true
+      state.writes.push({ op: 'confirmUser', id: Number(userId), payload: { confirmed: true } })
+    },
     findOrRegisterUser (email) {
       let u = [...state.users.values()].find(u => u.email.toLowerCase() === email.toLowerCase())
       let created = false
       if (!u) {
-        u = { id: nextId(), email, person: null, user_roles: [] }
+        u = { id: nextId(), email, person: null, user_roles: [], confirmed: true }
         state.users.set(u.id, u)
         state.writes.push({ op: 'registerUser', id: u.id, payload: { email } })
         created = true
@@ -158,10 +162,18 @@ function fakeStrapi () {
       state.writes.push({ op: 'linkPersonToUser', id: Number(userId), payload: { person: Number(personId) } })
     },
     ensureUserProfile (user, fields) {
-      if (state.profiles.has(Number(user.id))) return false
-      state.profiles.set(Number(user.id), { user: Number(user.id), ...fields })
-      state.writes.push({ op: 'createProfile', id: Number(user.id), payload: { ...fields } })
-      return true
+      const existing = state.profiles.get(Number(user.id))
+      if (!existing) {
+        state.profiles.set(Number(user.id), { user: Number(user.id), ...fields })
+        state.writes.push({ op: 'createProfile', id: Number(user.id), payload: { ...fields } })
+        return { created: true, updated: [] }
+      }
+      const updated = Object.keys(fields).filter(k => (existing[k] === undefined || existing[k] === null || existing[k] === '') && fields[k])
+      if (updated.length) {
+        for (const k of updated) existing[k] = fields[k]
+        state.writes.push({ op: 'updateProfile', id: Number(user.id), payload: Object.fromEntries(updated.map(k => [k, fields[k]])) })
+      }
+      return { created: false, updated }
     },
     uploadPhoto (buffer, filename) {
       const id = nextId()
@@ -248,7 +260,30 @@ describe('runSync', () => {
     expect(strapi.state.profiles.get(user.id)).toMatchObject({ email: 'mari@example.com', firstName: 'Mari', lastName: 'Maasikas' })
     expect(stats.persons).toMatchObject({ desired: 1, created: 1, updated: 0, unpublished: 0 })
     expect(stats.users.created).toBe(1)
-    expect(stats.profiles.created).toBe(1)
+    expect(stats.profiles).toEqual({ created: 1, updated: 0 })
+  })
+
+  it('confirms an existing unconfirmed user it links to a synced person', async () => {
+    strapi.state.users.set(601, { id: 601, email: 'mari@example.com', person: null, user_roles: [], confirmed: false })
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created')))
+    fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com' })
+
+    const stats = await runSync({}, deps)
+
+    expect(strapi.state.users.get(601).confirmed).toBe(true)
+    expect(stats.users.confirmed).toBe(1)
+  })
+
+  it('fills the empty names of a profile Strapi created on registration', async () => {
+    strapi.state.users.set(600, { id: 600, email: 'mari@example.com', person: null, user_roles: [] })
+    strapi.state.profiles.set(600, { user: 600, email: 'mari@example.com', firstName: '', lastName: null })
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created')))
+    fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com' })
+
+    const stats = await runSync({}, deps)
+
+    expect(strapi.state.profiles.get(600)).toMatchObject({ firstName: 'Mari', lastName: 'Maasikas' })
+    expect(stats.profiles).toEqual({ created: 0, updated: 1 })
   })
 
   it('every person write carries skipbuild and the create happens without user or editions', async () => {

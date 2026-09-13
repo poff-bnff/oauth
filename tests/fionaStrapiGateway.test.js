@@ -92,12 +92,30 @@ describe('createStrapiGateway', () => {
     expect(registered).toEqual([])
   })
 
-  it('registers a missing user through authenticateStrapiUser and reports created', async () => {
-    const { fetch } = fakeFetch({ 'GET /users?email=': [] })
+  it('creates a missing user directly as confirmed with the authenticated role, never through the register route', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /users?email=': [],
+      'POST /users': { id: 78, email: 'new@y.ee', confirmed: true }
+    })
     const result = await createStrapiGateway({ fetch, ...deps() }).findOrRegisterUser('new@y.ee')
-    expect(registered).toEqual(['new@y.ee'])
+    expect(registered).toEqual([]) // authenticateStrapiUser (register route + confirmation mail) is NOT used
     expect(result.created).toBe(true)
-    expect(result.user).toMatchObject({ id: 77, email: 'new@y.ee' })
+    expect(result.user).toMatchObject({ id: 78, email: 'new@y.ee' })
+    const post = calls.find(c => c.method === 'POST')
+    expect(post.url).toBe(`${STRAPI}/users`)
+    expect(post.body).toMatchObject({ email: 'new@y.ee', username: 'new@y.ee', confirmed: true, provider: 'local' })
+    expect(post.body.role).toBeUndefined() // Strapi assigns the default (authenticated) role itself
+    expect(typeof post.body.password).toBe('string')
+    expect(post.body.password.length).toBeGreaterThanOrEqual(32)
+    expect(post.headers.Authorization).toBe('Bearer ADMIN')
+  })
+
+  it('marks an existing unconfirmed user as confirmed when asked', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /users/3': { id: 3, confirmed: true } })
+    await createStrapiGateway({ fetch, ...deps() }).confirmUser(3)
+    expect(calls[0].method).toBe('PUT')
+    expect(calls[0].url).toBe(`${STRAPI}/users/3`)
+    expect(calls[0].body).toEqual({ confirmed: true })
   })
 
   it('writes people, links and roles with the admin token', async () => {
@@ -121,14 +139,33 @@ describe('createStrapiGateway', () => {
     expect(await createStrapiGateway({ fetch, ...deps() }).getUserRoleIds(3)).toEqual([7, 9])
   })
 
-  it('creates a user profile only when none exists', async () => {
-    const { fetch, calls } = fakeFetch({ 'GET /user-profiles?user=3': [{ id: 1 }], 'GET /user-profiles?user=4': [] })
+  it('creates a user profile when none exists', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /user-profiles?user=4': [] })
     const gateway = createStrapiGateway({ fetch, ...deps() })
-    expect(await gateway.ensureUserProfile({ id: 3 }, { email: 'a@b.ee' })).toBe(false)
-    expect(await gateway.ensureUserProfile({ id: 4 }, { email: 'c@d.ee', firstName: 'C' })).toBe(true)
+    expect(await gateway.ensureUserProfile({ id: 4 }, { email: 'c@d.ee', firstName: 'C' })).toEqual({ created: true, updated: [] })
     const post = calls.find(c => c.method === 'POST')
     expect(post.url).toBe(`${STRAPI}/user-profiles`)
     expect(post.body).toEqual({ user: 4, email: 'c@d.ee', firstName: 'C' })
+  })
+
+  it('fills only the empty fields of an existing profile and never overwrites filled ones', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /user-profiles?user=3': [{ id: 1, email: 'a@b.ee', firstName: '', lastName: null, phoneNr: '+372 1' }],
+      'PUT /user-profiles/1': { id: 1 }
+    })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+    const result = await gateway.ensureUserProfile({ id: 3 }, { email: 'a@b.ee', firstName: 'A', lastName: 'B', phoneNr: '+372 999' })
+    expect(result).toEqual({ created: false, updated: ['firstName', 'lastName'] })
+    const put = calls.find(c => c.method === 'PUT')
+    expect(put.url).toBe(`${STRAPI}/user-profiles/1`)
+    expect(put.body).toEqual({ firstName: 'A', lastName: 'B' })
+  })
+
+  it('leaves a complete existing profile untouched', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /user-profiles?user=3': [{ id: 1, email: 'a@b.ee', firstName: 'A', lastName: 'B' }] })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+    expect(await gateway.ensureUserProfile({ id: 3 }, { email: 'a@b.ee', firstName: 'X', lastName: 'Y' })).toEqual({ created: false, updated: [] })
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
   it('uploads a photo as multipart and returns the file id', async () => {

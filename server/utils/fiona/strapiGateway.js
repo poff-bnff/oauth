@@ -10,9 +10,11 @@
  * no Nuxt globals and can be tested with fakes.
  */
 
+import crypto from 'crypto'
+
 const relationId = value => (value && typeof value === 'object') ? value.id : value
 
-export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFionaGuestbooks, authenticateStrapiUser, log = console }) {
+export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFionaGuestbooks, log = console }) {
   if (typeof fetch !== 'function') throw new Error('createStrapiGateway: fetch is required')
   const base = config.strapiUrl
 
@@ -92,11 +94,29 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return await getOrNull(`/users/${encodeURIComponent(id)}`)
     },
 
+    /**
+     * Find the login user by email or create it. Creation goes through the admin
+     * user route (`POST /users`), NOT `/auth/local/register`: the user is created
+     * as confirmed and Strapi sends no confirmation mail. Strapi assigns the
+     * default (authenticated) role and hashes the random password.
+     */
     async findOrRegisterUser (email) {
       const existing = first(await get(`/users?email=${encodeURIComponent(email)}`))
       if (existing) return { user: existing, created: false }
-      const registered = await authenticateStrapiUser(email)
-      return { user: { id: Number(registered.id), email: registered.email || email, person: null }, created: true }
+      const created = await post('/users', {
+        username: email,
+        email,
+        password: crypto.randomBytes(32).toString('hex'),
+        confirmed: true,
+        provider: 'local',
+        externalProviders: [{ provider: 'local', UUID: 'not set yet', dateConnected: new Date().toISOString() }]
+      })
+      return { user: { id: Number(created.id), email: created.email || email, person: null, confirmed: true }, created: true }
+    },
+
+    /** Mark a user as confirmed (identity established through Fiona). */
+    async confirmUser (userId) {
+      await put(`/users/${encodeURIComponent(userId)}`, { confirmed: true })
     },
 
     async getUserRoleIds (userId) {
@@ -120,11 +140,27 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       await put(`/users/${encodeURIComponent(userId)}`, { person: Number(personId) })
     },
 
+    /**
+     * Make sure the user has a user-profile. Strapi creates an (empty) profile
+     * on registration, so an existing profile gets its EMPTY fields filled from
+     * `fields`; values already present are never overwritten.
+     * @returns {{ created: boolean, updated: string[] }}
+     */
     async ensureUserProfile (user, fields) {
-      const existing = await get(`/user-profiles?user=${encodeURIComponent(user.id)}&_limit=1`)
-      if (Array.isArray(existing) && existing.length) return false
-      await post('/user-profiles', { user: Number(user.id), ...fields })
-      return true
+      const existing = first(await get(`/user-profiles?user=${encodeURIComponent(user.id)}&_limit=1`))
+      if (!existing) {
+        await post('/user-profiles', { user: Number(user.id), ...fields })
+        return { created: true, updated: [] }
+      }
+      const patch = {}
+      for (const [key, value] of Object.entries(fields)) {
+        const current = existing[key]
+        const empty = current === undefined || current === null || current === ''
+        if (empty && value !== undefined && value !== null && value !== '') patch[key] = value
+      }
+      const updated = Object.keys(patch)
+      if (updated.length) await put(`/user-profiles/${encodeURIComponent(existing.id)}`, patch)
+      return { created: false, updated }
     },
 
     async uploadPhoto (buffer, filename) {
