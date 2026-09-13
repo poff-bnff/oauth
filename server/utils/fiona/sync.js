@@ -53,8 +53,8 @@ function newStats (dryRun, mode) {
     accreditations: { seen: 0, matched: 0, errors: 0 },
     persons: { desired: 0, created: 0, updated: 0, unchanged: 0, downgraded: 0, unpublished: 0, conflicts: 0, skippedNoEmail: 0 },
     editions: { attached: 0, detached: 0 },
-    users: { created: 0, linked: 0 },
-    profiles: { created: 0 },
+    users: { created: 0, linked: 0, confirmed: 0 },
+    profiles: { created: 0, updated: 0 },
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
     incremental: null,
@@ -598,13 +598,18 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         await strapi.linkPersonToUser(person.id, user.id)
         stats.users.linked++
       }
-      const profileCreated = await strapi.ensureUserProfile(user, {
+      if (user.confirmed === false && typeof strapi.confirmUser === 'function') {
+        await strapi.confirmUser(user.id) // identity comes from Fiona; also unblocks Strapi's own confirmation gate
+        stats.users.confirmed++
+      }
+      const profile = await strapi.ensureUserProfile(user, {
         email: contactEmail,
         firstName: fionaPerson.firstName || null,
         lastName: fionaPerson.lastName || null,
         ...(fionaPerson.phone ? { phoneNr: fionaPerson.phone } : {})
       })
-      if (profileCreated) stats.profiles.created++
+      if (profile === true || profile?.created) stats.profiles.created++
+      else if (profile?.updated?.length) stats.profiles.updated++
 
       if (want.roleIds.size || removeRoles.length) {
         const currentRoles = await strapi.getUserRoleIds(user.id)
