@@ -41,6 +41,7 @@ function newStats (dryRun) {
     profiles: { created: 0 },
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
+    guestbookBadges: {},
     badgeStatuses: {},
     warnings: [],
     errors: 0
@@ -122,7 +123,8 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
       if (badge.name) badgeNamesInScanned.add(norm(badge.name))
       if (badge.id && badge.name) badgeNameById.set(norm(badge.id), badge.name)
     }
-    log.info(`Guestbook ${guestbookId} badges: ${badges.map(badge => `${badge.name} (${badge.id})`).join(', ') || '(none)'}`)
+    stats.guestbookBadges[guestbookId] = badges.map(badge => `${badge.name} (${badge.id})`)
+    log.info(`Guestbook ${guestbookId} badges: ${stats.guestbookBadges[guestbookId].join(', ') || '(none)'}`)
   }
   const mappedRules = rules.filter(rule =>
     (rule.badgeId && badgeIdsInScanned.has(rule.badgeId)) || (rule.badgeName && badgeNamesInScanned.has(rule.badgeName))

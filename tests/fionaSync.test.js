@@ -415,6 +415,14 @@ describe('runSync', () => {
     expect(log.lines.info.join('\n')).toMatch(/Guestbook guestbook-2025 badges: TEAM \(badge-team-guid\), Industry PRO \(badge-pro-guid\)/)
   })
 
+  it('returns each scanned guestbook badge list in the stats', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith())
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.guestbookBadges).toEqual({ [GB]: ['TEAM (badge-team-guid)', 'Industry PRO (badge-pro-guid)'] })
+  })
+
   it('counts the badge statuses seen per badge and reports them in stats and the log', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(
       accreditation('acc1', 'fp1', BADGE_PRO, 'Approved'),
