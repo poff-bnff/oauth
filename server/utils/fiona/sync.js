@@ -64,7 +64,8 @@ function newStats (dryRun, mode) {
     badgeStatuses: {},
     warnings: [],
     errors: 0,
-    errorMessages: []
+    errorMessages: [],
+    dryRunActions: []
   }
 }
 
@@ -146,6 +147,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
+  const recordDryRun = (entry) => { if (stats.dryRunActions.length < 500) stats.dryRunActions.push(entry) }
   const fail = (message, err) => {
     stats.errors++
     const line = `${message}: ${describeError(err)}`
@@ -539,8 +541,23 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       const summary = `person ${fionaPersonId} ${fionaPerson.firstName} ${fionaPerson.lastName} level ${want.level} editions=[${editionIds.join(', ')}] roles=[${[...want.roleIds].join(', ')}]`
 
       if (dryRun) {
-        if (!existing) { stats.persons.created++; log.info(`${would}CREATE ${summary}`) } else if (changed.length) { stats.persons.updated++; log.info(`${would}UPDATE person #${existing.id} (${changed.join(', ')}) ${summary}`) } else { stats.persons.unchanged++ }
-        if (action) log.info(`${would}${action.type} person #${existing?.id} -editions=[${detach.join(', ')}] -roles=[${removeRoles.join(', ')}]`)
+        const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
+        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds) }
+        if (!existing) {
+          stats.persons.created++
+          log.info(`${would}CREATE ${summary}`)
+          recordDryRun({ action: 'CREATE', ...plan, changed: null })
+        } else if (changed.length) {
+          stats.persons.updated++
+          log.info(`${would}UPDATE person #${existing.id} (${changed.join(', ')}) ${summary}`)
+          recordDryRun({ action: 'UPDATE', personId: existing.id, ...plan, changed })
+        } else {
+          stats.persons.unchanged++
+        }
+        if (action) {
+          log.info(`${would}${action.type} person #${existing?.id} -editions=[${detach.join(', ')}] -roles=[${removeRoles.join(', ')}]`)
+          recordDryRun({ action: action.type, fionaPersonId, personId: existing?.id, detachEditionIds: detach, removeRoleIds: removeRoles })
+        }
         stats.editions.attached += newlyAttached.length
         stats.editions.detached += detach.length
         continue
@@ -611,7 +628,11 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       if (action.type === 'UNPUBLISH') stats.persons.unpublished++
       else stats.persons.downgraded++
       stats.editions.detached += action.detachEditionIds.length
-      if (dryRun) { log.info(`${would}${label}`); continue }
+      if (dryRun) {
+        log.info(`${would}${label}`)
+        recordDryRun({ action: action.type, fionaPersonId: action.fionaPersonId, personId: person.id, detachEditionIds: action.detachEditionIds, removeRoleIds: action.removeRoleIds })
+        continue
+      }
 
       const payload = {
         festival_editions: action.remainingEditionIds,
