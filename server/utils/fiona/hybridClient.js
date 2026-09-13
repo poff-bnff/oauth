@@ -7,8 +7,9 @@
  * only for a person the sync is about to write, and only for what the
  * published record lacks:
  *   - no published email  → XAPI person (communication items) for the login email
- *   - no MyPoff link      → XAPI external authentications
- *   - no published photo  → XAPI attachments
+ *   - no MyPoff link      → XAPI external authentications (prevents a second
+ *                           login account for someone who already has one)
+ * Photos are editorial content and come from the Publication API only.
  * XAPI failures never fail the sync: the published data is kept and a
  * warning is logged.
  */
@@ -56,9 +57,7 @@ export function createHybridClient ({ publication, xapi = null, log = console })
     },
 
     async getPersonPhoto (personId) {
-      const published = await publication.getPersonPhoto(personId)
-      if (published || !xapi) return published || null
-      return await fallback(log, 'photo', personId, () => xapi.getPersonPhoto(personId), null)
+      return (await publication.getPersonPhoto(personId)) || null
     }
   }
 }
