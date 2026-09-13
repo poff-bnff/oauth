@@ -49,8 +49,9 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const dryRun = body?.dryRun === true
+  const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
 
-  const stats = await runFionaSync({ dryRun })
+  const stats = await runFionaSync({ dryRun, force })
 
   return { ok: true, stats }
 })
