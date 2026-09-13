@@ -9,8 +9,10 @@
  *        -H "Authorization: Bearer <NUXT_SYNC_SECRET value>"
  *
  * Optional body: { "dryRun": true }  — logs intended changes without writing to Strapi.
- *                { "mode": "full" | "incremental" | "auto" } — default "full"; "auto" lets the
- *                fiona-sync-job entry decide (what the cron sends every minute).
+ *                { "mode": "full" | "incremental" | "auto" | "compare" } — default "full"; "auto"
+ *                lets the fiona-sync-job entry decide (what the cron sends every minute);
+ *                "compare" is a read-only diagnostic listing the differences between the
+ *                XAPI and the Publication API for the active guestbooks.
  *                { "force": true } — lift the per-run removal cap.
  */
 
@@ -53,7 +55,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event).catch(() => ({}))
   const dryRun = body?.dryRun === true
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare'].includes(body?.mode) ? body.mode : 'full'
 
   const stats = await runFionaSync({ dryRun, force, mode })
 

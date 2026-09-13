@@ -26,6 +26,7 @@ import { createPublicationClient } from './fiona/publicationClient.js'
 import { createHybridClient } from './fiona/hybridClient.js'
 import { createStrapiGateway } from './fiona/strapiGateway.js'
 import { runSync } from './fiona/sync.js'
+import { compareSources } from './fiona/compare.js'
 
 const config = useRuntimeConfig()
 
@@ -87,6 +88,25 @@ function buildDeps () {
  * Run the sync. Returns the stats object (see fiona/sync.js).
  * @param {{ dryRun?: boolean, force?: boolean }} options
  */
+/**
+ * Diagnostic: read the active guestbooks through BOTH APIs and report the
+ * differences (missing badge holders, status texts). Needs both keys. Read-only.
+ */
+async function compareFionaSources () {
+  if (!config.fionaApiKey || !config.fionaPublicationApiKey) {
+    throw new Error('compare needs both NUXT_FIONA_API_KEY and NUXT_FIONA_PUBLICATION_API_KEY')
+  }
+  const xapi = createXapiClient({ fetch: $fetch, apiKey: config.fionaApiKey, log })
+  const publication = createPublicationClient({
+    fetch: $fetch,
+    apiKey: config.fionaPublicationApiKey,
+    ...(config.fionaPublicationApiUrl ? { baseUrl: config.fionaPublicationApiUrl } : {}),
+    log
+  })
+  const guestbookIds = await getActiveFionaGuestbooks()
+  return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
+}
+
 export async function runFionaSync ({ dryRun = false, force = false, mode = 'full' } = {}) {
   if (syncRunning) {
     log.warn('Sync already running — skipping this invocation')
@@ -94,6 +114,7 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
   }
   syncRunning = true
   try {
+    if (mode === 'compare') return await compareFionaSources()
     return await runSync({ dryRun, force, mode }, buildDeps())
   } finally {
     syncRunning = false
