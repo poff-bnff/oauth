@@ -41,12 +41,14 @@ export function normalizeBadges (raw) {
   return badges
 }
 
-/** XAPI accreditation detail → { personId, noPublicationOfContactDetails, films } */
+/** XAPI accreditation detail → { personId, guestbookId, noPublicationOfContactDetails, films } */
 export function normalizeAccreditation (raw) {
   const person = pick(raw, 'Person', 'person') || {}
+  const guestbook = pick(raw, 'Guestbook', 'guestbook') || {}
   const films = pick(raw, 'Films', 'films') || []
   return {
     personId: text(pick(person, 'Id', 'id')),
+    guestbookId: text(pick(guestbook, 'Id', 'id')),
     noPublicationOfContactDetails: pick(raw, 'NoPublicationOfContactDetails', 'noPublicationOfContactDetails') === true,
     films: (Array.isArray(films) ? films : []).map(film => ({
       id: text(pick(film, 'Id', 'id')),

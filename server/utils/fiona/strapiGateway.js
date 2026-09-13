@@ -46,6 +46,15 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return await get('/fiona-sync-rules?active=true&_limit=-1')
     },
 
+    /** The `fiona-sync-job` entry for a job key (cursor, interval, on/off), or null. */
+    async getSyncJob (key) {
+      return first(await getOrNull(`/fiona-sync-jobs?key=${encodeURIComponent(key)}&_limit=1`)) // 404 = collection not created yet
+    },
+
+    async saveSyncJob (id, patch) {
+      return await put(`/fiona-sync-jobs/${encodeURIComponent(id)}`, patch)
+    },
+
     async getActiveGuestbookIds () {
       return await getActiveFionaGuestbooks()
     },
