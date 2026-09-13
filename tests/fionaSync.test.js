@@ -396,6 +396,31 @@ describe('runSync', () => {
     expect(stats.persons.unpublished).toBe(0)
   })
 
+  it('records error messages in the stats so a dry run explains failures by itself', async () => {
+    fiona.state.failGuestbooks.add(GB)
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.errors).toBe(1)
+    expect(stats.errorMessages).toHaveLength(1)
+    expect(stats.errorMessages[0]).toMatch(/guestbook guestbook-2025 .*fiona down for guestbook-2025/)
+  })
+
+  it('includes the HTTP status and response body of a failed Fiona call in the error message', async () => {
+    fiona.listAccreditations = () => {
+      const err = new Error('Unauthorized')
+      err.statusCode = 401
+      err.data = { message: 'Invalid api key' }
+      throw err
+    }
+    fiona.state.guestbooks.set(GB, guestbookWith())
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.errorMessages[0]).toMatch(/HTTP 401/)
+    expect(stats.errorMessages[0]).toMatch(/Invalid api key/)
+  })
+
   it('never removes when no active rule maps to a scanned guestbook', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com' })

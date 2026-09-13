@@ -45,8 +45,23 @@ function newStats (dryRun) {
     guestbookBadges: {},
     badgeStatuses: {},
     warnings: [],
-    errors: 0
+    errors: 0,
+    errorMessages: []
   }
+}
+
+/** Human-readable error text including HTTP status and response body when present. */
+function describeError (err) {
+  if (!err) return 'unknown error'
+  const status = err.statusCode || err.status || err.response?.status
+  const body = err.data ?? err.response?._data
+  let text = err.message || String(err)
+  if (status) text = `HTTP ${status} ${text}`
+  if (body !== undefined && body !== null) {
+    const snippet = typeof body === 'string' ? body : JSON.stringify(body)
+    if (snippet && !text.includes(snippet)) text += ` — ${snippet.slice(0, 300)}`
+  }
+  return text
 }
 
 /** Keys of `payload` whose value differs from `existing` (relations compared by id). */
@@ -81,7 +96,12 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
-  const fail = (message, err) => { stats.errors++; log.error(`${message}: ${err?.message || err}`) }
+  const fail = (message, err) => {
+    stats.errors++
+    const line = `${message}: ${describeError(err)}`
+    if (stats.errorMessages.length < 50) stats.errorMessages.push(line)
+    log.error(line)
+  }
   const finish = () => { stats.durationSec = Number(((Date.now() - startedAt) / 1000).toFixed(1)); return stats }
 
   // Why is no guestbook active? List every edition with a guestbook id and its window.
