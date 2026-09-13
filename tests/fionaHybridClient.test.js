@@ -63,13 +63,13 @@ describe('createHybridClient', () => {
     expect(tracker.log).toEqual([['xapi.getPerson', 'p']])
   })
 
-  it('falls back to the XAPI for the MyPoff link and the photo when the published record has none', async () => {
+  it('falls back to the XAPI for the MyPoff link when the published record has none, but never for the photo', async () => {
     const tracker = calls()
     const publication = publicationStub({ getMyPoffUserId: () => null, getPersonPhoto: () => null })
     const client = createHybridClient({ publication, xapi: xapiStub(tracker), log: { warn () {} } })
     expect(await client.getMyPoffUserId('p')).toBe('99')
-    expect((await client.getPersonPhoto('p')).buffer.toString()).toBe('xapi')
-    expect(tracker.log.map(c => c[0])).toEqual(['xapi.getMyPoffUserId', 'xapi.getPersonPhoto'])
+    expect(await client.getPersonPhoto('p')).toBeNull()
+    expect(tracker.log.map(c => c[0])).toEqual(['xapi.getMyPoffUserId'])
   })
 
   it('keeps the published person and warns when the XAPI fallback fails', async () => {
