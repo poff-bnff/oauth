@@ -41,10 +41,10 @@ export function normalizeRules (rawRules) {
   for (const raw of Array.isArray(rawRules) ? rawRules : []) {
     if (!raw || raw.active === false) continue
 
-    const badgeId = norm(raw.badge_id)
-    const badgeName = norm(raw.badge_name)
+    const badgeId = norm(raw.badge_type_id)
+    const badgeName = norm(raw.badge_type_name)
     if (!badgeId && !badgeName) {
-      warnings.push(`rule #${raw.id} "${raw.name}" has neither badge_id nor badge_name — skipped`)
+      warnings.push(`rule #${raw.id} "${raw.name}" has neither badge_type_id nor badge_type_name — skipped`)
       continue
     }
 

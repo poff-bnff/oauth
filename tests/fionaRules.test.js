@@ -8,8 +8,8 @@ function rawRule (overrides = {}) {
   return {
     id: 1,
     name: 'rule',
-    badge_id: GUID_TEAM,
-    badge_name: 'TEAM',
+    badge_type_id: GUID_TEAM,
+    badge_type_name: 'TEAM',
     sync_statuses: 'pending, created, approved',
     full_profile_statuses: '',
     festival_editions: [],
@@ -63,7 +63,7 @@ describe('normalizeRules', () => {
   it('skips inactive rules and rules without a badge id or name', () => {
     const { rules, warnings } = normalizeRules([
       rawRule({ id: 1, active: false }),
-      rawRule({ id: 2, badge_id: '', badge_name: '' }),
+      rawRule({ id: 2, badge_type_id: '', badge_type_name: '' }),
       rawRule({ id: 3 })
     ])
     expect(rules.map(r => r.id)).toEqual([3])
@@ -73,11 +73,11 @@ describe('normalizeRules', () => {
 
 describe('evaluateBadges', () => {
   const { rules } = normalizeRules([
-    rawRule({ id: 1, badge_id: GUID_TEAM, badge_name: 'TEAM', sync_statuses: 'pending, created, approved' }),
+    rawRule({ id: 1, badge_type_id: GUID_TEAM, badge_type_name: 'TEAM', sync_statuses: 'pending, created, approved' }),
     rawRule({
       id: 2,
-      badge_id: GUID_PRO,
-      badge_name: 'Industry PRO',
+      badge_type_id: GUID_PRO,
+      badge_type_name: 'Industry PRO',
       sync_statuses: 'approved, paid',
       full_profile_statuses: 'approved, paid',
       festival_editions: [{ id: 59 }, { id: 90 }],
@@ -125,8 +125,8 @@ describe('evaluateBadges', () => {
 
   it('takes the highest level and unions editions across several badges', () => {
     const { rules: two } = normalizeRules([
-      rawRule({ id: 5, badge_id: 'g5', sync_statuses: 'ok', full_profile_statuses: 'ok', festival_editions: [{ id: 1 }] }),
-      rawRule({ id: 6, badge_id: 'g6', sync_statuses: 'ok', full_profile_statuses: 'ok', festival_editions: [{ id: 2 }, { id: 1 }], user_roles: [{ id: 9 }] })
+      rawRule({ id: 5, badge_type_id: 'g5', sync_statuses: 'ok', full_profile_statuses: 'ok', festival_editions: [{ id: 1 }] }),
+      rawRule({ id: 6, badge_type_id: 'g6', sync_statuses: 'ok', full_profile_statuses: 'ok', festival_editions: [{ id: 2 }, { id: 1 }], user_roles: [{ id: 9 }] })
     ])
     const result = evaluateBadges([
       { badgeId: 'g5', badgeName: '', statusText: 'ok' },

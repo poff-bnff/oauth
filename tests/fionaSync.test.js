@@ -150,8 +150,8 @@ function rule (overrides) {
     id: 1,
     name: 'rule',
     active: true,
-    badge_id: BADGE_TEAM,
-    badge_name: 'TEAM',
+    badge_type_id: BADGE_TEAM,
+    badge_type_name: 'TEAM',
     sync_statuses: 'pending, created, approved',
     full_profile_statuses: '',
     festival_editions: [],
@@ -164,8 +164,8 @@ const TEAM_RULE = rule({ id: 1, name: 'TEAM → basic' })
 const PRO_RULE = rule({
   id: 2,
   name: 'Industry PRO → full',
-  badge_id: BADGE_PRO,
-  badge_name: 'Industry PRO',
+  badge_type_id: BADGE_PRO,
+  badge_type_name: 'Industry PRO',
   sync_statuses: 'approved, paid',
   full_profile_statuses: 'approved, paid',
   festival_editions: [{ id: IND }, { id: CG }],
@@ -398,7 +398,7 @@ describe('runSync', () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com' })
     await runSync({}, deps)
-    strapi.state.rules = [rule({ id: 9, badge_id: 'unknown-badge', badge_name: 'Nobody' })]
+    strapi.state.rules = [rule({ id: 9, badge_type_id: 'unknown-badge', badge_type_name: 'Nobody' })]
 
     const stats = await runSync({}, deps)
 
