@@ -36,6 +36,17 @@ describe('createStrapiGateway', () => {
     expect(calls[0].headers.Authorization).toBe('Bearer ADMIN')
   })
 
+  it('lists editions that carry a guestbook id with their validity window', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /festival-editions?guestbook_id_null=false': [
+        { id: 86, name_en: 'PÖFF 29', guestbook_id: 'gb-29', validFrom: '2026-01-01T00:00:00.000Z', validUntil: null, other: 'x' }
+      ]
+    })
+    const editions = await createStrapiGateway({ fetch, ...deps() }).listEditionsWithGuestbook()
+    expect(calls[0].url).toBe(`${STRAPI}/festival-editions?guestbook_id_null=false&_limit=-1`)
+    expect(editions).toEqual([{ id: 86, name: 'PÖFF 29', guestbookId: 'gb-29', validFrom: '2026-01-01T00:00:00.000Z', validUntil: null }])
+  })
+
   it('lists managed people by a non-null fiona_person_id', async () => {
     const { fetch, calls } = fakeFetch()
     await createStrapiGateway({ fetch, ...deps() }).findManagedPeople()

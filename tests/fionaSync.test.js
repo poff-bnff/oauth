@@ -65,6 +65,7 @@ function fakeStrapi () {
   const state = {
     rules: [],
     activeGuestbookIds: [GB],
+    editionsWithGuestbook: [],
     people: new Map(),
     users: new Map(),
     profiles: new Map(), // userId → profile
@@ -79,6 +80,7 @@ function fakeStrapi () {
     state,
     loadRules () { return clone(state.rules) },
     getActiveGuestbookIds () { return [...state.activeGuestbookIds] },
+    listEditionsWithGuestbook () { return clone(state.editionsWithGuestbook) },
     findManagedPeople () {
       return [...state.people.values()].filter(p => p.fiona_person_id).map(populated)
     },
@@ -464,6 +466,33 @@ describe('runSync', () => {
       'TEAM (badge-team-guid)': { created: 1 }
     })
     expect(log.lines.info.join('\n')).toMatch(/badge "Industry PRO" \(badge-pro-guid\) statuses: approved=2, cancelled=1/)
+  })
+
+  it('explains why no guestbook is active by listing editions with a guestbook id and their windows', async () => {
+    strapi.state.activeGuestbookIds = []
+    strapi.state.editionsWithGuestbook = [
+      { id: 86, name: 'PÖFF 29', guestbookId: 'gb-29', validFrom: '2026-09-13T10:00:00.000Z', validUntil: '2026-12-31T00:00:00.000Z' },
+      { id: 87, name: 'Industry 2025', guestbookId: 'gb-25', validFrom: null, validUntil: null },
+      { id: 88, name: 'Old', guestbookId: 'gb-old', validFrom: '2025-01-01T00:00:00.000Z', validUntil: '2025-12-31T00:00:00.000Z' }
+    ]
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.guestbooks.active).toBe(0)
+    expect(stats.editionsWithGuestbook).toEqual([
+      { id: 86, name: 'PÖFF 29', guestbookId: 'gb-29', validFrom: '2026-09-13T10:00:00.000Z', validUntil: '2026-12-31T00:00:00.000Z', active: false, reason: 'validFrom is not before today (2026-09-13)' },
+      { id: 87, name: 'Industry 2025', guestbookId: 'gb-25', validFrom: null, validUntil: null, active: false, reason: 'validFrom and validUntil are not set' },
+      { id: 88, name: 'Old', guestbookId: 'gb-old', validFrom: '2025-01-01T00:00:00.000Z', validUntil: '2025-12-31T00:00:00.000Z', active: false, reason: 'validUntil is not after today (2026-09-13)' }
+    ])
+    expect(log.lines.warn.join('\n')).toMatch(/edition #86 "PÖFF 29" guestbook gb-29 .*validFrom is not before today/)
+  })
+
+  it('warns when no edition has a guestbook id at all', async () => {
+    strapi.state.activeGuestbookIds = []
+
+    await runSync({ dryRun: true }, deps)
+
+    expect(log.lines.warn.join('\n')).toMatch(/no festival edition has a guestbook_id/)
   })
 
   it('dry run writes nothing and reports what it would do', async () => {

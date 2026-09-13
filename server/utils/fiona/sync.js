@@ -41,6 +41,7 @@ function newStats (dryRun) {
     profiles: { created: 0 },
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
+    editionsWithGuestbook: [],
     guestbookBadges: {},
     badgeStatuses: {},
     warnings: [],
@@ -83,6 +84,37 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
   const fail = (message, err) => { stats.errors++; log.error(`${message}: ${err?.message || err}`) }
   const finish = () => { stats.durationSec = Number(((Date.now() - startedAt) / 1000).toFixed(1)); return stats }
 
+  // Why is no guestbook active? List every edition with a guestbook id and its window.
+  async function explainInactiveEditions () {
+    const today = now().toISOString().slice(0, 10)
+    let editions = []
+    try {
+      editions = await strapi.listEditionsWithGuestbook()
+    } catch (err) {
+      warn(`could not list editions with a guestbook id: ${err.message}`)
+      return
+    }
+    if (!editions.length) {
+      warn('no festival edition has a guestbook_id — nothing to scan')
+      return
+    }
+    stats.editionsWithGuestbook = editions.map((edition) => {
+      const from = edition.validFrom ? String(edition.validFrom).slice(0, 10) : null
+      const until = edition.validUntil ? String(edition.validUntil).slice(0, 10) : null
+      let reason = null
+      if (!from && !until) reason = 'validFrom and validUntil are not set'
+      else if (!from) reason = 'validFrom is not set'
+      else if (!until) reason = 'validUntil is not set'
+      else if (!(from < today)) reason = `validFrom is not before today (${today})`
+      else if (!(until > today)) reason = `validUntil is not after today (${today})`
+      const active = reason === null
+      const line = `edition #${edition.id} "${edition.name}" guestbook ${edition.guestbookId} validFrom ${edition.validFrom || '-'} validUntil ${edition.validUntil || '-'}`
+      if (active) log.info(`${line} — active`)
+      else warn(`${line} — not active: ${reason}`)
+      return { ...edition, active, reason }
+    })
+  }
+
   log.info(`▶ Starting Fiona sync${dryRun ? ' (DRY RUN)' : ''} at ${now().toISOString()}`)
 
   // 1. Rules -----------------------------------------------------------------
@@ -101,6 +133,7 @@ export async function runSync ({ dryRun = false, force = false } = {}, deps) {
   // 2. Guestbooks ------------------------------------------------------------
   const guestbookIds = await strapi.getActiveGuestbookIds()
   stats.guestbooks.active = guestbookIds.length
+  if (!guestbookIds.length) await explainInactiveEditions()
   const scanned = new Map()
   for (const guestbookId of guestbookIds) {
     try {
