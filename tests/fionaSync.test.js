@@ -24,7 +24,8 @@ function fakeFiona () {
     guestbooks: new Map(), // id → { badges:[{id,name}], accreditations:[{id, personId, badges:[...], noPublicationOfContactDetails}] }
     persons: new Map(), // id → { firstName, lastName, email, phone, bio, myPoffUserId, photo }
     failGuestbooks: new Set(),
-    failPersons: new Set()
+    failPersons: new Set(),
+    knownGuestbooks: null // null = same as configured guestbooks
   }
   const gb = (id) => {
     if (state.failGuestbooks.has(id)) throw new Error(`fiona down for ${id}`)
@@ -39,6 +40,9 @@ function fakeFiona () {
   }
   return {
     state,
+    listGuestbooks () {
+      return state.knownGuestbooks || [...state.guestbooks.keys()].map(id => ({ id, name: `Guestbook ${id}` }))
+    },
     listGuestbookBadges (id) { return gb(id).badges },
     listAccreditations (id) { return gb(id).accreditations.map(a => ({ id: a.id })) },
     getAccreditationBadges (accId) { return findAcc(accId).badges },
@@ -419,6 +423,26 @@ describe('runSync', () => {
 
     expect(stats.errorMessages[0]).toMatch(/HTTP 401/)
     expect(stats.errorMessages[0]).toMatch(/Invalid api key/)
+  })
+
+  it('lists the guestbooks Fiona knows when a configured guestbook cannot be fetched', async () => {
+    fiona.state.failGuestbooks.add(GB)
+    fiona.state.knownGuestbooks = [{ id: 'gb-real', name: 'Guestbook 2026' }]
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.knownGuestbooks).toEqual([{ id: 'gb-real', name: 'Guestbook 2026' }])
+    expect(log.lines.warn.join('\n')).toMatch(/guestbook guestbook-2025 is NOT among the guestbooks Fiona knows/)
+    expect(log.lines.warn.join('\n')).toMatch(/Guestbook 2026 \(gb-real\)/)
+  })
+
+  it('says so when the failed guestbook id is known to Fiona', async () => {
+    fiona.state.failGuestbooks.add(GB)
+    fiona.state.knownGuestbooks = [{ id: GB, name: 'Guestbook 2026' }]
+
+    await runSync({ dryRun: true }, deps)
+
+    expect(log.lines.warn.join('\n')).toMatch(/guestbook guestbook-2025 is known to Fiona as "Guestbook 2026" — the error is on Fiona's side/)
   })
 
   it('never removes when no active rule maps to a scanned guestbook', async () => {

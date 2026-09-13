@@ -143,6 +143,14 @@ export function createXapiClient ({
   })
 
   return {
+    /** All guestbooks visible to this API key (diagnostics). */
+    async listGuestbooks () {
+      const list = await get('/guestbooks')
+      return (Array.isArray(list) ? list : [])
+        .map(item => ({ id: text(pick(item, 'id', 'Id')), name: text(pick(item, 'description', 'Description', 'name', 'Name')) }))
+        .filter(item => item.id)
+    },
+
     async listGuestbookBadges (guestbookId) {
       const guestbook = await get(`/guestbook/${encodeURIComponent(guestbookId)}`)
       const badges = pick(guestbook, 'badges', 'Badges') || []
