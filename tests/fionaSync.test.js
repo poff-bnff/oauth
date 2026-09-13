@@ -415,6 +415,31 @@ describe('runSync', () => {
     expect(log.lines.info.join('\n')).toMatch(/Guestbook guestbook-2025 badges: TEAM \(badge-team-guid\), Industry PRO \(badge-pro-guid\)/)
   })
 
+  it('with no rules, a dry run still discovers guestbook badges and status counts', async () => {
+    strapi.state.rules = []
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_PRO, 'Approved')))
+    fiona.state.persons.set('fp1', { firstName: 'A', lastName: 'B', email: 'a@b.ee' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.guestbooks).toMatchObject({ active: 1, scanned: 1 })
+    expect(stats.guestbookBadges[GB]).toEqual(['TEAM (badge-team-guid)', 'Industry PRO (badge-pro-guid)'])
+    expect(stats.badgeStatuses).toEqual({ 'Industry PRO (badge-pro-guid)': { approved: 1 } })
+    expect(stats.persons.desired).toBe(0)
+    expect(strapi.state.writes).toEqual([])
+  })
+
+  it('with no rules, a real run stops before touching accreditations', async () => {
+    strapi.state.rules = []
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_PRO, 'Approved')))
+
+    const stats = await runSync({}, deps)
+
+    expect(stats.accreditations.seen).toBe(0)
+    expect(stats.removals.skipped).toBe(true)
+    expect(strapi.state.writes).toEqual([])
+  })
+
   it('returns each scanned guestbook badge list in the stats', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith())
 
