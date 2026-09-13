@@ -47,6 +47,9 @@ export default defineNuxtConfig({
     maksekeskusId: '',
     maksekeskusSecret: '',
     syncSecret: '',  // NUXT_SYNC_SECRET — shared secret for POST /api/sync/fiona
+    fionaClient: 'xapi', // NUXT_FIONA_CLIENT — 'xapi' (today) or 'publication' (later)
+    syncMaxRemovals: '', // NUXT_SYNC_MAX_REMOVALS — cap on unpublishes per sync run (default 50)
+    syncMaxBuildsPerRun: '', // NUXT_SYNC_MAX_BUILDS_PER_RUN — cap on per-person site builds per run (default 20)
     public: {
       url: '',
       oauthUrl: '',
