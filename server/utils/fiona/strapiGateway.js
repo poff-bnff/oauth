@@ -50,6 +50,18 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return await getActiveFionaGuestbooks()
     },
 
+    /** Every edition that carries a guestbook id, with its validity window (diagnostics). */
+    async listEditionsWithGuestbook () {
+      const editions = await get('/festival-editions?guestbook_id_null=false&_limit=-1')
+      return (Array.isArray(editions) ? editions : []).map(edition => ({
+        id: edition.id,
+        name: edition.name_en || edition.name_et || String(edition.id),
+        guestbookId: edition.guestbook_id,
+        validFrom: edition.validFrom ?? null,
+        validUntil: edition.validUntil ?? null
+      }))
+    },
+
     async findManagedPeople () {
       const people = await get('/people?fiona_person_id_null=false&_limit=-1')
       return Array.isArray(people) ? people : []
