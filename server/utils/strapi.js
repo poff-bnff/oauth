@@ -30,27 +30,51 @@ export async function getStrapiSingleUser (userId) {
   })
 }
 
-export async function authenticateStrapiUser (email) {
+// `sendAccountEmail: false` creates a missing account without mailing its owner. Strapi's
+// /auth/local/register always sends the confirm-register mail, which spoils a surprise gift, so the
+// silent path uses POST /users instead (user.create is granted to the Hunt role, which the service
+// token belongs to). It creates the same account, but it is marked confirmed, since no confirmation
+// mail is ever sent. Mirrors strapiGateway.findOrRegisterUser.
+export async function authenticateStrapiUser (email, { sendAccountEmail = true } = {}) {
   if (!email) return null
 
   const token = await getStrapiToken()
 
-  const [user] = await $fetch(`${config.strapiUrl}/users?email=${email}`, { headers: { Authorization: `Bearer ${token}` } })
+  const [user] = await $fetch(`${config.strapiUrl}/users?email=${encodeURIComponent(email)}`, { headers: { Authorization: `Bearer ${token}` } })
 
   if (user) {
     return getUserObject(user)
-  } else {
-    const { user: newUser } = await $fetch(`${config.strapiUrl}/auth/local/register`, {
+  }
+
+  const password = crypto.randomBytes(32).toString('hex')
+
+  if (sendAccountEmail === false) {
+    const newUser = await $fetch(`${config.strapiUrl}/users`, {
       method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
       body: {
         email,
         username: email,
-        password: crypto.randomBytes(32).toString('hex')
+        password,
+        confirmed: true,
+        provider: 'local',
+        externalProviders: [{ provider: 'local', UUID: 'not set yet', dateConnected: new Date().toISOString() }]
       }
     })
 
     return getUserObject(newUser)
   }
+
+  const { user: newUser } = await $fetch(`${config.strapiUrl}/auth/local/register`, {
+    method: 'POST',
+    body: {
+      email,
+      username: email,
+      password
+    }
+  })
+
+  return getUserObject(newUser)
 }
 
 export async function emailInUse (email) {
@@ -1490,7 +1514,10 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
   }
   if (options.dryRun) return { mode: 'gift', existing: false }
 
-  const authUser = await authenticateStrapiUser(email)
+  // A buyer who opted out of notifying the recipient wants a surprise: the account this creates
+  // must not announce itself by mail either.
+  const sendAccountEmail = owner.sendEmail !== false
+  const authUser = await authenticateStrapiUser(email, { sendAccountEmail })
   const user = await getStrapiUser(authUser.id)
   const picture = await uploadCheckoutOwnerPhoto(owner.photo, user.user_profile.id, email, user.id)
   if (!picture?.id) return { error: 'ownerPhotoRequired' }
@@ -1502,7 +1529,7 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
     picture: picture.id
   })
 
-  trace('accepted', { why: 'createdRecipient', userId: user.id })
+  trace('accepted', { why: 'createdRecipient', userId: user.id, silent: !sendAccountEmail })
   return { userId: user.id, mode: 'gift', sendEmail: owner.sendEmail !== false, existing: false }
 }
 
