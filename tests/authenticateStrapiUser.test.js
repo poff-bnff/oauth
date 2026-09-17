@@ -8,14 +8,24 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import jwt from 'jsonwebtoken'
-import { authenticateStrapiUser } from '../server/utils/strapi.js'
+import { authenticateStrapiUser, getStrapiUser } from '../server/utils/strapi.js'
 
 const SERVICE_TOKEN = jwt.sign({ id: 16998 }, 'test-secret', { expiresIn: '1h' })
+// getStrapiUser (used to resolve an alias to its main account) logs in as admin and caches that
+// token by its exp claim, so it needs a decodable JWT with an exp in the future.
+const ADMIN_JWT = jwt.sign({ id: 1 }, 'test-secret', { expiresIn: '1h' })
 
-function mockStrapi ({ existing = [] } = {}) {
+// `byId` answers GET /users/:id (what getStrapiUser fetches); `onUserById` runs before each such answer.
+function mockStrapi ({ existing = [], byId = {}, onUserById = () => {} } = {}) {
   globalThis.$fetch = vi.fn().mockImplementation((url, opts = {}) => {
     if (url.endsWith('/auth/local')) return { jwt: SERVICE_TOKEN }
+    if (url.includes('/admin/login')) return { data: { token: ADMIN_JWT } }
     if (url.includes('/users?email=')) return existing
+    const byIdMatch = url.match(/\/users\/(\d+)$/)
+    if (byIdMatch) {
+      onUserById(Number(byIdMatch[1]))
+      if (byId[byIdMatch[1]]) return byId[byIdMatch[1]]
+    }
     if (url.endsWith('/auth/local/register')) {
       return { user: { id: 501, email: opts.body.email, confirmed: false } }
     }
@@ -28,6 +38,18 @@ function mockStrapi ({ existing = [] } = {}) {
 
 const callsTo = (suffix, method) => globalThis.$fetch.mock.calls
   .filter(([url, opts = {}]) => url.endsWith(suffix) && (!method || opts.method === method))
+const userByIdCalls = () => globalThis.$fetch.mock.calls.filter(([url]) => /\/users\/\d+$/.test(url))
+
+// Main accounts carry aliasUsers: [] because mergeUserMy reads that array unguarded; a non-empty
+// list would make it fetch the aliases, which is not what these tests are about.
+const MAIN_USER = {
+  id: 42,
+  email: '47807310298@example.ee',
+  confirmed: true,
+  profileFilled: true,
+  user_profile: { firstName: 'Katri', lastName: 'Riet' },
+  aliasUsers: []
+}
 
 describe('authenticateStrapiUser', () => {
   it('returns null without calling Strapi when there is no email', async () => {
@@ -95,5 +117,47 @@ describe('authenticateStrapiUser', () => {
     })
     expect(opts.body.password).toMatch(/^[0-9a-f]{64}$/)
     expect(Date.parse(opts.body.externalProviders[0].dateConnected)).not.toBeNaN()
+  })
+})
+
+// A Strapi user can be an alias of a main account (mainUser set). Only the main account owns the
+// profile, the products and the transactions, so the shop session must be the main account even
+// when the person logged in with the alias address.
+describe('authenticateStrapiUser with alias accounts', () => {
+  it('resolves an alias login to its main account', async () => {
+    mockStrapi({
+      existing: [{ id: 41, email: 'katriliis@example.ee', confirmed: true, mainUser: { id: 42 } }],
+      byId: { 42: MAIN_USER }
+    })
+
+    const user = await authenticateStrapiUser('katriliis@example.ee')
+
+    expect(user).toMatchObject({ id: '42', email: '47807310298@example.ee', firstName: 'Katri', profile: true })
+    expect(callsTo('/auth/local/register')).toHaveLength(0)
+    expect(callsTo('/users', 'POST')).toHaveLength(0)
+  })
+
+  it('does not fetch the user record again when the login email is a main account', async () => {
+    mockStrapi({ existing: [{ id: 42, email: '47807310298@example.ee', confirmed: true }] })
+
+    const user = await authenticateStrapiUser('47807310298@example.ee')
+
+    expect(user).toMatchObject({ id: '42' })
+    expect(userByIdCalls()).toHaveLength(0)
+  })
+})
+
+describe('getStrapiUser with a self-referencing mainUser', () => {
+  it('treats a user whose mainUser is itself as the main account instead of recursing', async () => {
+    let fetches = 0
+    mockStrapi({
+      byId: { 42: { ...MAIN_USER, mainUser: { id: 42 } } },
+      onUserById: () => { if (++fetches > 3) throw new Error('GET /users/42 requested more than 3 times: recursion') }
+    })
+
+    const user = await getStrapiUser(42)
+
+    expect(user).toMatchObject({ id: 42, email: '47807310298@example.ee' })
+    expect(fetches).toBe(1)
   })
 })

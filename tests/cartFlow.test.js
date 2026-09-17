@@ -910,6 +910,10 @@ function setupHappyPathFetch(captured, overrides = {}) {
       if (url.includes('/carts') && !url.includes('/carts/')) return [overrides.cart || CART_WITH_ITEM]
       if (url.includes('/carts/') && opts?.method === 'PUT') { captured.cartPut = opts.body; return {} }
       if (url.includes('/business-profiles')) return [{ id: BILLING_PROFILE_ID }]
+      if (overrides.usersById) {
+        const byId = url.match(/\/users\/(\d+)(\?|$)/)
+        if (byId && overrides.usersById[byId[1]]) return overrides.usersById[byId[1]]
+      }
       if (url.includes(`/users/${USER_ID}`)) return { id: USER_ID, user_profile: COMPLETE_BUYER_PROFILE, aliasUsers: [] }
       if (url.includes('/product-categories/')) return CATEGORY
       if (url.includes('/products/') && (!opts || opts.method !== 'PUT')) return PRODUCT
@@ -1024,5 +1028,58 @@ describe('payCheckoutCart — happy path', () => {
     expect(result).toMatchObject({ code: 400, case: 'noPaymentMethod' })
     // The failed attempt still created an order, which must be flipped to payment_failed.
     expect(captured.orderBody).toBeTruthy()
+  })
+})
+
+// ─── Pay checkout cart — session token of an alias account ──────────────────────
+//
+// Logins now resolve an alias to its main account, but a session token issued before that
+// change (14-day lifetime) still carries the alias id. The cart and the product reservations were
+// created under that id, so they stay keyed on it, while everything that records who bought and
+// who owns (order, order lines, Maksekeskus merchant_data) must name the main account.
+
+const MAIN_USER_ID = 100
+
+describe('payCheckoutCart — stale session of an alias account', () => {
+  function setupAliasSession (captured) {
+    setupHappyPathFetch(captured, {
+      usersById: {
+        [USER_ID]: { id: USER_ID, mainUser: { id: MAIN_USER_ID }, aliasUsers: [] },
+        [MAIN_USER_ID]: { id: MAIN_USER_ID, user_profile: COMPLETE_BUYER_PROFILE, aliasUsers: [] }
+      }
+    })
+  }
+
+  it('records the main account as the order user and product owner', async () => {
+    const captured = {}
+    setupAliasSession(captured)
+
+    await payCheckoutCart(USER_ID, { paymentMethodId: PAYMENT_METHOD_ID, billingProfileId: BILLING_PROFILE_ID })
+
+    expect(captured.orderBody).toMatchObject({ users_permissions_user: MAIN_USER_ID })
+    expect(captured.orderBody.orderProducts[0]).toMatchObject({ owner: MAIN_USER_ID })
+  })
+
+  it('sends the main account to Maksekeskus as buyer and owner', async () => {
+    const captured = {}
+    setupAliasSession(captured)
+
+    await payCheckoutCart(USER_ID, { paymentMethodId: PAYMENT_METHOD_ID, billingProfileId: BILLING_PROFILE_ID })
+
+    const merchant = JSON.parse(captured.mkBody.transaction.merchant_data)
+    expect(merchant).toMatchObject({ userId: MAIN_USER_ID })
+    expect(merchant.products[0]).toMatchObject({ ownerUserId: MAIN_USER_ID, ownerMode: 'me' })
+  })
+
+  it('keeps looking up the cart and billing profiles under the session id', async () => {
+    const captured = {}
+    setupAliasSession(captured)
+
+    await payCheckoutCart(USER_ID, { paymentMethodId: PAYMENT_METHOD_ID, billingProfileId: BILLING_PROFILE_ID })
+
+    const urls = globalThis.$fetch.mock.calls.map(([url]) => decodeURIComponent(url))
+    expect(urls.some(url => url.includes('/carts') && url.includes(`users_permissions_user=${USER_ID}`))).toBe(true)
+    expect(urls.some(url => url.includes('/business-profiles') && url.includes(`[user]=${USER_ID}`))).toBe(true)
+    expect(urls.some(url => url.includes(`users_permissions_user=${MAIN_USER_ID}`))).toBe(false)
   })
 })

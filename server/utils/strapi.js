@@ -43,7 +43,11 @@ export async function authenticateStrapiUser (email, { sendAccountEmail = true }
   const [user] = await $fetch(`${config.strapiUrl}/users?email=${encodeURIComponent(email)}`, { headers: { Authorization: `Bearer ${token}` } })
 
   if (user) {
-    return getUserObject(user)
+    // An alias account (mainUser set) is only a login identity. The session must belong to the main
+    // account, because carts, orders, billing profiles and Maksekeskus merchant_data.userId are all
+    // keyed by the session id, and only the main account owns the profile and the purchases.
+    const mainUserId = user.mainUser?.id || (Number.isInteger(user.mainUser) ? user.mainUser : null)
+    return getUserObject(mainUserId ? await getStrapiUser(mainUserId) : user)
   }
 
   const password = crypto.randomBytes(32).toString('hex')
@@ -571,6 +575,13 @@ export async function getStrapiUser(id) {
   })
   if (!user) {
     throw createError({ statusCode: 404, statusMessage: `No user with ID ${id}` })
+  }
+
+  if (user.mainUser && Number(user.mainUser.id) === Number(user.id)) {
+    // Seen in production data: a user linked as its own main. Treat it as a main account rather
+    // than following the link forever.
+    console.warn(`strapi::getStrapiUser - User ${user.id} has mainUser pointing at itself; treating as main`) // eslint-disable-line no-console
+    delete user.mainUser
   }
 
   if (user.mainUser && user.aliasUsers && user.aliasUsers.length > 0) {
@@ -1199,7 +1210,8 @@ export async function buyProduct (body) {
   const deliveryLocationId = validateCheckoutDeliveryLocation(pickupLocations, body.deliveryLocationId)
   if (deliveryLocationId === false) return { code: 400, case: body.deliveryLocationId ? 'invalidDeliveryLocation' : 'noDeliveryLocation' }
 
-  const ownerResult = await resolveCheckoutOwner(userId, productCategory, body.owner || { mode: 'me' })
+  // buyer.id is the main account (see payCheckoutCart); the claim stays under the session id.
+  const ownerResult = await resolveCheckoutOwner(buyer.id, productCategory, body.owner || { mode: 'me' })
   if (ownerResult.error) return { code: 400, case: ownerResult.error, missing: ownerResult.missing }
 
   // Atomically claim this product for the user (free OR already theirs); graceful if just taken.
@@ -1216,7 +1228,7 @@ export async function buyProduct (body) {
       productId: product.id,
       productCatSeller: sellerBusinessProfile,
       price,
-      userId,
+      userId: buyer.id,
       userEmail,
       billingProfileId,
       deliveryLocationId,
@@ -2784,7 +2796,10 @@ export async function payCheckoutCart(userId, body = {}) {
       const deliveryLocationId = validateCheckoutDeliveryLocation(category.pickup_locations || [], submitted.pickupLocationId)
       if (deliveryLocationId === false) throw checkoutError({ code: 400, case: submitted.pickupLocationId ? 'invalidDeliveryLocation' : 'noDeliveryLocation', productId: cartItem.productId })
 
-      const ownerResult = await resolveCheckoutOwner(userId, category, submitted.owner || { mode: 'me' })
+      // buyer.id is the main account (getStrapiUser resolves aliases); a session issued to an alias
+      // before logins were resolved still carries the alias id, which stays valid only for what was
+      // created under it: the cart, the reservations and the billing-profile lookup.
+      const ownerResult = await resolveCheckoutOwner(buyer.id, category, submitted.owner || { mode: 'me' })
       if (ownerResult.error) throw checkoutError({ code: 400, case: ownerResult.error, missing: ownerResult.missing, productId: cartItem.productId })
 
       const claimed = await claimCheckoutProducts({ productIds: [cartItem.productId], userId, price: cartItem.price })
@@ -2822,7 +2837,7 @@ export async function payCheckoutCart(userId, body = {}) {
         'Content-Type': 'application/json'
       },
       body: {
-        users_permissions_user: userId,
+        users_permissions_user: buyer.id,
         domain: domainId,
         orderTimeout: '00:30:00',
         orderCreatedAt: now,
@@ -2850,7 +2865,7 @@ export async function payCheckoutCart(userId, body = {}) {
 
     const mkResponse = await createCartMaksekeskusTransaction({
       body,
-      userId,
+      userId: buyer.id,
       userEmail: buyerProfile.email || buyer.email,
       billingProfileId,
       orderId: order.id,
