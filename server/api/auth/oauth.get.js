@@ -29,7 +29,11 @@ export default defineEventHandler(async (event) => {
 
     const strapiUser = await authenticateStrapiUser(user.email)
 
-    await updateUserAndAliasesRoles(strapiUser)
+    try {
+      await updateUserAndAliasesRoles(await getStrapiUser(strapiUser.id))
+    } catch (error) {
+      console.error('api::oauth GET - role sync failed for user', strapiUser.id, error) // eslint-disable-line no-console
+    }
 
     try {
       const id = getUserIdFromEvent(event)

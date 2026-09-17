@@ -20,7 +20,7 @@ const STRAPI_ADMIN_TOKEN = {
 
 export async function getStrapiSingleUser (userId) {
   if (!userId) return null
-  const token = await getStrapiToken() // Assuming this returns a general token
+  const token = await getStrapiAdminToken() // Parity with getStrapiUser
 
   // Fetch the user's current data, crucial for getting existing user_roles
   return await $fetch(`${config.strapiUrl}/users/${userId}`, {
@@ -110,7 +110,7 @@ export async function getStrapiUserRoles () {
   const token = await getStrapiAdminToken()
 
   // NOTE: This call only needs to happen once per run
-  return await $fetch(`${config.strapiUrl}/user-roles`, { headers: { Authorization: `Bearer ${token}` } })
+  return await $fetch(`${config.strapiUrl}/user-roles?_limit=-1`, { headers: { Authorization: `Bearer ${token}` } })
 }
 
 export async function setStrapiUserRoles (userId, roleIds) {
@@ -360,6 +360,14 @@ export async function updateUserAndAliasesRoles (mainUser) {
     return mainUser
   }
 
+  if (!Array.isArray(allStrapiRoles) || allStrapiRoles.length === 0) {
+    // A full-replace PUT with an empty computed list would strip every role from every account
+    // this function touches, so an empty (or malformed) roles response is treated the same as a
+    // fetch failure: skip the sync rather than wipe everyone.
+    console.error('updateUserAndAliasesRoles: no roles returned, skipping role sync')
+    return mainUser
+  }
+
   // 2. Load/Aggregate all badges ONTO the main user object (Resilience)
   let userWithBadges = mainUser;
   let allUserBadges = [];
@@ -404,8 +412,10 @@ export async function updateUserAndAliasesRoles (mainUser) {
   for (const alias of aliasUsers) {
     const aliasId = alias.id;
 
-    // 6. Fetch current alias details to get existing roles
-    const aliasCurrentDetails = await getStrapiUser(aliasId)
+    // 6. Fetch current alias details to get existing roles. getStrapiUser would resolve this
+    // aliasId back to the main account (mainUser is set), comparing the alias against the main's
+    // roles instead of its own — getStrapiSingleUser fetches the alias record as-is.
+    const aliasCurrentDetails = await getStrapiSingleUser(aliasId)
     const aliasExistingRoles = aliasCurrentDetails?.user_roles || []
     const aliasExistingRoleIds = aliasExistingRoles.map(role => role.id); // Array of current IDs
 
