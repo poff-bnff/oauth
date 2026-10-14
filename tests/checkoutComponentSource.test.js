@@ -304,4 +304,13 @@ describe('proven, non-eesti.ee buyer email', () => {
     expect(profileStepSource).toMatch(/<input type="file"[^>]*:disabled="emailUndeliverable"/)
     expect(profileStepSource).toMatch(/:disabled="saving \|\| emailUndeliverable \|\| !isProfileComplete"/)
   })
+
+  test('the email proof links are drawn like buttons: not inline, no underline', () => {
+    const css = read('../pages/checkout/checkout.css')
+    const rule = css.match(/\.profile-email a\.primary,\s*\.profile-email a\.ghost\s*\{([^}]*)\}/)
+    expect(rule).not.toBeNull()
+    expect(rule[1]).toMatch(/display:\s*inline-flex/)
+    expect(rule[1]).toMatch(/text-decoration:\s*none/)
+    expect(profileStepSource).toContain('profile-email"')
+  })
 })

@@ -1045,6 +1045,16 @@ button.back-button:focus-visible,
   line-height: 1;
 }
 .ghost:not(:disabled):hover { background: rgba(0,0,0,.06); }
+/* The email proof buttons are links (they navigate), so they must be sized and drawn like the
+   buttons: an inline <a> ignores min-height and takes the link underline. Scoped to the profile
+   email block so the other anchors that use these classes keep their own layout. */
+.profile-email a.primary,
+.profile-email a.ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
 .outline:disabled { cursor: not-allowed; opacity: .45; }
 .ghost.small { min-height: 32px; padding: 7px 12px; font-size: 11px; }
 .outline.small { min-height: 30px; padding: 7px 12px; font-size: 10px; }
