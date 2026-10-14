@@ -863,6 +863,21 @@ describe('payCheckoutCart — input validation', () => {
     expect(result.missing).not.toContain('birthdate') // birthdate not required by 4-field check
   })
 
+  it('returns 400 buyerProfileIncomplete when the profile email is an eesti.ee address', async () => {
+    const eestiProfile = { ...COMPLETE_BUYER_PROFILE, email: '38001010001@eesti.ee' }
+    setupFetch(
+      adminTokenHandler,
+      (url) => {
+        if (url.includes('/cart-statuses')) return [{ id: 1, status: 'active' }]
+        if (url.includes('/carts')) return [CART_WITH_ITEM]
+        if (url.includes('/business-profiles')) return [{ id: 6496 }]
+        if (url.includes('/users/') || url.includes('/users-permissions')) return { id: USER_ID, user_profile: eestiProfile, aliasUsers: [] }
+      }
+    )
+    const result = await payCheckoutCart(USER_ID, { paymentMethodId: 'nordea', billingProfileId: 6496 })
+    expect(result).toMatchObject({ code: 400, case: 'buyerProfileIncomplete', missing: ['email'] })
+  })
+
   it('returns 400 buyerProfileIncomplete listing all 4 missing fields when profile is empty', async () => {
     setupFetch(
       adminTokenHandler,

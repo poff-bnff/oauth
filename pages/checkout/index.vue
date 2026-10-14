@@ -2,6 +2,7 @@
 import { useCheckoutCopy } from './composables/useCheckoutCopy.js'
 import { useCheckoutSession } from './composables/useCheckoutSession.js'
 import { checkoutErrorMessage } from '../../utils/checkoutErrors.js'
+import { isUndeliverableEmail } from '../../utils/emailRules.js'
 import CheckoutSessionBanner from './components/CheckoutSessionBanner.vue'
 import CheckoutItemStep from './components/CheckoutItemStep.vue'
 import CheckoutInvoiceStep from './components/CheckoutInvoiceStep.vue'
@@ -30,6 +31,11 @@ const locale = ref(route.query.locale || 'en')
 // Set by the guest→login claim redirect when some guest cart lines sold out and were dropped.
 const removedNotice = ref(Number(route.query.removed) || 0)
 const authHeaders = computed(() => ({ Authorization: `Bearer ${token.value}` }))
+
+// Result of the email proof (GET /api/email), appended to the return address as &notifier=<result>.
+// Only the three known values are shown; anything else in the address bar is ignored.
+const EMAIL_NOTIFIERS = ['emailChangeSuccess', 'emailChangeSame', 'emailChangeTaken']
+const emailNotifier = ref(EMAIL_NOTIFIERS.includes(route.query.notifier) ? route.query.notifier : '')
 
 // ── Copy (i18n) ───────────────────────────────────────────────────────────────
 const copy = useCheckoutCopy(locale)
@@ -138,7 +144,8 @@ const myPoffUrl = computed(() => {
 })
 const hasProfileStep = computed(() => {
   const p = context.value?.profile || {}
-  return !(p.email && p.firstName && p.lastName && p.picture)
+  // An eesti.ee address counts as no email: nothing sent there arrives.
+  return isUndeliverableEmail(p.email) || !(p.firstName && p.lastName && p.picture)
 })
 
 const stepTotal = computed(() => hasProfileStep.value ? 4 : 3)
@@ -205,6 +212,22 @@ function checkoutRedirectUri () {
   redirect.searchParams.set('jwt', '')
   return redirect.toString()
 }
+
+// Where the email proof sends the buyer back: this checkout, signed in again with the same token.
+// jwt is always set, so the address always has a '?' — /api/email appends '&notifier=<result>'.
+function emailReturnUrl () {
+  const redirect = new URL(`${runtime.public.url}/checkout`)
+  for (const [key, value] of Object.entries(route.query)) {
+    if (key === 'jwt' || key === 'notifier') continue
+    const entry = Array.isArray(value) ? value[0] : value
+    if (entry !== undefined && entry !== null && entry !== '') redirect.searchParams.set(key, entry)
+  }
+  redirect.searchParams.set('locale', locale.value)
+  redirect.searchParams.set('jwt', token.value)
+  return redirect.toString()
+}
+
+const verifyEmailUrl = computed(() => `/api/email?user_token=${encodeURIComponent(token.value)}&redirect_uri=${encodeURIComponent(emailReturnUrl())}`)
 
 function checkoutLoginRedirectUri () {
   const nextUrl = checkoutRedirectUri()
@@ -839,6 +862,14 @@ async function pay () {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(() => {
+  // Like jwt, the notifier is one-shot: a refresh must not replay it.
+  if (route.query.notifier) {
+    try {
+      const clean = new URL(window.location.href)
+      clean.searchParams.delete('notifier')
+      window.history.replaceState({}, '', clean.toString())
+    } catch { /* no window */ }
+  }
   startSessionClock()
   startCheckoutSync()
   refreshContext()
@@ -961,6 +992,24 @@ watch(sessionRemainingSeconds, (seconds) => {
             aria-label="Dismiss"
             style="background:none;border:none;font-size:18px;line-height:1;cursor:pointer;color:inherit"
             @click="restoredWithoutPhoto = false"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div
+          v-if="emailNotifier"
+          role="status"
+          :style="emailNotifier === 'emailChangeTaken'
+            ? 'background:#fdecec;border:1px solid #f5b5b5;color:#8a1f1f;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px'
+            : 'background:#e8f7ec;border:1px solid #a9dcb7;color:#1d6b35;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px'"
+        >
+          <span>{{ copy[emailNotifier] }}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            style="background:none;border:none;font-size:18px;line-height:1;cursor:pointer;color:inherit"
+            @click="emailNotifier = ''"
           >
             &times;
           </button>
@@ -1095,6 +1144,7 @@ watch(sessionRemainingSeconds, (seconds) => {
               :copy="copy"
               :auth-headers="authHeaders"
               :profile="context?.profile || {}"
+              :verify-email-url="verifyEmailUrl"
               @done="profileDone = true; step = 1"
             />
 

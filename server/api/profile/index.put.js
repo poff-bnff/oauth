@@ -21,10 +21,11 @@ export default defineEventHandler(async (event) => {
     statusCode: 200
   }
 
-  // Add all properties sans picture to profileData
+  // Add all properties sans picture to profileData. `email` is skipped too: it may only be set by
+  // the proven flow (GET /api/email), which makes the user demonstrate they control the address.
   const profileData = {}
   body.forEach(({ name, data, filename, type }) => {
-    if (name !== 'picture') {
+    if (name !== 'picture' && name !== 'email') {
       profileData[name] = data.toString()
     }
   })

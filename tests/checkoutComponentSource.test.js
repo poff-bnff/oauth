@@ -240,3 +240,61 @@ test('the status line spans the form grid', () => {
   const checkoutCss = read('../pages/checkout/checkout.css')
   expect(checkoutCss).toMatch(/\.checkout-page \.owner-status\s*\{[^}]*grid-column:\s*1 \/ -1/)
 })
+
+describe('proven, non-eesti.ee buyer email', () => {
+  test('the profile step has no email input; the profile email is shown read-only', () => {
+    expect(profileStepSource).not.toMatch(/<input[^>]*type="email"/)
+    expect(profileStepSource).not.toMatch(/v-model[^>]*form\.email/)
+    expect(profileStepSource).toContain('isUndeliverableEmail')
+    expect(profileStepSource).toContain('copy.verifyEmailExplain')
+    expect(profileStepSource).toContain('copy.verifyEmailButton')
+    expect(profileStepSource).toContain('copy.changeEmailButton')
+  })
+
+  test('save() sends no email and the button waits for a deliverable one', () => {
+    const save = profileStepSource.slice(profileStepSource.indexOf('async function save'), profileStepSource.indexOf('</script>'))
+    expect(save).not.toMatch(/\bemail:|form\.email/)
+    expect(profileStepSource).toMatch(/isCheckoutProfileComplete\(form, hasPicture\.value, props\.profile\?\.email\)/)
+  })
+
+  test('the verify buttons navigate the same tab to the proven flow', () => {
+    expect(profileStepSource).toMatch(/:href="verifyEmailUrl"/)
+    expect(profileStepSource).not.toContain('target="_blank"')
+    expect(indexSource).toContain('/api/email?user_token=${encodeURIComponent(token.value)}&redirect_uri=${encodeURIComponent(')
+    expect(indexSource).toMatch(/:verify-email-url="verifyEmailUrl"/)
+  })
+
+  test('the return url carries the token, drops notifier and always has a query', () => {
+    const fn = indexSource.slice(indexSource.indexOf('function emailReturnUrl'), indexSource.indexOf('const verifyEmailUrl'))
+    expect(fn).toContain("key === 'jwt' || key === 'notifier'")
+    expect(fn).toContain("searchParams.set('jwt', token.value)")
+  })
+
+  test('the profile step is needed when the email is undeliverable', () => {
+    const rule = indexSource.slice(indexSource.indexOf('const hasProfileStep'), indexSource.indexOf('const stepTotal'))
+    expect(rule).toContain('isUndeliverableEmail(p.email)')
+    expect(rule).toContain('p.firstName')
+    expect(rule).toContain('p.picture')
+  })
+
+  test('the three notifier results are shown, then removed from the address bar', () => {
+    for (const value of ['emailChangeSuccess', 'emailChangeSame', 'emailChangeTaken']) {
+      expect(indexSource).toContain(`'${value}'`)
+      expect(copyDefaults.en[value]).toBeTruthy()
+    }
+    expect(indexSource).toContain("clean.searchParams.delete('notifier')")
+  })
+
+  test('the new copy exists in every language', () => {
+    for (const lang of ['et', 'en', 'ru']) {
+      for (const key of ['verifyEmailExplain', 'verifyEmailButton', 'changeEmailButton', 'emailChangeSuccess', 'emailChangeSame', 'emailChangeTaken', 'giftEmailUndeliverable']) {
+        expect(copyDefaults[lang][key], `${lang}.${key}`).toBeTruthy()
+      }
+    }
+  })
+
+  test('the gift form flags an undeliverable recipient with its own message', () => {
+    expect(checkoutItemStepSource).toContain('isUndeliverableEmail')
+    expect(checkoutItemStepSource).toContain('copy.giftEmailUndeliverable')
+  })
+})

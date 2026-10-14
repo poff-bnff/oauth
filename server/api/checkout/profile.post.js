@@ -4,10 +4,12 @@ export default defineEventHandler(async (event) => {
   const userId = getUserIdFromEvent(event)
   if (!userId) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
-  const { firstName, lastName, email, photo } = (await readBody(event)) || {}
+  const { firstName, lastName, photo } = (await readBody(event)) || {}
 
-  if (!firstName?.trim() || !lastName?.trim() || !email?.trim()) {
-    throw createError({ statusCode: 400, statusMessage: 'firstName, lastName, and email are required' })
+  // The email is deliberately not read: it may only be set by the proven flow (GET /api/email),
+  // which makes the buyer demonstrate they control the address.
+  if (!firstName?.trim() || !lastName?.trim()) {
+    throw createError({ statusCode: 400, statusMessage: 'firstName and lastName are required' })
   }
 
   const user = await getStrapiUser(userId)
@@ -22,7 +24,7 @@ export default defineEventHandler(async (event) => {
       const buffer = Buffer.from(match[2], 'base64')
       if (buffer.length > 0 && buffer.length <= 5 * 1024 * 1024) {
         const ext = (photo.name?.includes('.') ? photo.name.split('.').pop() : '') || match[1].split('/')[1] || 'jpg'
-        const filename = `${userPictureBaseName(email.trim(), userId)}.${ext}`
+        const filename = `${userPictureBaseName(user.user_profile.email, userId)}.${ext}`
         const pic = await uploadStrapiImage({ name: 'picture', filename, data: buffer }, 'user-profile', profileId)
         if (pic?.id) pictureId = pic.id
       }
@@ -32,14 +34,12 @@ export default defineEventHandler(async (event) => {
   await setStrapiUserProfile(profileId, {
     firstName: firstName.trim(),
     lastName: lastName.trim(),
-    email: email.trim(),
     ...(pictureId !== undefined ? { picture: pictureId } : {})
   })
 
   return {
     ok: true,
     firstName: firstName.trim(),
-    lastName: lastName.trim(),
-    email: email.trim()
+    lastName: lastName.trim()
   }
 })

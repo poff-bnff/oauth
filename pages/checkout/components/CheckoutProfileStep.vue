@@ -1,6 +1,7 @@
 <script setup>
 import { isCheckoutProfileComplete } from '../composables/useCheckoutProgress.js'
 import { checkoutErrorMessage } from '../../../utils/checkoutErrors.js'
+import { isUndeliverableEmail } from '../../../utils/emailRules.js'
 import {
   DEFAULT_PHOTO_RULES,
   acceptAttributeFor,
@@ -15,7 +16,9 @@ import {
 const props = defineProps({
   copy: { type: Object, required: true },
   authHeaders: { type: Object, required: true },
-  profile: { type: Object, default: () => ({}) }
+  profile: { type: Object, default: () => ({}) },
+  // The proven flow (GET /api/email), built by index.vue because it owns the checkout token.
+  verifyEmailUrl: { type: String, default: '' }
 })
 
 const emit = defineEmits(['done'])
@@ -26,14 +29,17 @@ const errorMsg = ref('')
 const form = reactive({
   firstName: props.profile?.firstName || '',
   lastName: props.profile?.lastName || '',
-  email: props.profile?.email || '',
   photo: null,
   photoName: '',
   photoError: ''
 })
 
 const hasPicture = computed(() => !!(props.profile?.picture))
-const isProfileComplete = computed(() => isCheckoutProfileComplete(form, hasPicture.value))
+// The email is shown, never edited here: it may only be set by the proven flow, which makes the
+// buyer demonstrate they control it. An eesti.ee address (what ID-card and Smart-ID logins create)
+// counts as none, because nothing sent there arrives.
+const emailUndeliverable = computed(() => isUndeliverableEmail(props.profile?.email))
+const isProfileComplete = computed(() => isCheckoutProfileComplete(form, hasPicture.value, props.profile?.email))
 
 const photoRules = ref(DEFAULT_PHOTO_RULES)
 // Derived from the rules so the picker and the validation cannot disagree.
@@ -106,8 +112,12 @@ function onCropCancel () {
 async function save () {
   errorMsg.value = ''
 
-  if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim()) {
-    errorMsg.value = `${props.copy.firstName}, ${props.copy.lastName} & ${props.copy.email} required`
+  if (emailUndeliverable.value) {
+    errorMsg.value = props.copy.verifyEmailExplain
+    return
+  }
+  if (!form.firstName.trim() || !form.lastName.trim()) {
+    errorMsg.value = `${props.copy.firstName} & ${props.copy.lastName} required`
     return
   }
   if (!form.photo && !hasPicture.value) {
@@ -123,7 +133,6 @@ async function save () {
       body: {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
-        email: form.email.trim(),
         photo: form.photo || null
       }
     })
@@ -156,10 +165,19 @@ async function save () {
         <span class="field-label">{{ copy.lastName }} <span class="required-dot">*</span></span>
         <input v-model.trim="form.lastName" autocomplete="family-name" required>
       </label>
-      <label class="span">
+      <div class="span profile-email">
         <span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span>
-        <input v-model.trim="form.email" type="email" autocomplete="email" required>
-      </label>
+        <template v-if="emailUndeliverable">
+          <p class="intro">
+            {{ copy.verifyEmailExplain }}
+          </p>
+          <a class="primary" :href="verifyEmailUrl">{{ copy.verifyEmailButton }}</a>
+        </template>
+        <template v-else>
+          <p><strong>{{ profile.email }}</strong></p>
+          <a class="ghost" :href="verifyEmailUrl">{{ copy.changeEmailButton }}</a>
+        </template>
+      </div>
       <label class="file photo-upload span">
         <span class="field-label">{{ copy.photo }} <span class="required-dot">*</span></span>
         <input type="file" :accept="photoAccept" @change="handlePhoto">

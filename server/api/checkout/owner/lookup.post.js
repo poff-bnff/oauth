@@ -1,4 +1,5 @@
 import { getStrapiAdminToken, getStrapiUser, getUserIdFromEvent } from '../../../utils/strapi.js'
+import { isUndeliverableEmail } from '../../../../utils/emailRules.js'
 import { hitLimit } from '../../../utils/rateLimiter.js'
 
 // Answers one question: what does this gift recipient still need the buyer to supply?
@@ -41,6 +42,9 @@ export default defineEventHandler(async (event) => {
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid email' })
+  }
+  if (isUndeliverableEmail(email)) {
+    throw createError({ statusCode: 400, statusMessage: 'ownerEmailUndeliverable', data: { case: 'ownerEmailUndeliverable' } })
   }
 
   const config = useRuntimeConfig()

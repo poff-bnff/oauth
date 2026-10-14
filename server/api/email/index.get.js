@@ -14,8 +14,11 @@ export default defineEventHandler(async (event) => {
 
   if(query.user_token){
     try{
-      if (!stateCookie) {
-        setCookie(event, 'state', crypto.randomBytes(16).toString('hex'))
+      // One value for both the cookie and the oauth.ee URL. The login callback clears the cookie
+      // (sometimes leaving the literal string "null"), so a missing cookie must not be sent on.
+      const state = (stateCookie && stateCookie !== 'null') ? stateCookie : crypto.randomBytes(16).toString('hex')
+      if (state !== stateCookie) {
+        setCookie(event, 'state', state)
       }
 
       setCookie(event, 'redirect_uri', query.redirect_uri)
@@ -26,7 +29,7 @@ export default defineEventHandler(async (event) => {
         redirect_uri: `${config.public.url}/api/email`,
         response_type: 'code',
         scope: 'openid',
-        state: stateCookie,
+        state,
       }).toString()
 
       const redirectUri = `${config.public.oauthUrl}/auth/e-mail?${params}`

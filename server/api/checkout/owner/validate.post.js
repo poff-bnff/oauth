@@ -31,5 +31,6 @@ function ownerValidationMessage(result) {
     return `This existing user profile is missing: ${(result.missing || []).join(', ')}`
   }
   if (result.error === 'ownerPhotoRequired') return 'Photo is required for a new owner'
+  if (result.error === 'ownerEmailUndeliverable') return 'Owner email cannot receive mail'
   return 'Owner profile is not valid'
 }

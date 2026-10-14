@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { CART_LIMITS } from './cartLimits.js'
 import { userPictureBaseName } from './userPicture.js'
+import { isUndeliverableEmail } from '../../utils/emailRules.js'
 
 const config = useRuntimeConfig()
 
@@ -1261,22 +1262,28 @@ export async function buyProduct (body) {
   return { url: paymentMethod.url }
 }
 
+// The email counts as present only when mail can actually reach it: an eesti.ee address (what ID-card
+// and Smart-ID logins create) is treated like a blank one.
+const hasDeliverableEmail = profile => !isUndeliverableEmail(profile.email)
+
 export function hasCompleteCheckoutBuyerProfile(profile = {}) {
-  return !!(profile.email && profile.firstName && profile.lastName && profile.birthdate && profile.phoneNr && profile.gender && profile.picture)
+  return !!(hasDeliverableEmail(profile) && profile.firstName && profile.lastName && profile.birthdate && profile.phoneNr && profile.gender && profile.picture)
 }
 
 export function missingBuyerProfileFields(profile = {}) {
-  return ['email', 'firstName', 'lastName', 'birthdate', 'phoneNr', 'gender', 'picture'].filter(field => !profile[field])
+  return ['email', 'firstName', 'lastName', 'birthdate', 'phoneNr', 'gender', 'picture']
+    .filter(field => field === 'email' ? !hasDeliverableEmail(profile) : !profile[field])
 }
 
 // 4-field check used by the "Your profile" checkout step gate and the payment-time guard.
 // Leave hasCompleteCheckoutBuyerProfile (7-field) untouched for other callers.
 export function hasCheckoutBuyerProfile(profile = {}) {
-  return !!(profile.email && profile.firstName && profile.lastName && profile.picture)
+  return !!(hasDeliverableEmail(profile) && profile.firstName && profile.lastName && profile.picture)
 }
 
 export function missingCheckoutBuyerProfileFields(profile = {}) {
-  return ['email', 'firstName', 'lastName', 'picture'].filter(field => !profile[field])
+  return ['email', 'firstName', 'lastName', 'picture']
+    .filter(field => field === 'email' ? !hasDeliverableEmail(profile) : !profile[field])
 }
 
 function missingOwnerProfileFields(profile = {}) {
@@ -1454,6 +1461,11 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
   if (!validCheckoutEmail(email)) {
     trace('rejected', { why: 'invalidEmail', email: maskEmail(email) })
     return { error: 'invalidOwner' }
+  }
+  // Nothing sent to eesti.ee arrives, so the pass would never reach the recipient.
+  if (isUndeliverableEmail(email)) {
+    trace('rejected', { why: 'undeliverableEmail', email: maskEmail(email) })
+    return { error: 'ownerEmailUndeliverable' }
   }
 
   trace('start', {

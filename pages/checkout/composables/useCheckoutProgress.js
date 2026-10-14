@@ -1,3 +1,5 @@
+import { isUndeliverableEmail } from '../../../utils/emailRules.js'
+
 export const CHECKOUT_PROGRESS_KEY = 'poff_checkout_progress'
 
 export function itemKey (item, index = 0) {
@@ -63,6 +65,8 @@ export function giftFieldsStillNeeded (form = {}) {
 export function isGiftOwnerComplete (form = {}) {
   const email = (form.email || '').trim()
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return false
+  // Mail to eesti.ee never arrives, so the recipient would never get the pass.
+  if (isUndeliverableEmail(email)) return false
   // Compared case-insensitively: nobody should be blocked because they capitalised one of them.
   if (email.toLowerCase() !== (form.emailConfirm || '').trim().toLowerCase()) return false
 
@@ -83,11 +87,14 @@ export function isCheckoutItemComplete (item = {}, form = {}) {
   return true
 }
 
-export function isCheckoutProfileComplete (form = {}, hasPicture = false) {
+// `email` is the address on the profile, proven through /api/email — the checkout form cannot
+// change it. It defaults to form.email only for callers that still keep one on the form.
+export function isCheckoutProfileComplete (form = {}, hasPicture = false, email = form.email) {
   return !!(
     (form.firstName || '').trim() &&
     (form.lastName || '').trim() &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((form.email || '').trim()) &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((email || '').trim()) &&
+    !isUndeliverableEmail(email) &&
     (form.photo || hasPicture)
   )
 }

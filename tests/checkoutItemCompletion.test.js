@@ -109,6 +109,20 @@ describe('isCheckoutItemComplete', () => {
   })
 })
 
+describe('eesti.ee addresses', () => {
+  it('a gift to an eesti.ee recipient is never complete', () => {
+    const eesti = '38001010001@eesti.ee'
+    expect(isGiftOwnerComplete(giftForm({ email: eesti, emailConfirm: eesti }))).toBe(false)
+    expect(isGiftOwnerComplete(giftForm({ email: 'A@EESTI.EE', emailConfirm: 'A@EESTI.EE' }))).toBe(false)
+  })
+  it('a profile whose email is eesti.ee is never complete, whatever else it has', () => {
+    const form = { firstName: 'Ada', lastName: 'Lovelace', photo: null }
+    expect(isCheckoutProfileComplete(form, true, '38001010001@eesti.ee')).toBe(false)
+    expect(isCheckoutProfileComplete(form, true, 'ada@example.com')).toBe(true)
+    expect(isCheckoutProfileComplete(form, true, '')).toBe(false)
+  })
+})
+
 describe('isCheckoutProfileComplete', () => {
   const profile = (over = {}) => ({
     firstName: 'Ada',

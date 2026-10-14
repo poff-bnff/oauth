@@ -6,6 +6,7 @@
 <script setup>
 import { emptyCheckoutItemForm, itemKey, isGiftOwnerComplete, isCheckoutItemComplete, giftFieldsStillNeeded, shouldLookupOwner } from '../composables/useCheckoutProgress.js'
 import { savePhoto, deletePhoto } from '../composables/useCheckoutPhotoStore.js'
+import { isUndeliverableEmail } from '../../../utils/emailRules.js'
 import {
   DEFAULT_PHOTO_RULES,
   acceptAttributeFor,
@@ -137,7 +138,8 @@ async function lookupOwner (item, index) {
   const form = ensureItemForm(item, index)
   const email = (form.email || '').trim().toLowerCase()
 
-  if (!EMAIL_PATTERN.test(email)) {
+  // An eesti.ee recipient is refused outright, so there is nothing worth looking up.
+  if (!EMAIL_PATTERN.test(email) || isUndeliverableEmail(email)) {
     form.ownerOnFile = null
     return
   }
@@ -219,6 +221,12 @@ function giftOnFile (item, index) {
 // confirmation field and the check appear together rather than one before the other.
 function giftEmailLooksValid (item, index) {
   return EMAIL_PATTERN.test((ensureItemForm(item, index).email || '').trim().toLowerCase())
+}
+
+// Nothing sent to eesti.ee arrives, so a pass gifted there would never reach the recipient.
+function giftEmailUndeliverable (item, index) {
+  const email = (ensureItemForm(item, index).email || '').trim()
+  return giftEmailLooksValid(item, index) && isUndeliverableEmail(email)
 }
 
 function giftEmailMismatch (item, index) {
@@ -471,6 +479,8 @@ function validateAndContinue () {
                 <span v-if="ensureItemForm(item, index).ownerLookupPending" class="owner-lookup-spinner" aria-hidden="true" />
               </span>
             </label>
+
+            <small v-if="giftEmailUndeliverable(item, index)" class="photo-error span" role="alert">{{ copy.giftEmailUndeliverable }}</small>
 
             <!-- Typed twice on purpose. A mistyped address that happens to belong to a real
                  account would otherwise pass silently as "details on file" and send the pass to a

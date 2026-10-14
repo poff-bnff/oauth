@@ -10,6 +10,7 @@ const CASE_TO_COPY_KEY = {
   buyerProfileIncomplete: 'checkoutBuyerProfileIncomplete',
   ownerProfileIncomplete: 'checkoutOwnerProfileIncomplete',
   ownerPhotoRequired: 'checkoutOwnerPhotoRequired',
+  ownerEmailUndeliverable: 'giftEmailUndeliverable',
   invalidOwner: 'checkoutInvalidOwner',
   noDeliveryLocation: 'checkoutNoDeliveryLocation',
   invalidDeliveryLocation: 'checkoutInvalidDeliveryLocation',

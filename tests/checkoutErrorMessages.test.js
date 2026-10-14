@@ -34,6 +34,15 @@ describe('each cause gets its own message', () => {
     expect(message).toContain('a photo')
   })
 
+  test('an undeliverable gift email gets its own message, in every language', () => {
+    for (const locale of ['en', 'et', 'ru']) {
+      const localized = buildCheckoutCopy(locale, {})
+      const message = checkoutErrorMessage(failure({ case: 'ownerEmailUndeliverable', productId: 9000 }), localized, null, { items })
+      expect(message).toBe(localized.giftEmailUndeliverable)
+      expect(message).toContain('eesti.ee')
+    }
+  })
+
   test('the six causes no longer share one message', () => {
     const cases = ['buyerProfileIncomplete', 'ownerProfileIncomplete', 'ownerPhotoRequired',
       'invalidOwner', 'noDeliveryLocation', 'invalidDeliveryLocation']
