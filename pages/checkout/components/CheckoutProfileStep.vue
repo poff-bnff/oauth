@@ -159,11 +159,11 @@ async function save () {
     <div class="form-grid profile-form">
       <label>
         <span class="field-label">{{ copy.firstName }} <span class="required-dot">*</span></span>
-        <input v-model.trim="form.firstName" autocomplete="given-name" required>
+        <input v-model.trim="form.firstName" autocomplete="given-name" required :disabled="emailUndeliverable">
       </label>
       <label>
         <span class="field-label">{{ copy.lastName }} <span class="required-dot">*</span></span>
-        <input v-model.trim="form.lastName" autocomplete="family-name" required>
+        <input v-model.trim="form.lastName" autocomplete="family-name" required :disabled="emailUndeliverable">
       </label>
       <div class="span profile-email">
         <span class="field-label">{{ copy.email }} <span class="required-dot">*</span></span>
@@ -180,7 +180,7 @@ async function save () {
       </div>
       <label class="file photo-upload span">
         <span class="field-label">{{ copy.photo }} <span class="required-dot">*</span></span>
-        <input type="file" :accept="photoAccept" @change="handlePhoto">
+        <input type="file" :accept="photoAccept" :disabled="emailUndeliverable" @change="handlePhoto">
         <span class="photo-upload-box">
           <span class="photo-preview">
             <img v-if="form.photo" :src="form.photo.data" :alt="copy.photo">
@@ -202,7 +202,7 @@ async function save () {
     </p>
 
     <div class="actions">
-      <button class="primary" type="button" :disabled="saving || !isProfileComplete" @click="save">
+      <button class="primary" type="button" :disabled="saving || emailUndeliverable || !isProfileComplete" @click="save">
         {{ saving ? copy.savingProfile : copy.saveAndContinue }} →
       </button>
     </div>

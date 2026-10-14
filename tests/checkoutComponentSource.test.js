@@ -66,7 +66,7 @@ describe('profile step — save button gated on completeness', () => {
     expect(profileStepSource).toContain('isCheckoutProfileComplete')
   })
   test('the save button is disabled until the form is complete', () => {
-    expect(profileStepSource).toContain(':disabled="saving || !isProfileComplete"')
+    expect(profileStepSource).toMatch(/:disabled="saving \|\|[^"]*!isProfileComplete"/)
   })
 })
 
@@ -296,5 +296,12 @@ describe('proven, non-eesti.ee buyer email', () => {
   test('the gift form flags an undeliverable recipient with its own message', () => {
     expect(checkoutItemStepSource).toContain('isUndeliverableEmail')
     expect(checkoutItemStepSource).toContain('copy.giftEmailUndeliverable')
+  })
+
+  test('while the email is undeliverable the names, photo and save are locked', () => {
+    expect(profileStepSource).toMatch(/<input v-model\.trim="form\.firstName"[^>]*:disabled="emailUndeliverable"/)
+    expect(profileStepSource).toMatch(/<input v-model\.trim="form\.lastName"[^>]*:disabled="emailUndeliverable"/)
+    expect(profileStepSource).toMatch(/<input type="file"[^>]*:disabled="emailUndeliverable"/)
+    expect(profileStepSource).toMatch(/:disabled="saving \|\| emailUndeliverable \|\| !isProfileComplete"/)
   })
 })
