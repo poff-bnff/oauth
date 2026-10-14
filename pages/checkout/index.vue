@@ -32,9 +32,14 @@ const locale = ref(route.query.locale || 'en')
 const removedNotice = ref(Number(route.query.removed) || 0)
 const authHeaders = computed(() => ({ Authorization: `Bearer ${token.value}` }))
 
-// Result of the email proof (GET /api/email), appended to the return address as &notifier=<result>.
-// Only the known values are shown; anything else in the address bar is ignored.
-const EMAIL_NOTIFIERS = ['emailChangeSuccess', 'emailChangeSame', 'emailChangeTaken', 'emailChangeUndeliverable']
+// Result of the email proof (GET /api/email) or of adding another login (/api/alias/auth), appended
+// to the return address as &notifier=<result>. Only the known values are shown; anything else in the
+// address bar is ignored.
+const EMAIL_NOTIFIERS = [
+  'emailChangeSuccess', 'emailChangeSame', 'emailChangeTaken', 'emailChangeUndeliverable',
+  'addAliasSuccess', 'addAliasExists', 'addAliasFailed'
+]
+const EMAIL_NOTIFIER_ERRORS = ['emailChangeTaken', 'emailChangeUndeliverable', 'addAliasFailed']
 const emailNotifier = ref(EMAIL_NOTIFIERS.includes(route.query.notifier) ? route.query.notifier : '')
 
 // ── Copy (i18n) ───────────────────────────────────────────────────────────────
@@ -228,6 +233,16 @@ function emailReturnUrl () {
 }
 
 const verifyEmailUrl = computed(() => `/api/email?user_token=${encodeURIComponent(token.value)}&redirect_uri=${encodeURIComponent(emailReturnUrl())}`)
+
+// "Taken" means the proven address already has its own PÖFF account. The way out is the existing
+// add-account flow (the same one poff.ee's profile page uses): the buyer logs in with that other account,
+// which proves it is theirs, and it becomes an alias of this one. It comes back with addAlias<result>.
+const addAccountUrl = computed(() => `/?${new URLSearchParams({
+  query_type: 'add_account',
+  user_token: token.value,
+  redirect_uri: emailReturnUrl(),
+  locale: locale.value
+}).toString()}`)
 
 function checkoutLoginRedirectUri () {
   const nextUrl = checkoutRedirectUri()
@@ -999,12 +1014,19 @@ watch(sessionRemainingSeconds, (seconds) => {
 
         <div
           v-if="emailNotifier"
-          :role="emailNotifier === 'emailChangeTaken' || emailNotifier === 'emailChangeUndeliverable' ? 'alert' : 'status'"
-          :style="emailNotifier === 'emailChangeTaken' || emailNotifier === 'emailChangeUndeliverable'
+          :role="EMAIL_NOTIFIER_ERRORS.includes(emailNotifier) ? 'alert' : 'status'"
+          :style="EMAIL_NOTIFIER_ERRORS.includes(emailNotifier)
             ? 'background:#fdecec;border:1px solid #f5b5b5;color:#8a1f1f;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px'
             : 'background:#e8f7ec;border:1px solid #a9dcb7;color:#1d6b35;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px'"
         >
-          <span>{{ copy[emailNotifier] }}</span>
+          <span style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+            <span>{{ copy[emailNotifier] }}</span>
+            <a
+              v-if="emailNotifier === 'emailChangeTaken'"
+              :href="addAccountUrl"
+              style="display:inline-flex;align-items:center;padding:6px 12px;border:1px solid currentColor;border-radius:2px;color:inherit;text-decoration:none;font-weight:600;white-space:nowrap"
+            >{{ copy.addOtherAccountButton }}</a>
+          </span>
           <button
             type="button"
             aria-label="Dismiss"

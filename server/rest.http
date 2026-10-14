@@ -37,15 +37,6 @@ get {{hunt_url}}/api/validate/eventUrl?1131 HTTP/1.1
 Authorization: token {{jwt}}
 Content-Type: application/json
 
-### Merge My over all my users
-# gmail 14813
-# poff 17339
-put {{hunt_url}}/api/me/link HTTP/1.1
-Authorization: token {{jwt}}
-Content-Type: application/json
-
-17339
-
 ### GET strapi cinemas
 get https://admin.poff.ee/cinemas HTTP/1.1
 Authorization: token {{jwt}}

@@ -288,7 +288,8 @@ describe('proven, non-eesti.ee buyer email', () => {
   test('the clean-up keeps the router history state, and the undeliverable result is accepted and alert-styled', () => {
     expect(indexSource).toContain("window.history.replaceState(window.history.state, '', clean.toString())")
     expect(indexSource).toMatch(/EMAIL_NOTIFIERS = \[[^\]]*'emailChangeUndeliverable'/)
-    expect(indexSource).toMatch(/:role="emailNotifier === 'emailChangeTaken' \|\| emailNotifier === 'emailChangeUndeliverable' \? 'alert' : 'status'"/)
+    expect(indexSource).toMatch(/EMAIL_NOTIFIER_ERRORS = \[[^\]]*'emailChangeUndeliverable'/)
+    expect(indexSource).toContain(':role="EMAIL_NOTIFIER_ERRORS.includes(emailNotifier) ? \'alert\' : \'status\'"')
     for (const lang of ['et', 'en', 'ru']) expect(copyDefaults[lang].emailChangeUndeliverable, lang).toBeTruthy()
   })
 
@@ -319,5 +320,51 @@ describe('proven, non-eesti.ee buyer email', () => {
     expect(rule[1]).toMatch(/display:\s*inline-flex/)
     expect(rule[1]).toMatch(/text-decoration:\s*none/)
     expect(profileStepSource).toContain('profile-email"')
+  })
+})
+
+// When the proven address already has its own PÖFF account, /api/email refuses with emailChangeTaken
+// (it cannot tell the buyer's own second account from a stranger's profile carrying the address).
+// poff.ee's way out is "Add account", which proves the other login itself; checkout offers the same.
+describe('taken address: add the other account from checkout', () => {
+  test('the add-account URL starts the existing login-page flow and returns to this checkout', () => {
+    const fn = indexSource.slice(indexSource.indexOf('const addAccountUrl'), indexSource.indexOf('const addAccountUrl') + 400)
+    expect(fn).toContain("query_type: 'add_account'")
+    expect(fn).toContain('user_token: token.value')
+    expect(fn).toContain('redirect_uri: emailReturnUrl()')
+    expect(fn).toContain('locale: locale.value')
+  })
+
+  test('the button is offered only with the taken result', () => {
+    expect(indexSource).toMatch(/v-if="emailNotifier === 'emailChangeTaken'"[^>]*:href="addAccountUrl"|:href="addAccountUrl"[^>]*v-if="emailNotifier === 'emailChangeTaken'"/)
+    expect(indexSource).toContain('{{ copy.addOtherAccountButton }}')
+  })
+
+  test('the three add-account results are accepted; a failure is alert-styled', () => {
+    for (const value of ['addAliasSuccess', 'addAliasExists', 'addAliasFailed']) {
+      expect(indexSource).toMatch(new RegExp(`EMAIL_NOTIFIERS = \\[[^\\]]*'${value}'`))
+    }
+    expect(indexSource).toMatch(/EMAIL_NOTIFIER_ERRORS = \[[^\]]*'addAliasFailed'/)
+    expect(indexSource).toMatch(/EMAIL_NOTIFIER_ERRORS = \[[^\]]*'emailChangeTaken'/)
+  })
+
+  test('the copy exists in every language, and the taken message points to the button', () => {
+    for (const lang of ['et', 'en', 'ru']) {
+      for (const key of ['addOtherAccountButton', 'addAliasSuccess', 'addAliasExists', 'addAliasFailed']) {
+        expect(copyDefaults[lang][key], `${lang}.${key}`).toBeTruthy()
+      }
+    }
+    expect(copyDefaults.en.emailChangeTaken).toBe('This email address already has its own PÖFF account. If that account is yours, add it here, then confirm the address again.')
+  })
+})
+
+// An old developer endpoint linked ANY account id from the request body as the caller's alias,
+// with no proof of the other login; nothing called it. Linking now happens only through the proven
+// flows (/api/email and /api/alias/auth).
+describe('no unproven account linking', () => {
+  test('the /api/me/link route and its helper are gone', () => {
+    expect(() => read('../server/api/me/link.put.js')).toThrow()
+    expect(read('../server/utils/strapi.js')).not.toContain('linkStrapiUser')
+    expect(read('../server/rest.http')).not.toContain('/api/me/link')
   })
 })

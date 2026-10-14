@@ -2961,27 +2961,6 @@ export async function roleCheck (body) {
   return result
 }
 
-export async function linkStrapiUser (mainUserId, aliasUserId) {
-  if (!mainUserId) return null
-  if (!aliasUserId) return null
-
-  const token = await getStrapiToken()
-
-  const result = await $fetch(`${config.strapiUrl}/user/link`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: {
-      mainUser: mainUserId,
-      aliasUser: aliasUserId
-    }
-  })
-
-  return result
-}
-
 const makeUnique = (arr, prop) => {
   const obj = {}
   return Object.keys(arr.reduce((prev, next) => {
