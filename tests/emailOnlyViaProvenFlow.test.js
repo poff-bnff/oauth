@@ -11,7 +11,8 @@ vi.mock('~/server/utils/userPicture', async () => await import('../server/utils/
 
 const handlerGlobals = ['defineEventHandler', 'getUserIdFromEvent', 'readBody', 'readMultipartFormData',
   'getStrapiUser', 'setStrapiUserProfile', 'uploadStrapiImage', 'createStrapiUserProfile',
-  'getCookie', 'setCookie', 'sendRedirect', 'getQuery']
+  'getCookie', 'setCookie', 'sendRedirect', 'getQuery', 'useRuntimeConfig', '$fetch',
+  'getUserIdFromToken', 'emailInUse', 'authenticateStrapiUser', 'createError']
 
 afterEach(() => {
   for (const name of handlerGlobals) delete globalThis[name]
@@ -102,5 +103,43 @@ describe('GET /api/email state handling', () => {
     const { set, state } = await run('abc123')
     expect(state).toBe('abc123')
     expect(set.state).toBeUndefined()
+  })
+})
+
+describe('GET /api/email callback', () => {
+  const run = async (oauthEmail) => {
+    const cookies = { state: 'st', redirect_uri: 'https://x/checkout?a=1', user_token: 'jwt' }
+    const set = {}
+    let location
+    globalThis.defineEventHandler = fn => fn
+    globalThis.createError = (o) => Object.assign(new Error(o.statusMessage), o)
+    globalThis.useRuntimeConfig = () => ({ public: { oauthClientId: 'c', url: 'http://shop.test', oauthUrl: 'http://oauth.test' }, oauthClientSecret: 's' })
+    globalThis.getQuery = () => ({ code: 'c1', state: 'st' })
+    globalThis.getCookie = (_e, name) => cookies[name]
+    globalThis.setCookie = (_e, name, value) => { set[name] = value }
+    globalThis.sendRedirect = (_e, url) => { location = url }
+    globalThis.$fetch = vi.fn(async (url) => (String(url).endsWith('/api/token') ? { access_token: 't' } : { email: oauthEmail }))
+    globalThis.getUserIdFromToken = async () => 7
+    globalThis.getStrapiUser = vi.fn().mockResolvedValue({ id: 7, user_profile: { id: 70, email: 'old@example.ee' } })
+    globalThis.emailInUse = vi.fn().mockResolvedValue(false)
+    globalThis.setStrapiUserProfile = vi.fn().mockResolvedValue({})
+    globalThis.authenticateStrapiUser = vi.fn().mockResolvedValue({ id: 7 })
+    const handler = (await import('../server/api/email/index.get.js')).default
+    await handler({})
+    return { set, location }
+  }
+
+  test.each([['38001010000@eesti.ee'], ['38001010000@EESTI.ee']])('refuses the proven address %s: no lookup, no profile write', async (email) => {
+    const { set, location } = await run(email)
+    expect(location).toBe('https://x/checkout?a=1&notifier=emailChangeUndeliverable')
+    expect(set.state).toBeNull()
+    expect(globalThis.setStrapiUserProfile).not.toHaveBeenCalled()
+    expect(globalThis.emailInUse).not.toHaveBeenCalled()
+  })
+
+  test('a real address is still written', async () => {
+    const { location } = await run('new@example.ee')
+    expect(globalThis.setStrapiUserProfile).toHaveBeenCalledWith(70, { email: 'new@example.ee' })
+    expect(location).toBe('https://x/checkout?a=1&notifier=emailChangeSuccess')
   })
 })

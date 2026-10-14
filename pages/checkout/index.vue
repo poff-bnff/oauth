@@ -33,8 +33,8 @@ const removedNotice = ref(Number(route.query.removed) || 0)
 const authHeaders = computed(() => ({ Authorization: `Bearer ${token.value}` }))
 
 // Result of the email proof (GET /api/email), appended to the return address as &notifier=<result>.
-// Only the three known values are shown; anything else in the address bar is ignored.
-const EMAIL_NOTIFIERS = ['emailChangeSuccess', 'emailChangeSame', 'emailChangeTaken']
+// Only the known values are shown; anything else in the address bar is ignored.
+const EMAIL_NOTIFIERS = ['emailChangeSuccess', 'emailChangeSame', 'emailChangeTaken', 'emailChangeUndeliverable']
 const emailNotifier = ref(EMAIL_NOTIFIERS.includes(route.query.notifier) ? route.query.notifier : '')
 
 // ── Copy (i18n) ───────────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ function checkoutRedirectUri () {
 function emailReturnUrl () {
   const redirect = new URL(`${runtime.public.url}/checkout`)
   for (const [key, value] of Object.entries(route.query)) {
-    if (key === 'jwt' || key === 'notifier') continue
+    if (key === 'jwt' || key === 'notifier' || key === 'result' || key === 'removed') continue
     const entry = Array.isArray(value) ? value[0] : value
     if (entry !== undefined && entry !== null && entry !== '') redirect.searchParams.set(key, entry)
   }
@@ -867,7 +867,7 @@ onMounted(() => {
     try {
       const clean = new URL(window.location.href)
       clean.searchParams.delete('notifier')
-      window.history.replaceState({}, '', clean.toString())
+      window.history.replaceState(window.history.state, '', clean.toString())
     } catch { /* no window */ }
   }
   startSessionClock()
@@ -999,8 +999,8 @@ watch(sessionRemainingSeconds, (seconds) => {
 
         <div
           v-if="emailNotifier"
-          role="status"
-          :style="emailNotifier === 'emailChangeTaken'
+          :role="emailNotifier === 'emailChangeTaken' || emailNotifier === 'emailChangeUndeliverable' ? 'alert' : 'status'"
+          :style="emailNotifier === 'emailChangeTaken' || emailNotifier === 'emailChangeUndeliverable'
             ? 'background:#fdecec;border:1px solid #f5b5b5;color:#8a1f1f;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px'
             : 'background:#e8f7ec;border:1px solid #a9dcb7;color:#1d6b35;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;gap:12px'"
         >

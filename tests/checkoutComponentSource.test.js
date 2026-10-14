@@ -266,7 +266,7 @@ describe('proven, non-eesti.ee buyer email', () => {
 
   test('the return url carries the token, drops notifier and always has a query', () => {
     const fn = indexSource.slice(indexSource.indexOf('function emailReturnUrl'), indexSource.indexOf('const verifyEmailUrl'))
-    expect(fn).toContain("key === 'jwt' || key === 'notifier'")
+    for (const key of ['jwt', 'notifier', 'result', 'removed']) expect(fn).toContain(`key === '${key}'`)
     expect(fn).toContain("searchParams.set('jwt', token.value)")
   })
 
@@ -283,6 +283,13 @@ describe('proven, non-eesti.ee buyer email', () => {
       expect(copyDefaults.en[value]).toBeTruthy()
     }
     expect(indexSource).toContain("clean.searchParams.delete('notifier')")
+  })
+
+  test('the clean-up keeps the router history state, and the undeliverable result is accepted and alert-styled', () => {
+    expect(indexSource).toContain("window.history.replaceState(window.history.state, '', clean.toString())")
+    expect(indexSource).toMatch(/EMAIL_NOTIFIERS = \[[^\]]*'emailChangeUndeliverable'/)
+    expect(indexSource).toMatch(/:role="emailNotifier === 'emailChangeTaken' \|\| emailNotifier === 'emailChangeUndeliverable' \? 'alert' : 'status'"/)
+    for (const lang of ['et', 'en', 'ru']) expect(copyDefaults[lang].emailChangeUndeliverable, lang).toBeTruthy()
   })
 
   test('the new copy exists in every language', () => {

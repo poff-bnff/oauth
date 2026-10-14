@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import { isUndeliverableEmail } from '../../../utils/emailRules.js'
 
 function hasCompleteProfile(user){
   let profile = user.user_profile
@@ -56,6 +57,13 @@ export default defineEventHandler(async (event) => {
       const authUser = await $fetch(`${config.public.oauthUrl}/api/user`, { headers: { Authorization: `Bearer ${token}` } })
 
       if (!authUser.email) throw createError({ statusCode: 500, statusMessage: 'No OAuth.ee e-mail' })
+
+      // The proof can succeed with an eesti.ee address (an ID-card login's own mailbox). Our mail
+      // never reaches it, so it must not become the profile email.
+      if (isUndeliverableEmail(authUser.email)) {
+        setCookie(event, 'state', null)
+        return sendRedirect(event, redirectCookie + '&notifier=emailChangeUndeliverable', 302)
+      }
 
       const id = await getUserIdFromToken(userCookie)
       const user = await getStrapiUser(id)
