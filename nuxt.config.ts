@@ -51,7 +51,7 @@ export default defineNuxtConfig({
     fionaPublicationApiKey: '', // NUXT_FIONA_PUBLICATION_API_KEY — Publication API key (`apikey` header)
     fionaPublicationApiUrl: '', // NUXT_FIONA_PUBLICATION_API_URL — e.g. https://poff-online-api.fiona-online.net/v1
     syncMaxRemovals: '', // NUXT_SYNC_MAX_REMOVALS — cap on unpublishes per sync run (default 50)
-    syncMaxBuildsPerRun: '', // NUXT_SYNC_MAX_BUILDS_PER_RUN — cap on per-person site builds per run (default 20)
+    syncMaxBuildsPerRun: '', // NUXT_SYNC_MAX_BUILDS_PER_RUN — site builds per rule and run when the rule leaves target_builds_limit_per_run empty (default 20)
     syncKeepBioPersonIds: '', // NUXT_SYNC_KEEP_BIO_PERSON_IDS — comma-separated Strapi person ids whose existing biography the Fiona sync never overwrites
     public: {
       url: '',

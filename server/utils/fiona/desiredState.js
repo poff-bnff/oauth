@@ -42,7 +42,8 @@ export function mergeDesired (desired, fionaPersonId, { guestbookId, accreditati
       accreditationIds: new Set(),
       editionIds: new Set(),
       roleIds: new Set(),
-      matchedRuleIds: new Set()
+      matchedRuleIds: new Set(),
+      fullRuleIds: new Set()
     }
     desired.set(fionaPersonId, entry)
   }
@@ -53,6 +54,7 @@ export function mergeDesired (desired, fionaPersonId, { guestbookId, accreditati
   for (const id of evaluation.editionIds || []) entry.editionIds.add(Number(id))
   for (const id of evaluation.roleIds || []) entry.roleIds.add(Number(id))
   for (const id of evaluation.matchedRuleIds || []) entry.matchedRuleIds.add(id)
+  for (const id of evaluation.fullRuleIds || []) entry.fullRuleIds.add(id)
   return desired
 }
 

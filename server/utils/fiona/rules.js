@@ -34,6 +34,12 @@ const relationIds = list => (Array.isArray(list) ? list : [])
  * Turn raw Strapi rule records into normalised rules.
  * Returns { rules, warnings }.
  */
+/** A whole number of at least 1, else null (empty = use the global default). */
+function positiveInteger (value) {
+  const number = Number(value)
+  return Number.isInteger(number) && number >= 1 ? number : null
+}
+
 export function normalizeRules (rawRules) {
   const rules = []
   const warnings = []
@@ -64,7 +70,9 @@ export function normalizeRules (rawRules) {
       level1,
       level2,
       editionIds: relationIds(raw.festival_editions),
-      roleIds: relationIds(raw.user_roles)
+      roleIds: relationIds(raw.user_roles),
+      targetBuilds: raw.target_builds === true,
+      targetBuildsLimitPerRun: positiveInteger(raw.target_builds_limit_per_run)
     })
   }
 
@@ -104,13 +112,15 @@ const sortedUnique = values => [...new Set(values)].sort((a, b) => (a > b ? 1 : 
  *
  * @param {Array<{badgeId:string, badgeName:string, statusText:string}>} badges
  * @param {{byBadgeId:Map, byBadgeName:Map}} index
- * @returns {{level:0|1|2, editionIds:number[], roleIds:number[], matchedRuleIds:number[]}}
+ * @returns {{level:0|1|2, editionIds:number[], roleIds:number[], matchedRuleIds:number[], fullRuleIds:number[]}}
+ *   fullRuleIds = the rules whose full-profile statuses matched
  */
 export function evaluateBadges (badges, index) {
   let level = 0
   const editionIds = []
   const roleIds = []
   const matchedRuleIds = []
+  const fullRuleIds = []
 
   for (const badge of Array.isArray(badges) ? badges : []) {
     const status = norm(badge.statusText)
@@ -121,6 +131,7 @@ export function evaluateBadges (badges, index) {
         editionIds.push(...rule.editionIds)
         roleIds.push(...rule.roleIds)
         matchedRuleIds.push(rule.id)
+        fullRuleIds.push(rule.id)
       } else if (rule.level1.has(status)) {
         level = Math.max(level, 1)
         matchedRuleIds.push(rule.id)
@@ -132,6 +143,7 @@ export function evaluateBadges (badges, index) {
     level,
     editionIds: sortedUnique(editionIds),
     roleIds: sortedUnique(roleIds),
-    matchedRuleIds: sortedUnique(matchedRuleIds)
+    matchedRuleIds: sortedUnique(matchedRuleIds),
+    fullRuleIds: sortedUnique(fullRuleIds)
   }
 }
