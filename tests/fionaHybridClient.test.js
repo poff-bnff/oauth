@@ -54,12 +54,12 @@ describe('createHybridClient', () => {
     expect(tracker.log).toEqual([])
   })
 
-  it('fills a missing email and phone from the XAPI person, keeping the published fields', async () => {
+  it('fills a missing email and phone from the XAPI person; the biography published on the person is no longer used', async () => {
     const tracker = calls()
     const publication = publicationStub({ getPerson: () => ({ id: 'p', firstName: 'A', lastName: 'B', email: null, phone: null, bio: 'published bio', country: null, externalAccountId: null, photoToken: null }) })
     const client = createHybridClient({ publication, xapi: xapiStub(tracker), log: { warn () {} } })
     const person = await client.getPerson('p')
-    expect(person).toMatchObject({ email: 'x@api.ee', phone: '+1', bio: 'published bio', emailSource: 'xapi' })
+    expect(person).toMatchObject({ email: 'x@api.ee', phone: '+1', bio: null, emailSource: 'xapi' })
     expect(tracker.log).toEqual([['xapi.getPerson', 'p']])
   })
 
@@ -144,30 +144,30 @@ describe('createHybridClient', () => {
     })
     const publicationPerson = bio => ({ getPerson: () => ({ id: 'p', firstName: 'A', lastName: 'B', email: 'a@b.ee', phone: null, bio, country: null, externalAccountId: '5', photoToken: 'tok' }) })
 
-    it('keeps the published biography and does not ask the XAPI', async () => {
+    it('takes the biography from the accreditation card only: the biography published on the person is ignored', async () => {
       const tracker = calls()
-      const client = createHybridClient({ publication: publicationStub(publicationPerson('Published bio')), xapi: xapiWithBio(tracker), allowUnpublishedBios: true, log: { warn () {} } })
-      const person = await client.getPerson('p', opts)
-      expect(person).toMatchObject({ bio: 'Published bio', bioSource: 'published' })
-      expect(tracker.log).toEqual([])
-    })
-
-    it('without the switch a person without a published biography gets none', async () => {
-      const tracker = calls()
-      const client = createHybridClient({ publication: publicationStub(publicationPerson(null)), xapi: xapiWithBio(tracker), log: { warn () {} } })
-      expect((await client.getPerson('p', opts)).bio).toBeNull()
-      expect(tracker.log).toEqual([])
-    })
-
-    it('with the switch on, a full-profile person without a published biography gets the accreditation card biography', async () => {
-      const tracker = calls()
-      const client = createHybridClient({ publication: publicationStub(publicationPerson(null)), xapi: xapiWithBio(tracker), allowUnpublishedBios: true, log: { warn () {} } })
+      const client = createHybridClient({ publication: publicationStub(publicationPerson('Published on the person')), xapi: xapiWithBio(tracker), allowUnpublishedBios: true, log: { warn () {} } })
       const person = await client.getPerson('p', opts)
       expect(person).toMatchObject({ bio: 'Card bio', bioSource: 'accreditation' })
       expect(tracker.log).toEqual([['xapi.getUnpublishedBiography', ['acc']]])
     })
 
-    it('a basic-level person gets no XAPI lookup', async () => {
+    it('a person whose card has no Biography note gets no biography, even if one is published on the person', async () => {
+      const tracker = calls()
+      const client = createHybridClient({ publication: publicationStub(publicationPerson('Published on the person')), xapi: xapiWithBio(tracker, { getUnpublishedBiography: () => null }), allowUnpublishedBios: true, log: { warn () {} } })
+      const person = await client.getPerson('p', opts)
+      expect(person.bio).toBeNull()
+      expect(person.bioSource).toBeUndefined()
+    })
+
+    it('with the switch off there is no biography at all, and the XAPI is not asked', async () => {
+      const tracker = calls()
+      const client = createHybridClient({ publication: publicationStub(publicationPerson('Published on the person')), xapi: xapiWithBio(tracker), log: { warn () {} } })
+      expect((await client.getPerson('p', opts)).bio).toBeNull()
+      expect(tracker.log).toEqual([])
+    })
+
+    it('a basic-level person gets no biography and no XAPI lookup', async () => {
       const tracker = calls()
       const client = createHybridClient({ publication: publicationStub(publicationPerson(null)), xapi: xapiWithBio(tracker), allowUnpublishedBios: true, log: { warn () {} } })
       expect((await client.getPerson('p', { accreditationIds: ['acc'], level: 1 })).bio).toBeNull()

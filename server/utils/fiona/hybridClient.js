@@ -9,8 +9,9 @@
  *   - no published email  → XAPI person (communication items) for the login email
  *   - no MyPoff link      → XAPI external authentications (prevents a second
  *                           login account for someone who already has one)
- * A biography is read the same way: the published one comes first; only when allowUnpublishedBios is on, a full-profile
- * person without one gets the Biography memo from its accreditation card, published or not.
+ * A biography comes from the accreditation card ONLY: the Memo whose content type is Biography, published or not. The
+ * biography published on the person itself is ignored on purpose (decision with Jaan). Needs allowUnpublishedBios, a
+ * full-profile person and the XAPI; otherwise the person gets no biography from the sync.
  * Photos are editorial content: the published one comes first. Only when the switch allowUnpublishedPhotos is on, a
  * full-profile person without a published photo gets the attachment whose content type is Headshot, published or not.
  * XAPI failures never fail the sync: the published data is kept and a
@@ -53,7 +54,7 @@ export function createHybridClient ({ publication, xapi = null, log = console, a
           }
         }
       }
-      if (result.bio) return { ...result, bioSource: 'published' }
+      result = { ...result, bio: null }
       if (!allowUnpublishedBios || level < 2 || typeof xapi?.getUnpublishedBiography !== 'function') return result
       const card = await fallback(log, 'biography', personId, () => xapi.getUnpublishedBiography(accreditationIds), null)
       return card?.text ? { ...result, bio: card.text, bioSource: 'accreditation' } : result

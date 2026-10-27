@@ -809,26 +809,24 @@ describe('runSync', () => {
   describe('biographies', () => {
     it('asks for the person with the accreditation ids and the level', async () => {
       fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
-      fiona.state.persons.set('fp2', { firstName: 'A', lastName: 'A', email: 'a@a.ee', bio: 'Bio', bioSource: 'published' })
+      fiona.state.persons.set('fp2', { firstName: 'A', lastName: 'A', email: 'a@a.ee', bio: 'Bio', bioSource: 'accreditation' })
 
       await runSync({}, deps)
 
       expect(fiona.state.personCalls).toEqual([{ personId: 'fp2', accreditationIds: ['acc2'], level: 2 }])
     })
 
-    it('counts where biographies came from and names the full-profile persons that have none', async () => {
+    it('counts the biographies read from accreditation cards and names the full-profile persons that have none', async () => {
       fiona.state.guestbooks.set(GB, guestbookWith(
-        accreditation('acc2', 'fp2', BADGE_PRO, 'Paid'),
         accreditation('acc7', 'fp7', BADGE_PRO, 'Paid'),
         accreditation('acc8', 'fp8', BADGE_PRO, 'Paid')
       ))
-      fiona.state.persons.set('fp2', { firstName: 'Pub', lastName: 'Lished', email: 'a@a.ee', bio: 'Published', bioSource: 'published' })
       fiona.state.persons.set('fp7', { firstName: 'Card', lastName: 'Bio', email: 'b@b.ee', bio: 'From the card', bioSource: 'accreditation' })
       fiona.state.persons.set('fp8', { firstName: 'No', lastName: 'Bio', email: 'c@c.ee' })
 
       const stats = await runSync({}, deps)
 
-      expect(stats.bios).toEqual({ published: 1, accreditation: 1, missing: ['No Bio'] })
+      expect(stats.bios).toEqual({ accreditation: 1, missing: ['No Bio'] })
     })
 
     it('a biography from the accreditation card fills an empty biography but never overwrites an existing one', async () => {
@@ -845,18 +843,7 @@ describe('runSync', () => {
       expect(created.bio_en).toBe('Card text for a new person')
     })
 
-    it('a published biography still overwrites, as decided', async () => {
-      strapi.state.users.set(911, { id: 911, email: 'o@x.ee', person: 92, user_roles: [] })
-      strapi.state.people.set(92, { id: 92, firstName: 'Old', lastName: 'Bio', eMail: 'o@x.ee', bio_en: 'Old text', festival_editions: [], user: 911 })
-      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc11', 'fp11', BADGE_PRO, 'Paid')))
-      fiona.state.persons.set('fp11', { firstName: 'Old', lastName: 'Bio', email: 'o@x.ee', myPoffUserId: '911', bio: 'Published text', bioSource: 'published' })
-
-      await runSync({}, deps)
-
-      expect(strapi.state.people.get(92).bio_en).toBe('Published text')
-    })
-
-    it('a dry run says where each biography would come from', async () => {
+    it('a dry run says the biography would come from the accreditation card, with its length', async () => {
       fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
       fiona.state.persons.set('fp2', { firstName: 'Card', lastName: 'Bio', email: 'a@a.ee', bio: 'From the card', bioSource: 'accreditation' })
 
