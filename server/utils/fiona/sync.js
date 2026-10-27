@@ -88,6 +88,7 @@ function newStats (dryRun, mode) {
     ruleRoles: [],
     build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
     switches: { unpublishedPhotos: false, unpublishedBios: false },
+    backlog: { cap: 0, more: false },
     photos: { published: 0, headshot: 0, missing: [] },
     bios: { accreditation: 0, missing: [] },
     removals: { skipped: false, reason: null },
@@ -186,9 +187,21 @@ function localDateAndHour (date) {
 }
 
 /** What should an `auto` invocation do, given the job entry? */
+const BACKLOG_GAP_MINUTES = 2
+const BACKLOG_RECENT_HOURS = 6 // a person written within this time by the run before is left alone in a backlog run
+
 export function decideAutoMode (job, nowDate) {
   if (!job) return { skipped: true, reason: `no fiona-sync-job entry with key "${JOB_KEY}" — create one in Strapi admin` }
   if (job.enabled === false) return { skipped: true, reason: 'job is disabled (enabled = false)' }
+
+  // The last run stopped at its cap of persons written (backlog.more): carry on with a full run two minutes later,
+  // without waiting for the interval or for the night, until a run writes fewer persons than the cap.
+  if (job.last_stats?.backlog?.more === true) {
+    const lastRun = Math.max(job.last_full_run_at ? new Date(job.last_full_run_at).getTime() : 0, job.last_incremental_run_at ? new Date(job.last_incremental_run_at).getTime() : 0)
+    const dueAt = lastRun + BACKLOG_GAP_MINUTES * 60 * 1000
+    if (nowDate.getTime() >= dueAt) return { skipped: false, mode: 'full', backlog: true }
+    return { skipped: true, reason: `backlog — the next run at ${new Date(dueAt).toISOString()}` }
+  }
 
   const hour = Number(job.full_run_hour)
   if (job.full_run_hour !== null && job.full_run_hour !== undefined && job.full_run_hour !== '' && Number.isFinite(hour)) {
@@ -207,18 +220,23 @@ export function decideAutoMode (job, nowDate) {
   return { skipped: true, reason: 'not due — incremental runs are off (interval is 0) and no full run is due' }
 }
 
-export async function runSync ({ dryRun = false, force = false, mode = 'full' } = {}, deps) {
+export async function runSync ({ dryRun = false, force = false, mode = 'full', backlog = false } = {}, deps) {
   const { fiona, strapi, config = {} } = deps
   const log = deps.log || console
   const now = deps.now || (() => new Date())
   const maxRemovals = Number.isFinite(Number(config.maxRemovals)) && config.maxRemovals !== undefined ? Number(config.maxRemovals) : 50
   const maxBuildsPerRun = Number.isFinite(Number(config.maxBuildsPerRun)) && config.maxBuildsPerRun !== undefined ? Number(config.maxBuildsPerRun) : 20
+  // at most this many persons are written per run (0 = no cap); the run then stops and says more work remains
+  const maxPersonsPerRun = Number.isFinite(Number(config.maxPersonsPerRun)) && config.maxPersonsPerRun !== undefined ? Number(config.maxPersonsPerRun) : 50
+  let backlogRun = Boolean(backlog)
   // Strapi person ids whose existing biography the sync never overwrites (an empty one is still filled)
   const keepBioPersonIds = new Set(splitIds(config.keepBioPersonIds).map(Number))
   const startedAt = now()
   const startedMs = Date.now()
   const stats = newStats(dryRun, mode)
+  deps.onStart?.(stats) // lets a caller watch the stats of a long run while it is still going
   stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios) }
+  stats.backlog = { cap: maxPersonsPerRun, more: false }
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
@@ -234,12 +252,40 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
 
   // 0. Job entry + mode ------------------------------------------------------
   let job = null
-  if (typeof strapi.getSyncJob === 'function') {
-    try {
+  let jobDuplicates = []
+  try {
+    if (typeof strapi.getSyncJobs === 'function') {
+      const jobs = await strapi.getSyncJobs(JOB_KEY)
+      job = jobs[0] || null
+      jobDuplicates = jobs.slice(1).map(entry => entry.id)
+    } else if (typeof strapi.getSyncJob === 'function') {
       job = await strapi.getSyncJob(JOB_KEY)
-    } catch (err) {
-      fail('could not read the fiona-sync-job entry', err)
     }
+  } catch (err) {
+    fail('could not read the fiona-sync-job entry', err)
+  }
+  stats.job = job
+    ? {
+        id: job.id,
+        name: job.name ?? null,
+        enabled: job.enabled,
+        incrementalIntervalMinutes: job.incremental_interval_minutes ?? null,
+        fullRunHour: job.full_run_hour ?? null,
+        lastFullRunAt: job.last_full_run_at ?? null,
+        lastIncrementalRunAt: job.last_incremental_run_at ?? null,
+        duplicates: jobDuplicates
+      }
+    : null
+  const duplicateMessage = jobDuplicates.length
+    ? `${jobDuplicates.length + 1} fiona-sync-job entries share the key "${JOB_KEY}" (#${[job.id, ...jobDuplicates].join(', #')}): which one counts is not defined, delete the ones you do not want`
+    : null
+  if (duplicateMessage) warn(duplicateMessage)
+  if (mode === 'auto' && duplicateMessage) {
+    // never let a second entry start a run nobody expects: the automatic mode stays off until only one is left
+    stats.skipped = true
+    stats.reason = `${duplicateMessage} — the automatic mode is off until only one is left`
+    stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
+    return stats
   }
   if (mode === 'auto') {
     const decision = decideAutoMode(job, startedAt)
@@ -252,6 +298,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       return stats
     }
     mode = decision.mode
+    backlogRun = Boolean(decision.backlog)
   }
   if (mode === 'incremental' && !job?.mutation_cursor) {
     warn('no mutation cursor yet — running a full sync first')
@@ -578,8 +625,19 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   }))
 
   // 6. Upsert desired persons -----------------------------------------------
+  let written = 0 // persons this run writes: created, or updated because something differs
   for (const [fionaPersonId, want] of desired) {
     if (erroredPersonIds.has(fionaPersonId)) continue
+    // the cap of persons written per run is reached: stop here and say so; the next run carries on (see decideAutoMode)
+    if (!dryRun && maxPersonsPerRun > 0 && written >= maxPersonsPerRun) {
+      stats.backlog.more = true
+      break
+    }
+    // a backlog run leaves alone the persons the run before wrote, without a single call to Fiona or Strapi
+    if (backlogRun && !dryRun) {
+      const managed = managedByFionaId.get(fionaPersonId)
+      if (managed?.fiona_synced_at && startedAt.getTime() - new Date(managed.fiona_synced_at).getTime() < BACKLOG_RECENT_HOURS * 3600 * 1000) continue
+    }
     try {
       const fionaPerson = await fiona.getPerson(fionaPersonId, { accreditationIds: [...want.accreditationIds], level: want.level })
       if (want.level === 2) {
@@ -685,6 +743,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       // the picture joins the payload only after the upload (real runs), so a photo that is the only difference would
       // look like "nothing changed" and never be written: count it as a change of the person here
       if (photo && existing && !changed.includes('picture')) changed.push('picture')
+      if (!dryRun && (!existing || changed.length > 0)) written++
       const summary = `person ${fionaPersonId} ${fionaPerson.firstName} ${fionaPerson.lastName} level ${want.level} editions=[${editionIds.join(', ')}] roles=[${[...want.roleIds].join(', ')}]`
 
       if (dryRun) {
@@ -786,6 +845,12 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
     } catch (err) {
       fail(`person ${fionaPersonId}`, err)
     }
+  }
+
+  // a dry run ignores the cap and says how many runs the import would need
+  if (dryRun && maxPersonsPerRun > 0) {
+    const planned = stats.persons.created + stats.persons.updated
+    stats.backlog = { cap: maxPersonsPerRun, more: false, planned, runsNeeded: Math.ceil(planned / maxPersonsPerRun) }
   }
 
   // 7. Remaining removals (persons no longer desired) ------------------------

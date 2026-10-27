@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { runSync } from '../server/utils/fiona/sync.js'
+import { runSync, decideAutoMode } from '../server/utils/fiona/sync.js'
 
 const GB = 'guestbook-2025'
 const BADGE_TEAM = 'badge-team-guid'
@@ -126,6 +126,10 @@ function fakeStrapi () {
     getActiveGuestbookIds () { return [...state.activeGuestbookIds] },
     listEditionsWithGuestbook () { return clone(state.editionsWithGuestbook) },
     getSyncJob (key) { return state.syncJob && state.syncJob.key === key ? clone(state.syncJob) : null },
+    getSyncJobs (key) {
+      if (!state.extraJobs) return state.syncJob && state.syncJob.key === key ? [clone(state.syncJob)] : []
+      return [state.syncJob, ...state.extraJobs].filter(j => j && j.key === key).map(clone)
+    },
     saveSyncJob (id, patch) {
       Object.assign(state.syncJob, clone(patch))
       state.writes.push({ op: 'saveSyncJob', id, payload: clone(patch) })
@@ -1030,6 +1034,175 @@ describe('runSync', () => {
     ])
   })
 
+  describe('import in steps: the cap of persons written per run', () => {
+    const many = (n) => {
+      const accreditations = []
+      for (let i = 1; i <= n; i++) {
+        accreditations.push(accreditation(`acc${i}`, `fp${i}`, BADGE_PRO, 'Paid'))
+        fiona.state.persons.set(`fp${i}`, { firstName: `P${i}`, lastName: 'X', email: `p${i}@x.ee` })
+      }
+      fiona.state.guestbooks.set(GB, guestbookWith(...accreditations))
+    }
+
+    it('stops after the cap of persons written and says that more work remains', async () => {
+      deps.config.maxPersonsPerRun = 2
+      many(5)
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons.created).toBe(2)
+      expect(strapi.state.people.size).toBe(2)
+      expect(stats.backlog).toMatchObject({ cap: 2, more: true })
+    })
+
+    it('the next runs carry on with the rest, and a run that writes less than the cap ends the backlog', async () => {
+      deps.config.maxPersonsPerRun = 2
+      many(5)
+      await runSync({}, deps)
+      const second = await runSync({ backlog: true }, deps)
+      expect(second.persons.created).toBe(2)
+      expect(second.backlog.more).toBe(true)
+
+      const third = await runSync({ backlog: true }, deps)
+
+      expect(third.persons.created).toBe(1)
+      expect(third.backlog.more).toBe(false)
+      expect(strapi.state.people.size).toBe(5)
+    })
+
+    it('a backlog run leaves the persons the run before wrote alone, without asking Fiona or Strapi about them', async () => {
+      deps.config.maxPersonsPerRun = 2
+      many(4)
+      await runSync({}, deps)
+      fiona.state.personCalls.length = 0
+
+      await runSync({ backlog: true }, deps)
+
+      expect(fiona.state.personCalls.map(c => c.personId)).toEqual(['fp3', 'fp4'])
+    })
+
+    it('persons that are already in sync do not count toward the cap', async () => {
+      many(2)
+      await runSync({}, deps)
+      deps.config.maxPersonsPerRun = 1
+      many(4)
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons.unchanged).toBe(2)
+      expect(stats.persons.created).toBe(1)
+      expect(stats.backlog.more).toBe(true)
+    })
+
+    it('when fewer persons need a write than the cap there is no backlog', async () => {
+      deps.config.maxPersonsPerRun = 5
+      many(3)
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons.created).toBe(3)
+      expect(stats.backlog.more).toBe(false)
+    })
+
+    it('a cap of 0 means no cap', async () => {
+      deps.config.maxPersonsPerRun = 0
+      many(6)
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons.created).toBe(6)
+      expect(stats.backlog.more).toBe(false)
+    })
+
+    it('persons after the cap cost no photo lookup at all', async () => {
+      deps.config.maxPersonsPerRun = 1
+      many(3)
+      for (const id of ['fp1', 'fp2', 'fp3']) { fiona.state.persons.get(id).photo = 'jpg'; fiona.state.persons.get(id).photoSource = 'headshot' }
+
+      await runSync({}, deps)
+
+      expect(strapi.state.uploads).toHaveLength(1)
+      expect(fiona.state.photoCalls.map(c => c.personId)).toEqual(['fp1'])
+    })
+
+    it('a dry run ignores the cap, lists everything and says how many runs the import needs', async () => {
+      deps.config.maxPersonsPerRun = 2
+      many(5)
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.persons.created).toBe(5)
+      expect(stats.backlog).toEqual({ cap: 2, more: false, planned: 5, runsNeeded: 3 })
+    })
+  })
+
+  describe('more than one job entry with the same key', () => {
+    const entry = (id, overrides = {}) => ({
+      id,
+      key: 'accreditations',
+      name: `entry ${id}`,
+      enabled: true,
+      incremental_interval_minutes: 15,
+      full_run_hour: 3,
+      mutation_cursor: '2026-10-27T10:00:00.000Z',
+      last_incremental_run_at: '2026-10-27T10:00:00.000Z',
+      last_full_run_at: '2026-10-26T01:00:00.000Z',
+      last_stats: null,
+      ...overrides
+    })
+
+    it('keeps the automatic mode off and says why, so a second entry cannot start a run nobody expects', async () => {
+      strapi.state.syncJob = entry(1)
+      strapi.state.extraJobs = [entry(2, { enabled: false })]
+
+      const stats = await runSync({ mode: 'auto' }, deps)
+
+      expect(stats.skipped).toBe(true)
+      expect(stats.reason).toMatch(/2 fiona-sync-job entries/)
+      expect(stats.reason).toMatch(/#1, #2/)
+    })
+
+    it('a manual run still works, warns about the second entry and keeps its state in the entry with the lowest id', async () => {
+      strapi.state.syncJob = entry(1)
+      strapi.state.extraJobs = [entry(2, { enabled: false })]
+      fiona.state.guestbooks.set(GB, guestbookWith())
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.warnings.join('\n')).toMatch(/2 fiona-sync-job entries/)
+      expect(stats.job).toMatchObject({ id: 1, duplicates: [2] })
+      expect(strapi.state.syncJob.last_stats).toBeTruthy()
+    })
+
+    it('shows in the stats which job entry is used and its schedule', async () => {
+      strapi.state.syncJob = entry(7, { enabled: false })
+      fiona.state.guestbooks.set(GB, guestbookWith())
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.job).toEqual({
+        id: 7,
+        name: 'entry 7',
+        enabled: false,
+        incrementalIntervalMinutes: 15,
+        fullRunHour: 3,
+        lastFullRunAt: '2026-10-26T01:00:00.000Z',
+        lastIncrementalRunAt: '2026-10-27T10:00:00.000Z',
+        duplicates: []
+      })
+    })
+
+    it('hands the stats object to the caller as soon as the run starts, so a long run can be watched', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith())
+      let seen = null
+      deps.onStart = (stats) => { seen = stats }
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(seen).toBe(stats)
+    })
+  })
+
   it('an immediate second run changes nothing', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', bio: 'b', photo: 'x' })
@@ -1657,5 +1830,42 @@ describe('runSync', () => {
 
       expect(strapi.state.syncJob.last_error).toMatch(/fiona down/)
     })
+  })
+})
+
+describe('decideAutoMode with a backlog', () => {
+  const job = (overrides = {}) => ({
+    id: 1,
+    key: 'accreditations',
+    enabled: true,
+    incremental_interval_minutes: 15,
+    full_run_hour: 3,
+    mutation_cursor: '2026-10-27T10:00:00.000Z',
+    last_incremental_run_at: '2026-10-27T11:00:00.000Z',
+    last_full_run_at: '2026-10-27T01:00:00.000Z',
+    last_stats: null,
+    ...overrides
+  })
+
+  it('runs a backlog run two minutes after a run that stopped at the cap, without waiting for the interval or the night', () => {
+    const j = job({ last_stats: { backlog: { more: true } }, last_full_run_at: '2026-10-27T11:20:00.000Z' })
+    expect(decideAutoMode(j, new Date('2026-10-27T11:22:30.000Z'))).toEqual({ skipped: false, mode: 'full', backlog: true })
+  })
+
+  it('waits for the two minutes after the last run', () => {
+    const j = job({ last_stats: { backlog: { more: true } }, last_full_run_at: '2026-10-27T11:20:00.000Z' })
+    const decision = decideAutoMode(j, new Date('2026-10-27T11:21:00.000Z'))
+    expect(decision.skipped).toBe(true)
+    expect(decision.reason).toMatch(/backlog/i)
+  })
+
+  it('does nothing special when the last run left no work', () => {
+    const j = job({ last_stats: { backlog: { more: false } }, last_incremental_run_at: '2026-10-27T11:20:00.000Z' })
+    expect(decideAutoMode(j, new Date('2026-10-27T11:22:30.000Z')).skipped).toBe(true)
+  })
+
+  it('a disabled job stays disabled whatever the backlog', () => {
+    const j = job({ enabled: false, last_stats: { backlog: { more: true } } })
+    expect(decideAutoMode(j, new Date('2026-10-27T11:22:30.000Z')).reason).toMatch(/disabled/)
   })
 })
