@@ -283,7 +283,7 @@ export function createXapiClient ({
     listAccreditationAttachments,
 
     /** The Headshot of a person (own attachments and its accreditations'), published or not; null when there is none. */
-    async getUnpublishedHeadshot (personId, accreditationIds = []) {
+    async getUnpublishedHeadshot (personId, accreditationIds = [], { download = true } = {}) {
       const lists = [await listPersonAttachments(personId)]
       for (const id of accreditationIds) lists.push(await listAccreditationAttachments(id))
       // the default (starred) image is named on the person and on the accreditation; a failed lookup just means
@@ -301,6 +301,7 @@ export function createXapiClient ({
       }
       const picked = pickHeadshot(lists.flat(), favouriteIds)
       if (!picked) return null
+      if (!download) return { buffer: null, filename: `fiona-person-${personId}.jpg`, fileName: picked.fileName, otherFiles: picked.otherFiles, choice: picked.choice }
       const urlResult = await get(`/attachment/url?token=${encodeURIComponent(picked.token)}`)
       const url = typeof urlResult === 'string' ? urlResult : pick(urlResult, 'accessUrl', 'AccessUrl', 'url', 'Url')
       if (!url) return null

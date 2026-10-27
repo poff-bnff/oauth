@@ -947,7 +947,16 @@ describe('runSync', () => {
 
       await runSync({}, deps)
 
-      expect(fiona.state.photoCalls).toEqual([{ personId: 'fp2', accreditationIds: ['acc2'], level: 2 }])
+      expect(fiona.state.photoCalls).toEqual([{ personId: 'fp2', accreditationIds: ['acc2'], level: 2, download: true }])
+    })
+
+    it('a dry run asks for the photo without downloading it', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
+      fiona.state.persons.set('fp2', { firstName: 'A', lastName: 'A', email: 'a@a.ee', photo: 'jpg', photoSource: 'headshot' })
+
+      await runSync({ dryRun: true }, deps)
+
+      expect(fiona.state.photoCalls).toEqual([{ personId: 'fp2', accreditationIds: ['acc2'], level: 2, download: false }])
     })
 
     it('counts where the photos came from and names the full-profile persons that have none', async () => {
@@ -1003,6 +1012,22 @@ describe('runSync', () => {
     deps.config.unpublishedPhotos = true
     deps.config.unpublishedBios = true
     expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true })
+  })
+
+  it('reports per rule how many persons it matches, and how many of them get the full profile', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc1', 'fp1', BADGE_TEAM, 'approved'),
+      accreditation('acc2', 'fp2', BADGE_PRO, 'Paid'),
+      accreditation('acc3', 'fp3', BADGE_PRO, 'Paid')
+    ))
+    for (const id of ['fp1', 'fp2', 'fp3']) fiona.state.persons.set(id, { firstName: id, lastName: 'X', email: `${id}@x.ee` })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.rules.detail).toEqual([
+      { id: 1, name: 'TEAM → basic', targetBuilds: false, persons: 1, fullProfile: 0 },
+      { id: 2, name: 'Industry PRO → full', targetBuilds: false, persons: 2, fullProfile: 2 }
+    ])
   })
 
   it('an immediate second run changes nothing', async () => {

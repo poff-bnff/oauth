@@ -215,3 +215,24 @@ describe('privacy flags from the accreditation custom fields', () => {
     expect(rec.customFields).toEqual([])
   })
 })
+
+describe('createPublicationClient photo without download', () => {
+  const BASE = 'https://poff-online-api.fiona-online.net/v1'
+  it('says there is a published photo without asking for the address or downloading it when download is false', async () => {
+    const calls = []
+    const downloads = []
+    const fetch = (url) => {
+      calls.push(url.replace(BASE, ''))
+      if (url.includes('/accreditations/acc-1')) return rawRecord()
+      return 'https://s3.example/photo.jpg'
+    }
+    const client = createPublicationClient({ fetch, apiKey: 'K', baseUrl: BASE, log: { warn () {} }, download: (u) => { downloads.push(u); return Buffer.from('img') } })
+    await client.getAccreditationBadges('acc-1') // loads the record the person comes from
+
+    const photo = await client.getPersonPhoto('person-1', { download: false })
+
+    expect(photo).toEqual({ buffer: null, filename: 'fiona-person-person-1.jpg' })
+    expect(calls.filter(c => c.startsWith('/attachments'))).toEqual([])
+    expect(downloads).toEqual([])
+  })
+})

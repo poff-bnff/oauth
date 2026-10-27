@@ -418,3 +418,23 @@ describe('createXapiClient short-lived file address', () => {
     })
   }
 })
+
+describe('createXapiClient headshot without download', () => {
+  it('finds the Headshot but neither asks for the file address nor downloads it when download is false', async () => {
+    const calls = []
+    const downloads = []
+    const headshot = { Id: 'att-1', Category: 0, Type: { Description: 'Image' }, ContentType: { Description: 'Headshot' }, OriginalFileName: 'x.jpg', CreatedOn: '2026-09-01T10:00:00Z', Value: 'TOK' }
+    const fetch = (url) => {
+      calls.push(url)
+      if (url.endsWith('/person/p1/attachments')) return [headshot]
+      return {}
+    }
+    const client = createXapiClient({ fetch, apiKey: 'KEY', log: { warn () {} }, download: (u) => { downloads.push(u); return Buffer.from('img') } })
+
+    const photo = await client.getUnpublishedHeadshot('p1', [], { download: false })
+
+    expect(photo).toMatchObject({ buffer: null, filename: 'fiona-person-p1.jpg', fileName: 'x.jpg', choice: 'only' })
+    expect(calls.some(url => url.includes('/attachment/url'))).toBe(false)
+    expect(downloads).toEqual([])
+  })
+})

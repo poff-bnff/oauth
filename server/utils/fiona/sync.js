@@ -568,6 +568,15 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   const buildCandidates = []
   const removedIds = []
 
+  // per rule: how many persons it matches and how many of them get the full profile (what a run would do, before it does it)
+  stats.rules.detail = rules.map(rule => ({
+    id: rule.id,
+    name: rule.name,
+    targetBuilds: Boolean(rule.targetBuilds),
+    persons: [...desired.values()].filter(entry => entry.matchedRuleIds.has(rule.id)).length,
+    fullProfile: [...desired.values()].filter(entry => entry.fullRuleIds.has(rule.id)).length
+  }))
+
   // 6. Upsert desired persons -----------------------------------------------
   for (const [fionaPersonId, want] of desired) {
     if (erroredPersonIds.has(fionaPersonId)) continue
@@ -664,7 +673,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       let photo = null
       if (!existing?.picture) {
         try {
-          photo = await fiona.getPersonPhoto(fionaPersonId, { accreditationIds: [...want.accreditationIds], level: want.level })
+          photo = await fiona.getPersonPhoto(fionaPersonId, { accreditationIds: [...want.accreditationIds], level: want.level, download: !dryRun })
         } catch (err) {
           warn(`person ${fionaPersonId}: photo unavailable (${err.message})`)
         }

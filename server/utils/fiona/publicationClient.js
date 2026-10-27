@@ -263,9 +263,11 @@ export function createPublicationClient ({
       return (await getPerson(personId)).externalAccountId || null
     },
 
-    async getPersonPhoto (personId) {
+    /** The published photo of a person; with download: false only says that there is one (buffer null), as a dry run needs. */
+    async getPersonPhoto (personId, { download = true } = {}) {
       const person = await getPerson(personId)
       if (!person.photoToken) return null
+      if (!download) return { buffer: null, filename: `fiona-person-${personId}.jpg` }
       const result = await get(`/attachments/${encodeURIComponent(person.photoToken)}`)
       const url = typeof result === 'string' ? result.trim() : (result?.accessUrl || result?.url)
       if (!url) return null
