@@ -97,11 +97,24 @@ function fakeStrapi () {
     profiles: new Map(), // userId → profile
     uploads: [],
     writes: [],
+    emails: [], // Creative Gate "created" emails Strapi's hooks would send: { userId, personId }
+    publisherRoleIds: new Set([ROLE_CG]), // roles with publish_cg_person
     nextId: 1000
   }
   const nextId = () => state.nextId++
   const clone = v => JSON.parse(JSON.stringify(v))
   const populated = p => ({ ...clone(p), festival_editions: (p.festival_editions || []).map(id => ({ id })) })
+  // Strapi's Creative Gate hooks (web2021 creative_gate_email_notification.js): a person is "ready" when it holds the
+  // CG edition and a linked user (Strapi fills the slugs itself). The "created" email goes out on the save that makes
+  // it ready, and only if the user holds a publisher role AT THAT MOMENT.
+  const readyUserId = person => ((person?.festival_editions || []).map(Number).includes(CG) && person?.user ? Number(person.user) : null)
+  const notifyWhenReady = (person, before = null) => {
+    const userId = readyUserId(person)
+    if (!userId || userId === readyUserId(before)) return
+    const user = state.users.get(userId)
+    if (!(user.user_roles || []).some(roleId => state.publisherRoleIds.has(Number(roleId)))) return
+    state.emails.push({ userId, personId: person.id })
+  }
   return {
     state,
     loadRules () { return clone(state.rules) },
@@ -156,18 +169,24 @@ function fakeStrapi () {
       const p = { id: nextId(), ...clone(payload) }
       state.people.set(p.id, p)
       state.writes.push({ op: 'createPerson', id: p.id, payload: clone(payload) })
+      notifyWhenReady(p)
       return populated(p)
     },
     updatePerson (id, payload) {
       const p = state.people.get(Number(id))
+      const before = clone(p)
       Object.assign(p, clone(payload))
       state.writes.push({ op: 'updatePerson', id: Number(id), payload: clone(payload) })
+      if (['festival_editions', 'firstName', 'lastName', 'user'].some(field => payload[field] !== undefined)) notifyWhenReady(p, before)
       return populated(p)
     },
     linkPersonToUser (personId, userId) {
-      state.users.get(Number(userId)).person = Number(personId)
+      const user = state.users.get(Number(userId))
+      const previousPerson = user.person
+      user.person = Number(personId)
       state.people.get(Number(personId)).user = Number(userId)
       state.writes.push({ op: 'linkPersonToUser', id: Number(userId), payload: { person: Number(personId) } })
+      if (Number(previousPerson) !== Number(personId)) notifyWhenReady(state.people.get(Number(personId)))
     },
     ensureUserProfile (user, fields) {
       const existing = state.profiles.get(Number(user.id))
@@ -669,6 +688,120 @@ describe('runSync', () => {
     })
   })
 
+  describe('Creative Gate "created" email from Strapi', () => {
+    it('a new full-profile person: the user is notified once, because the publisher role is in place before the person becomes ready', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc80', 'fp80', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp80', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com' })
+
+      await runSync({}, deps)
+
+      const user = [...strapi.state.users.values()][0]
+      const person = [...strapi.state.people.values()][0]
+      expect(strapi.state.emails).toEqual([{ userId: user.id, personId: person.id }])
+    })
+
+    it('an existing person already linked to its user: attaching the CG edition notifies the user once', async () => {
+      strapi.state.users.set(800, { id: 800, email: 'old@example.com', person: 80, user_roles: [] })
+      strapi.state.people.set(80, { id: 80, firstName: 'Old', lastName: 'Name', eMail: 'old@example.com', festival_editions: [IND], user: 800 })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc81', 'fp81', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp81', { firstName: 'Old', lastName: 'Name', email: 'old@example.com', myPoffUserId: '800' })
+
+      await runSync({}, deps)
+
+      expect(strapi.state.emails).toEqual([{ userId: 800, personId: 80 }])
+    })
+
+    it('a person that already held the CG edition and a user is not notified again', async () => {
+      strapi.state.users.set(801, { id: 801, email: 'own@example.com', person: 81, user_roles: [] })
+      strapi.state.people.set(81, { id: 81, firstName: 'Own', lastName: 'Profile', eMail: 'own@example.com', festival_editions: [CG], user: 801 })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc82', 'fp82', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp82', { firstName: 'Own', lastName: 'Profile', email: 'own@example.com', myPoffUserId: '801' })
+
+      await runSync({}, deps)
+
+      expect(strapi.state.emails).toEqual([])
+    })
+
+    it('a basic (level 1) person has no CG edition and gets no email', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc83', 'fp83', BADGE_TEAM, 'approved')))
+      fiona.state.persons.set('fp83', { firstName: 'Team', lastName: 'Member', email: 'team@example.com' })
+
+      await runSync({}, deps)
+
+      expect(strapi.state.emails).toEqual([])
+    })
+
+    it('no email when the rule grants no publisher role', async () => {
+      strapi.state.rules = [rule({ id: 9, name: 'edition only', badge_type_id: BADGE_PRO, sync_statuses: 'approved', full_profile_statuses: 'approved', festival_editions: [{ id: CG }], user_roles: [] })]
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc84', 'fp84', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp84', { firstName: 'No', lastName: 'Role', email: 'norole@example.com' })
+
+      await runSync({}, deps)
+
+      expect(strapi.state.emails).toEqual([])
+    })
+
+    it('a second run sends nothing more', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc85', 'fp85', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp85', { firstName: 'Once', lastName: 'Only', email: 'once@example.com' })
+      await runSync({}, deps)
+      expect(strapi.state.emails).toHaveLength(1)
+
+      await runSync({}, deps)
+
+      expect(strapi.state.emails).toHaveLength(1)
+    })
+
+    it('a dry run sends nothing', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc86', 'fp86', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp86', { firstName: 'Dry', lastName: 'Run', email: 'dry@example.com' })
+
+      await runSync({ dryRun: true }, deps)
+
+      expect(strapi.state.emails).toEqual([])
+    })
+  })
+
+  describe('validity of the roles a rule grants', () => {
+    const withRole = (role) => {
+      fiona.state.guestbooks.set(GB, guestbookWith())
+      strapi.state.rules = [rule({ id: 9, name: 'jury', badge_type_id: BADGE_PRO, sync_statuses: 'approved', full_profile_statuses: 'approved', festival_editions: [{ id: CG }], user_roles: [role] })]
+    }
+
+    it('lists each granted role with its validity so a dry run shows it', async () => {
+      withRole({ id: ROLE_CG, name: 'CG PERSON publisher', valid_from: null, valid_to: '2099-01-01T00:00:00.000Z' })
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.ruleRoles).toEqual([{ id: ROLE_CG, name: 'CG PERSON publisher', validFrom: null, validTo: '2099-01-01T00:00:00.000Z' }])
+      expect(stats.warnings.join('\n')).not.toMatch(/role #7/)
+    })
+
+    it('warns when a granted role has no valid_to date: the publisher right then needs a purchased product and no email goes out', async () => {
+      withRole({ id: ROLE_CG, name: 'CG PERSON publisher', valid_from: null, valid_to: null })
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.warnings.join('\n')).toMatch(/role #7 "CG PERSON publisher" has no valid_to/)
+    })
+
+    it('warns when a granted role has expired', async () => {
+      withRole({ id: ROLE_CG, name: 'CG PERSON publisher', valid_from: null, valid_to: '2026-01-01T00:00:00.000Z' })
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.warnings.join('\n')).toMatch(/role #7 "CG PERSON publisher" expired/)
+    })
+
+    it('stays quiet when the rule data carries no validity fields at all', async () => {
+      withRole({ id: ROLE_CG })
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.warnings.join('\n')).not.toMatch(/role #7/)
+    })
+  })
+
   it('an immediate second run changes nothing', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', bio: 'b', photo: 'x' })
@@ -920,7 +1053,8 @@ describe('runSync', () => {
 
     const stats = await runSync({ dryRun: true }, deps)
 
-    expect(stats.dryRunActions).toEqual([{ action: 'UNPUBLISH', fionaPersonId: 'fp2', personId: 1000, detachEditionIds: [CG, IND], removeRoleIds: [ROLE_CG] }])
+    const [personId] = [...strapi.state.people.keys()]
+    expect(stats.dryRunActions).toEqual([{ action: 'UNPUBLISH', fionaPersonId: 'fp2', personId, detachEditionIds: [CG, IND], removeRoleIds: [ROLE_CG] }])
   })
 
   it('logs a build instruction instead of triggering builds above the per-run cap', async () => {

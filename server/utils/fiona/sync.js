@@ -57,6 +57,7 @@ function newStats (dryRun, mode) {
     profiles: { created: 0, updated: 0 },
     privacy: { emailWithheld: 0, phoneWithheld: 0, emailCleared: 0, phoneCleared: 0 },
     customFieldKeys: {},
+    ruleRoles: [],
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
     incremental: null,
@@ -83,6 +84,28 @@ function describeError (err) {
     if (snippet && !text.includes(snippet)) text += ` — ${snippet.slice(0, 300)}`
   }
   return text
+}
+
+/**
+ * The roles the rules grant, with their validity. Strapi lets a person publish, and sends its Creative Gate
+ * "created" email, only while the user holds a role that is still valid: a role without a valid_to date counts
+ * only with an active Creative Gate product, which synced users do not have. Warns about such roles.
+ * A role object without the valid_to key at all (plain ids, test data) is not judged.
+ */
+function reportRoleValidity (rawRules, now, stats, warn) {
+  const seen = new Map()
+  for (const rule of Array.isArray(rawRules) ? rawRules : []) {
+    for (const role of Array.isArray(rule?.user_roles) ? rule.user_roles : []) {
+      if (role && typeof role === 'object' && role.id !== undefined && !seen.has(Number(role.id))) seen.set(Number(role.id), role)
+    }
+  }
+  stats.ruleRoles = [...seen.values()].map(role => ({ id: Number(role.id), name: role.name ?? null, validFrom: role.valid_from ?? null, validTo: role.valid_to ?? null }))
+  for (const role of seen.values()) {
+    if (!('valid_to' in role)) continue
+    const label = `role #${role.id} "${role.name ?? ''}"`
+    if (!role.valid_to) warn(`${label} has no valid_to date: users get the publisher right only with an active Creative Gate product, so persons stay unpublished and no "created" email goes out`)
+    else if (new Date(role.valid_to) < now) warn(`${label} expired on ${role.valid_to}: no publisher right and no "created" email`)
+  }
 }
 
 const COMPARED_FIELDS = ['firstName', 'lastName', 'firstNameLastName', 'eMail', 'phoneNr', 'bio_en']
@@ -228,8 +251,10 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   log.info(`▶ Starting Fiona sync (${mode}${dryRun ? ', DRY RUN' : ''}) at ${startedAt.toISOString()}`)
 
   // 1. Rules -----------------------------------------------------------------
-  const { rules, warnings } = normalizeRules(await strapi.loadRules())
+  const rawRules = await strapi.loadRules()
+  const { rules, warnings } = normalizeRules(rawRules)
   warnings.forEach(warn)
+  reportRoleValidity(rawRules, startedAt, stats, warn)
   stats.rules.active = rules.length
   const discoveryOnly = rules.length === 0
   if (discoveryOnly) {
@@ -634,6 +659,34 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         if (fileId) payload.picture = fileId
       }
 
+      // The login user comes first: find or register, confirm, user profile and publisher roles. Strapi sends the
+      // Creative Gate "created" email on the save that makes the person ready (CG edition and a linked user), and
+      // only when the user already holds a publisher role at that moment, so the roles must be in place before the
+      // person is written and linked. The link is the very last step.
+      if (!user) {
+        const result = await strapi.findOrRegisterUser(contactEmail)
+        user = result.user
+        if (result.created) stats.users.created++
+      }
+      if (user.confirmed === false && typeof strapi.confirmUser === 'function') {
+        await strapi.confirmUser(user.id) // identity comes from Fiona; also unblocks Strapi's own confirmation gate
+        stats.users.confirmed++
+      }
+      const profile = await strapi.ensureUserProfile(user, {
+        email: contactEmail,
+        firstName: fionaPerson.firstName || null,
+        lastName: fionaPerson.lastName || null,
+        ...(fionaPerson.phone ? { phoneNr: fionaPerson.phone } : {})
+      })
+      if (profile === true || profile?.created) stats.profiles.created++
+      else if (profile?.updated?.length) stats.profiles.updated++
+
+      if (want.roleIds.size || removeRoles.length) {
+        const currentRoles = await strapi.getUserRoleIds(user.id)
+        const nextRoles = uniqueNumbers([...currentRoles.filter(id => !removeRoles.includes(Number(id))), ...want.roleIds])
+        if (!sameIds(currentRoles, nextRoles)) await strapi.setUserRoles(user.id, nextRoles)
+      }
+
       let person = existing
       let personChanged = false
       if (!existing) {
@@ -655,32 +708,9 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       stats.editions.detached += detach.length
       if (action) stats.persons.downgraded++
 
-      if (!user) {
-        const result = await strapi.findOrRegisterUser(contactEmail)
-        user = result.user
-        if (result.created) stats.users.created++
-      }
       if (Number(relationId(user.person)) !== Number(person.id)) {
         await strapi.linkPersonToUser(person.id, user.id)
         stats.users.linked++
-      }
-      if (user.confirmed === false && typeof strapi.confirmUser === 'function') {
-        await strapi.confirmUser(user.id) // identity comes from Fiona; also unblocks Strapi's own confirmation gate
-        stats.users.confirmed++
-      }
-      const profile = await strapi.ensureUserProfile(user, {
-        email: contactEmail,
-        firstName: fionaPerson.firstName || null,
-        lastName: fionaPerson.lastName || null,
-        ...(fionaPerson.phone ? { phoneNr: fionaPerson.phone } : {})
-      })
-      if (profile === true || profile?.created) stats.profiles.created++
-      else if (profile?.updated?.length) stats.profiles.updated++
-
-      if (want.roleIds.size || removeRoles.length) {
-        const currentRoles = await strapi.getUserRoleIds(user.id)
-        const nextRoles = uniqueNumbers([...currentRoles.filter(id => !removeRoles.includes(Number(id))), ...want.roleIds])
-        if (!sameIds(currentRoles, nextRoles)) await strapi.setUserRoles(user.id, nextRoles)
       }
 
       if ((want.level === 2 && personChanged) || detach.length) buildIds.push(Number(person.id))
