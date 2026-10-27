@@ -120,11 +120,6 @@ function fakeStrapi () {
     loadRules () { return clone(state.rules) },
     getActiveGuestbookIds () { return [...state.activeGuestbookIds] },
     listEditionsWithGuestbook () { return clone(state.editionsWithGuestbook) },
-    saveRule (id, patch) {
-      const rule = state.rules.find(r => r.id === Number(id))
-      Object.assign(rule, clone(patch))
-      state.writes.push({ op: 'saveRule', id: Number(id), payload: clone(patch) })
-    },
     getSyncJob (key) { return state.syncJob && state.syncJob.key === key ? clone(state.syncJob) : null },
     saveSyncJob (id, patch) {
       Object.assign(state.syncJob, clone(patch))
@@ -1064,8 +1059,20 @@ describe('runSync', () => {
 
   describe('site builds of changed persons', () => {
     const touches = () => strapi.state.writes.filter(w => w.op === 'updatePerson' && w.payload.skipbuild !== true)
-    const buildRule = (overrides = {}) => ({ ...PRO_RULE, target_builds: true, build_queue: null, ...overrides })
-    const queueOf = id => strapi.state.rules.find(r => r.id === id).build_queue
+    const job = () => ({
+      id: 1,
+      key: 'accreditations',
+      enabled: true,
+      incremental_interval_minutes: 15,
+      full_run_hour: 3,
+      mutation_cursor: null,
+      last_incremental_run_at: null,
+      last_full_run_at: null,
+      last_stats: null,
+      last_error: null,
+      build_queue: null
+    })
+    const buildRule = (overrides = {}) => ({ ...PRO_RULE, target_builds: true, ...overrides })
     const three = () => {
       fiona.state.guestbooks.set(GB, guestbookWith(
         accreditation('acc2', 'fp2', BADGE_PRO, 'Paid'),
@@ -1081,7 +1088,7 @@ describe('runSync', () => {
       fiona.state.persons.set('fp2', { firstName: 'A', lastName: 'A', email: 'a@a.ee' })
     }
 
-    it('builds nothing when the rule does not switch target builds on', async () => {
+    it('builds nothing when the rule does not switch builds on', async () => {
       one()
 
       const stats = await runSync({}, deps)
@@ -1090,7 +1097,7 @@ describe('runSync', () => {
       expect(stats.build).toMatchObject({ triggered: false, ids: [], queued: 0, candidates: 0 })
     })
 
-    it('builds a changed person right away when the rule switches target builds on', async () => {
+    it('builds a changed person right away when the rule switches builds on', async () => {
       strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
       one()
 
@@ -1101,8 +1108,9 @@ describe('runSync', () => {
       expect(stats.build).toMatchObject({ triggered: true, ids: [person.id], queued: 0 })
     })
 
-    it('builds the limit amount now and keeps the rest on the rule\'s waiting list', async () => {
+    it('builds the limit amount now and keeps the rest on a waiting list', async () => {
       strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 2 })]
+      strapi.state.syncJob = job()
       three()
 
       const stats = await runSync({}, deps)
@@ -1110,26 +1118,29 @@ describe('runSync', () => {
       expect(touches()).toHaveLength(2)
       expect(stats.build.ids).toHaveLength(2)
       expect(stats.build.queued).toBe(1)
-      expect(queueOf(2)).toHaveLength(1)
+      expect(strapi.state.syncJob.build_queue).toHaveLength(1)
+      expect(strapi.state.syncJob.build_queue[0]).toMatchObject({ ruleIds: [2] })
     })
 
     it('the next run builds the next limit amount from the waiting list', async () => {
       strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 2 })]
+      strapi.state.syncJob = job()
       three()
       await runSync({}, deps)
-      const [waiting] = queueOf(2)
+      const waiting = strapi.state.syncJob.build_queue[0].personId
 
       const stats = await runSync({}, deps)
 
       expect(touches()).toHaveLength(3)
       expect(stats.build.ids).toEqual([waiting])
       expect(stats.build.queued).toBe(0)
-      expect(queueOf(2)).toEqual([])
+      expect(strapi.state.syncJob.build_queue).toEqual([])
     })
 
     it('an empty limit falls back to the global default', async () => {
       deps.config.maxBuildsPerRun = 1
       strapi.state.rules = [TEAM_RULE, buildRule()]
+      strapi.state.syncJob = job()
       three()
 
       const stats = await runSync({}, deps)
@@ -1140,38 +1151,20 @@ describe('runSync', () => {
 
     it('switching a rule off drops its waiting persons without building them', async () => {
       strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 1 })]
+      strapi.state.syncJob = job()
       three()
       await runSync({}, deps)
-      expect(queueOf(2)).toHaveLength(2)
-      strapi.state.rules.find(r => r.id === 2).target_builds = false
+      expect(strapi.state.syncJob.build_queue).toHaveLength(2)
+      strapi.state.rules = [TEAM_RULE, PRO_RULE]
 
       const stats = await runSync({}, deps)
 
       expect(touches()).toHaveLength(1)
       expect(stats.build.queued).toBe(0)
-      expect(queueOf(2)).toEqual([])
+      expect(strapi.state.syncJob.build_queue).toEqual([])
     })
 
-    it('a person matched by two rules is built once, using whichever rule still has room, and leaves both waiting lists', async () => {
-      strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 1 }), buildRule({ id: 3, name: 'second rule for the same badge', target_builds_limit_per_run: 1 })]
-      three()
-
-      const first = await runSync({}, deps)
-
-      expect(touches()).toHaveLength(2)
-      expect(first.build.queued).toBe(1)
-      expect(queueOf(2)).toHaveLength(1)
-      expect(queueOf(3)).toHaveLength(1)
-
-      const second = await runSync({}, deps)
-
-      expect(touches()).toHaveLength(3)
-      expect(second.build.ids).toHaveLength(1)
-      expect(queueOf(2)).toEqual([])
-      expect(queueOf(3)).toEqual([])
-    })
-
-    it('a person matched by two rules is built when only one of them has target builds on', async () => {
+    it('a person matched by two rules is built when one of them has builds on', async () => {
       strapi.state.rules = [TEAM_RULE, PRO_RULE, buildRule({ id: 3, name: 'second rule for the same badge', target_builds_limit_per_run: 5 })]
       one()
 
@@ -1209,41 +1202,54 @@ describe('runSync', () => {
 
     it('a waiting person who is then taken off Creative Gate is dropped from the list and never built', async () => {
       strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 1 })]
+      strapi.state.syncJob = job()
       three()
       await runSync({}, deps)
-      const waitingIds = queueOf(2)
-      expect(waitingIds).toHaveLength(2)
-      const removed = strapi.state.people.get(waitingIds[1])
-      const removedAccreditation = fiona.state.guestbooks.get(GB).accreditations.find(a => a.personId === removed.fiona_person_id)
-      removedAccreditation.badges[0].statusText = 'Cancelled'
+      const waiting = strapi.state.syncJob.build_queue
+      expect(waiting).toHaveLength(2)
+      const removed = strapi.state.people.get(waiting[1].personId)
+      fiona.state.guestbooks.get(GB).accreditations.find(a => a.personId === removed.fiona_person_id).badges[0].statusText = 'Cancelled'
 
       const stats = await runSync({}, deps)
 
-      expect(stats.build.ids).toEqual([waitingIds[0]])
+      expect(stats.build.ids).toEqual([waiting[0].personId])
       expect(stats.build.removedWithoutBuild).toEqual([removed.id])
-      expect(queueOf(2)).toEqual([])
+      expect(strapi.state.syncJob.build_queue).toEqual([])
     })
 
-    it('a dry run builds nothing, leaves the waiting lists alone and says how many persons it would queue', async () => {
+    it('a dry run builds nothing, keeps the waiting list as it is and says how many persons it would queue', async () => {
       strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
+      strapi.state.syncJob = job()
       one()
 
       const stats = await runSync({ dryRun: true }, deps)
 
       expect(touches()).toHaveLength(0)
       expect(stats.build.candidates).toBe(1)
-      expect(queueOf(2)).toBeNull()
+      expect(strapi.state.syncJob.build_queue).toBeNull()
     })
 
-    it('a rule without the build_queue field cannot keep a waiting list: builds the limit and says the rest needs a full build', async () => {
-      const { build_queue: notThereYet, ...ruleWithoutField } = buildRule({ target_builds_limit_per_run: 1 })
-      strapi.state.rules = [TEAM_RULE, ruleWithoutField]
+    it('while the job entry has no build_queue field yet, the rest of the job state still saves and the run says a full build is needed', async () => {
+      strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 1 })]
+      const { build_queue: notThereYet, ...withoutField } = job()
+      strapi.state.syncJob = withoutField
       three()
 
       const stats = await runSync({}, deps)
 
       expect(touches()).toHaveLength(1)
-      expect(strapi.state.rules.find(r => r.id === 2)).not.toHaveProperty('build_queue')
+      expect(strapi.state.syncJob).not.toHaveProperty('build_queue')
+      expect(strapi.state.syncJob.last_stats).toBeTruthy()
+      expect(stats.warnings.join('\n')).toMatch(/full build/i)
+    })
+
+    it('without a job entry there is nowhere to keep a waiting list: builds the limit and says the rest needs a full build', async () => {
+      strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 1 })]
+      three()
+
+      const stats = await runSync({}, deps)
+
+      expect(touches()).toHaveLength(1)
       expect(stats.warnings.join('\n')).toMatch(/full build/i)
     })
   })

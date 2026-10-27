@@ -64,15 +64,6 @@ describe('createStrapiGateway', () => {
     expect(calls[0].headers.Authorization).toBe('Bearer ADMIN')
   })
 
-  it('saves a patch on a rule with the admin token', async () => {
-    const { fetch, calls } = fakeFetch({ 'PUT /fiona-sync-rules/2': { id: 2 } })
-    await createStrapiGateway({ fetch, ...deps() }).saveRule(2, { build_queue: [31, 32] })
-    expect(calls[0].method).toBe('PUT')
-    expect(calls[0].url).toBe(`${STRAPI}/fiona-sync-rules/2`)
-    expect(calls[0].body).toEqual({ build_queue: [31, 32] })
-    expect(calls[0].headers.Authorization).toBe('Bearer ADMIN')
-  })
-
   it('lists managed people by a non-null fiona_person_id', async () => {
     const { fetch, calls } = fakeFetch()
     await createStrapiGateway({ fetch, ...deps() }).findManagedPeople()

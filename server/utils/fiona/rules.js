@@ -40,16 +40,6 @@ function positiveInteger (value) {
   return Number.isInteger(number) && number >= 1 ? number : null
 }
 
-/** build_queue (JSON array of person ids, or a JSON string of one) → unique positive integers; anything else → []. */
-function waitingPersonIds (raw) {
-  let list = raw
-  if (typeof raw === 'string') {
-    try { list = JSON.parse(raw) } catch (err) { return [] }
-  }
-  if (!Array.isArray(list)) return []
-  return [...new Set(list.map(Number).filter(id => Number.isInteger(id) && id > 0))]
-}
-
 export function normalizeRules (rawRules) {
   const rules = []
   const warnings = []
@@ -82,10 +72,7 @@ export function normalizeRules (rawRules) {
       editionIds: relationIds(raw.festival_editions),
       roleIds: relationIds(raw.user_roles),
       targetBuilds: raw.target_builds === true,
-      targetBuildsLimitPerRun: positiveInteger(raw.target_builds_limit_per_run),
-      // the rule's waiting list of persons still to be built (build_queue, JSON); a rule entry without that field cannot keep one
-      canKeepBuildQueue: Object.prototype.hasOwnProperty.call(raw, 'build_queue'),
-      waitingPersonIds: waitingPersonIds(raw.build_queue)
+      targetBuildsLimitPerRun: positiveInteger(raw.target_builds_limit_per_run)
     })
   }
 

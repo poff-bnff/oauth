@@ -41,22 +41,31 @@ const relationIds = list => (Array.isArray(list) ? list : []).map(relationId).fi
 const sameIds = (a, b) => joinIds(uniqueNumbers(a)) === joinIds(uniqueNumbers(b))
 const isNotFound = err => err?.statusCode === 404 || err?.status === 404 || err?.response?.status === 404
 
-/**
- * The waiting lists of the rules that build (one list of person ids per rule) joined with this run's candidates into
- * [{ personId, ruleIds }], oldest first. Only rules that still build count; entries without any are dropped.
- */
-function mergeBuildQueue (buildRules, candidates) {
+/** The job's build_queue (JSON): [{ personId, ruleIds }], tolerant of anything else. */
+function normalizeBuildQueue (raw) {
+  let list = raw
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw) } catch (err) { return [] }
+  }
+  if (!Array.isArray(list)) return []
   const byPerson = new Map()
-  const add = (personId, ruleIds) => {
+  for (const item of list) {
+    const personId = Number(item?.personId)
+    if (!Number.isInteger(personId) || personId <= 0) continue
+    const ruleIds = (Array.isArray(item.ruleIds) ? item.ruleIds : []).map(Number).filter(Number.isFinite)
     const entry = byPerson.get(personId) || { personId, ruleIds: [] }
-    entry.ruleIds = uniqueNumbers([...entry.ruleIds, ...ruleIds.filter(id => buildRules.has(id))])
+    entry.ruleIds = uniqueNumbers([...entry.ruleIds, ...ruleIds])
     byPerson.set(personId, entry)
   }
-  for (const rule of buildRules.values()) {
-    for (const personId of rule.waitingPersonIds) add(personId, [rule.id])
-  }
-  for (const candidate of candidates) add(candidate.personId, candidate.ruleIds)
-  return [...byPerson.values()].filter(entry => entry.ruleIds.length)
+  return [...byPerson.values()]
+}
+
+/** Waiting list plus this run's candidates; only rules that still build count, entries without any are dropped. */
+function mergeBuildQueue (queue, candidates, buildRules) {
+  const merged = normalizeBuildQueue([...queue, ...candidates])
+  return merged
+    .map(entry => ({ personId: entry.personId, ruleIds: entry.ruleIds.filter(id => buildRules.has(id)) }))
+    .filter(entry => entry.ruleIds.length)
 }
 
 function newStats (dryRun, mode) {
@@ -246,6 +255,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   stats.mode = mode
 
   let scanCompleted = false
+  let buildQueue = null // the waiting list to save with the job entry; null = leave it as it is
 
   const finish = async ({ save = true } = {}) => {
     stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
@@ -256,6 +266,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         [mode === 'full' ? 'last_full_run_at' : 'last_incremental_run_at']: startedAt.toISOString()
       }
       if (scanCompleted) patch.mutation_cursor = startedAt.toISOString()
+      if (buildQueue !== null) patch.build_queue = buildQueue
       try {
         await strapi.saveSyncJob(job.id, patch)
       } catch (err) {
@@ -789,23 +800,23 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   }
 
   // 8. Builds ----------------------------------------------------------------
-  // Each rule with target builds on builds at most its limit of changed persons per run (empty limit = the global
-  // default); the rest wait in the rule's build_queue for the next runs. Persons the sync takes off Creative Gate are
-  // never built here: they leave the site at the next manual full build, so a mistake in Fiona or in the automation
-  // cannot take pages away.
+  // Each rule builds at most its limit of changed persons per run (empty limit = the global default); the rest wait
+  // in the job's build_queue for the next runs. Persons the sync takes off Creative Gate are never built here: they
+  // leave the site at the next manual full build, so a mistake in Fiona or in the automation cannot take pages away.
   stats.build.removedWithoutBuild = uniqueNumbers(removedIds)
   if (stats.build.removedWithoutBuild.length) {
     warn(`${stats.build.removedWithoutBuild.length} persons were taken off Creative Gate — their pages stay on the site until your next full build + publish`)
   }
+  const waitingBefore = normalizeBuildQueue(job?.build_queue)
   if (dryRun) {
-    stats.build.queued = mergeBuildQueue(buildRules, []).length
+    stats.build.queued = mergeBuildQueue(waitingBefore, [], buildRules).length
   } else {
     stats.build.candidates = buildCandidates.length
     const allowance = new Map([...buildRules].map(([id, rule]) => [id, rule.targetBuildsLimitPerRun ?? maxBuildsPerRun]))
     const waiting = []
     const built = []
     const removedThisRun = new Set(stats.build.removedWithoutBuild)
-    for (const entry of mergeBuildQueue(buildRules, buildCandidates)) {
+    for (const entry of mergeBuildQueue(waitingBefore, buildCandidates, buildRules)) {
       if (removedThisRun.has(entry.personId)) continue // taken off Creative Gate while waiting: never built here
       const ruleId = entry.ruleIds.find(id => allowance.get(id) > 0)
       if (ruleId === undefined) {
@@ -823,26 +834,13 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
     stats.build.ids = built
     stats.build.triggered = built.length > 0
     stats.build.queued = waiting.length
-    if (waiting.length) log.info(`${built.length} persons built now, ${waiting.length} wait for the next runs`)
-
-    // keep each rule's waiting list in its build_queue field; a rule off (or deactivated while still holding a list) is emptied.
-    // A rule entry without that field cannot keep a list, and writing an unknown field must not break anything.
-    const cannotKeep = []
-    for (const rule of rules) {
-      const wanted = buildRules.has(rule.id) ? waiting.filter(entry => entry.ruleIds.includes(rule.id)).map(entry => entry.personId) : []
-      if (sameIds(wanted, rule.waitingPersonIds)) continue
-      if (!rule.canKeepBuildQueue || typeof strapi.saveRule !== 'function') {
-        if (wanted.length) cannotKeep.push(rule)
-        continue
-      }
-      try {
-        await strapi.saveRule(rule.id, { build_queue: wanted })
-      } catch (err) {
-        fail(`could not save the build waiting list of rule #${rule.id}`, err)
-      }
-    }
-    if (cannotKeep.length) {
-      warn(`rule(s) ${cannotKeep.map(rule => `#${rule.id}`).join(', ')} have no build_queue field to keep persons waiting — persons that did not fit under the limit need a full build + publish from the Strapi admin`)
+    // the waiting list lives in the job entry's build_queue field; an entry without that field (not created yet)
+    // cannot keep it, and writing an unknown field must not break saving the rest of the job state
+    if (job && 'build_queue' in job && typeof strapi.saveSyncJob === 'function') {
+      buildQueue = waiting
+      if (waiting.length) log.info(`${built.length} persons built now, ${waiting.length} wait for the next runs`)
+    } else if (waiting.length) {
+      warn(`${waiting.length} persons are not built yet and the fiona-sync-job entry has no build_queue field to keep them waiting — run a full build + publish from the Strapi admin`)
     }
   }
 
