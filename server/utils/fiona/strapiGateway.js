@@ -163,6 +163,22 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return { created: false, updated }
     },
 
+    /**
+     * An earlier upload of the same photo that is already in the media library (same name, same size within 1.5 KB),
+     * so a photo that was uploaded but never attached is reused instead of being uploaded a second time.
+     * Any failure counts as "none": the photo is then uploaded.
+     */
+    async findUploadedPhoto (filename, bytes) {
+      try {
+        const files = await get(`/upload/files?name=${encodeURIComponent(filename)}&_limit=10`)
+        const hit = (Array.isArray(files) ? files : []).find(file => file?.name === filename && Math.abs(Number(file.size) * 1000 - bytes) <= 1500)
+        return hit?.id ?? null
+      } catch (err) {
+        log.warn?.(`[fionaSync] lookup of an earlier upload of ${filename} failed: ${err?.message || err}`)
+        return null
+      }
+    },
+
     async uploadPhoto (buffer, filename) {
       const form = new FormData()
       form.append('files', new Blob([buffer], { type: 'image/jpeg' }), filename)

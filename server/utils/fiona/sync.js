@@ -672,6 +672,9 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       }
 
       const changed = existing ? changedFields(existing, payload) : null
+      // the picture joins the payload only after the upload (real runs), so a photo that is the only difference would
+      // look like "nothing changed" and never be written: count it as a change of the person here
+      if (photo && existing && !changed.includes('picture')) changed.push('picture')
       const summary = `person ${fionaPersonId} ${fionaPerson.firstName} ${fionaPerson.lastName} level ${want.level} editions=[${editionIds.join(', ')}] roles=[${[...want.roleIds].join(', ')}]`
 
       if (dryRun) {
@@ -701,7 +704,8 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       }
 
       if (photo) {
-        const fileId = await strapi.uploadPhoto(photo.buffer, photo.filename)
+        // a photo uploaded earlier but never attached is reused, not uploaded again
+        const fileId = (await strapi.findUploadedPhoto?.(photo.filename, photo.buffer.length)) ?? await strapi.uploadPhoto(photo.buffer, photo.filename)
         if (fileId) payload.picture = fileId
       }
 
