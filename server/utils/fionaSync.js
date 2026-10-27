@@ -93,6 +93,7 @@ function buildDeps () {
       maxRemovals: numberOr(config.syncMaxRemovals, 50),
       maxBuildsPerRun: numberOr(config.syncMaxBuildsPerRun, 20),
       keepBioPersonIds: config.syncKeepBioPersonIds || '',
+      maxPersonsPerRun: numberOr(config.syncMaxPersonsPerRun, 50),
       unpublishedPhotos: String(config.syncUnpublishedPhotos).toLowerCase() === 'true',
       unpublishedBios: String(config.syncUnpublishedBios).toLowerCase() === 'true'
     }
