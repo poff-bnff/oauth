@@ -20,6 +20,9 @@
  *                attachments (headshot, showcase, ...) for those persons, published or not. Never shows a file.
  *                Add "probe": true (at most 10 persons) to also try the real Headshot download and Biography read
  *                and see whether each step worked (size, or the error message).
+ *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
+ *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
+ *                job entry, so a test cannot start, delay or shorten the real import.
  *                Any run can be started with "background": true: the answer comes at once and the run goes on.
  *                Ask { "mode": "status" } for the progress of the run that is going and the result of the last one
  *                (kept in memory only). Use it for anything that may last more than ten minutes: the platform cuts a
@@ -76,10 +79,12 @@ export default defineEventHandler(async (event) => {
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []
+  const testRuleIds = Array.isArray(body?.testRuleIds) ? body.testRuleIds.map(Number).filter(Number.isFinite) : []
+  const testMaxPersons = Number(body?.testMaxPersons) > 0 ? Number(body.testMaxPersons) : 0
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons })
 
   return { ok: true, stats }
 })

@@ -1203,6 +1203,76 @@ describe('runSync', () => {
     })
   })
 
+  describe('a test run: only the persons of chosen rules, at most a few, and no job state saved', () => {
+    const entry = () => ({
+      id: 1,
+      key: 'accreditations',
+      name: 'job',
+      enabled: false,
+      incremental_interval_minutes: 15,
+      full_run_hour: 3,
+      mutation_cursor: null,
+      last_incremental_run_at: null,
+      last_full_run_at: null,
+      last_stats: null
+    })
+    const mixed = () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(
+        accreditation('acc1', 'fp1', BADGE_TEAM, 'approved'),
+        accreditation('acc2', 'fp2', BADGE_PRO, 'Paid'),
+        accreditation('acc3', 'fp3', BADGE_PRO, 'Paid'),
+        accreditation('acc4', 'fp4', BADGE_PRO, 'Paid'),
+        accreditation('acc5', 'fp5', BADGE_TEAM, 'approved')
+      ))
+      for (let i = 1; i <= 5; i++) fiona.state.persons.set(`fp${i}`, { firstName: `P${i}`, lastName: 'X', email: `p${i}@x.ee` })
+    }
+
+    it('handles only the persons the chosen rules match, and at most the given number', async () => {
+      mixed()
+
+      const stats = await runSync({ only: { ruleIds: [2], maxPersons: 2 } }, deps)
+
+      const names = [...strapi.state.people.values()].map(p => p.firstName).sort()
+      expect(names).toEqual(['P2', 'P3'])
+      expect(stats.persons.created).toBe(2)
+      expect(stats.test).toEqual({ ruleIds: [2], maxPersons: 2, outsideRules: 2 })
+    })
+
+    it('saves no state in the job entry, so a test cannot start, delay or shorten the real import', async () => {
+      strapi.state.syncJob = entry()
+      mixed()
+
+      await runSync({ only: { ruleIds: [2], maxPersons: 2 } }, deps)
+
+      expect(strapi.state.syncJob.last_full_run_at).toBeNull()
+      expect(strapi.state.syncJob.last_stats).toBeNull()
+      expect(strapi.state.writes.some(w => w.op === 'saveSyncJob')).toBe(false)
+    })
+
+    it('without a test the same run handles everyone, as before', async () => {
+      mixed()
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons.created).toBe(5)
+      expect(stats.test).toBeUndefined()
+    })
+
+    it('a dry run with a test filter lists only those persons', async () => {
+      mixed()
+
+      const stats = await runSync({ dryRun: true, only: { ruleIds: [2], maxPersons: 2 } }, deps)
+
+      expect(stats.dryRunActions.map(a => a.name)).toEqual(['P2 X', 'P3 X', 'P4 X'])
+      expect(stats.persons.created).toBe(3)
+    })
+
+    it('needs at least one rule id', async () => {
+      mixed()
+      await expect(runSync({ only: { ruleIds: [], maxPersons: 2 } }, deps)).rejects.toThrow(/rule id/)
+    })
+  })
+
   it('an immediate second run changes nothing', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', bio: 'b', photo: 'x' })
