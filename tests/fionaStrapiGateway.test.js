@@ -168,27 +168,37 @@ describe('createStrapiGateway', () => {
     expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
-  it('finds an earlier upload of the same photo by name and size, so it is not uploaded twice', async () => {
+  it('finds an unused earlier upload of a photo by its file name: one that no person uses', async () => {
     const { fetch, calls } = fakeFetch({
-      'GET /upload/files': [{ id: 4, name: 'fiona-person-x.jpg', size: 10.5 }, { id: 5, name: 'fiona-person-x.jpg', size: 372.04 }]
+      'GET /upload/files': [{ id: 4, name: 'fiona-person-x.jpg' }, { id: 5, name: 'fiona-person-x.jpg' }],
+      'GET /people?picture=4': [{ id: 70 }],
+      'GET /people?picture=5': []
     })
-    const id = await createStrapiGateway({ fetch, ...deps() }).findUploadedPhoto('fiona-person-x.jpg', 372043)
+    const id = await createStrapiGateway({ fetch, ...deps() }).findOrphanPhoto('fiona-person-x.jpg')
     expect(id).toBe(5)
     expect(calls[0].url).toBe(`${STRAPI}/upload/files?name=fiona-person-x.jpg&_limit=10`)
-    expect(calls[0].headers.Authorization).toBe('Bearer ADMIN')
+    expect(calls.map(c => c.url)).toContain(`${STRAPI}/people?picture=4&_limit=1`)
+    expect(calls.every(c => c.headers.Authorization === 'Bearer ADMIN')).toBe(true)
   })
 
-  it('finds no earlier upload when the name matches but the size does not, or when there is none', async () => {
-    const { fetch } = fakeFetch({ 'GET /upload/files': [{ id: 4, name: 'fiona-person-x.jpg', size: 10.5 }] })
-    const gateway = createStrapiGateway({ fetch, ...deps() })
-    expect(await gateway.findUploadedPhoto('fiona-person-x.jpg', 372043)).toBeNull()
-    const empty = createStrapiGateway({ fetch: fakeFetch({ 'GET /upload/files': [] }).fetch, ...deps() })
-    expect(await empty.findUploadedPhoto('fiona-person-y.jpg', 100)).toBeNull()
+  it('finds nothing when every file of that name is in use, or there is none', async () => {
+    const used = fakeFetch({ 'GET /upload/files': [{ id: 4, name: 'a.jpg' }], 'GET /people?picture=4': [{ id: 70 }] })
+    expect(await createStrapiGateway({ fetch: used.fetch, ...deps() }).findOrphanPhoto('a.jpg')).toBeNull()
+    const none = fakeFetch({ 'GET /upload/files': [] })
+    expect(await createStrapiGateway({ fetch: none.fetch, ...deps() }).findOrphanPhoto('b.jpg')).toBeNull()
   })
 
-  it('treats a failing lookup as "no earlier upload" instead of failing the sync', async () => {
+  it('treats a failing lookup as "no unused upload" instead of failing the sync', async () => {
     const fetch = () => { throw new Error('Strapi hiccup') }
-    expect(await createStrapiGateway({ fetch, ...deps() }).findUploadedPhoto('fiona-person-x.jpg', 100)).toBeNull()
+    expect(await createStrapiGateway({ fetch, ...deps() }).findOrphanPhoto('fiona-person-x.jpg')).toBeNull()
+  })
+
+  it('replaces the file of an existing media entry in place when given its id', async () => {
+    const { fetch, calls } = fakeFetch({ 'POST /upload?id=55': [{ id: 55, name: 'R_Mari_Maasikas' }] })
+    const id = await createStrapiGateway({ fetch, ...deps() }).uploadPhoto(Buffer.from('jpg'), 'R_Mari_Maasikas.jpg', { replaceId: 55 })
+    expect(id).toBe(55)
+    expect(calls[0].url).toBe(`${STRAPI}/upload?id=55`)
+    expect(calls[0].body.get('files').name).toBe('R_Mari_Maasikas.jpg')
   })
 
   it('uploads a photo as multipart and returns the file id', async () => {

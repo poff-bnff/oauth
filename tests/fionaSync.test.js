@@ -207,13 +207,13 @@ function fakeStrapi () {
       }
       return { created: false, updated }
     },
-    uploadPhoto (buffer, filename) {
-      const id = nextId()
-      state.uploads.push({ id, filename, size: buffer.length })
+    uploadPhoto (buffer, filename, options = {}) {
+      const id = options.replaceId ?? nextId()
+      state.uploads.push({ id, filename, size: buffer.length, replaced: Boolean(options.replaceId) })
       return id
     },
-    findUploadedPhoto (filename, bytes) {
-      const hit = state.orphanUploads.find(file => file.filename === filename && file.size === bytes)
+    findOrphanPhoto (filename) {
+      const hit = state.orphanUploads.find(file => file.filename === filename)
       return hit ? hit.id : null
     }
   }
@@ -891,15 +891,38 @@ describe('runSync', () => {
       expect(strapi.state.uploads).toEqual([])
     })
 
-    it('does not upload the photo again when it is already in the media library, it attaches that file', async () => {
+    it('replaces the file of an unused earlier upload in place under the new name instead of uploading a second copy', async () => {
       const person = await syncedWithoutPhoto()
       fiona.state.persons.get('fp2').photo = 'jpegbytes'
-      strapi.state.orphanUploads.push({ id: 777, filename: 'fiona-person-fp2.jpg', size: Buffer.from('jpegbytes').length })
+      strapi.state.orphanUploads.push({ id: 777, filename: 'fiona-person-fp2.jpg' })
 
       await runSync({}, deps)
 
-      expect(strapi.state.uploads).toEqual([])
+      expect(strapi.state.uploads).toEqual([{ id: 777, filename: 'R_Mari_Maasikas.jpg', size: 9, replaced: true }])
       expect(strapi.state.people.get(person.id).picture).toBe(777)
+    })
+
+    it('attaches the unused earlier upload as it is when replacing its file fails', async () => {
+      const person = await syncedWithoutPhoto()
+      fiona.state.persons.get('fp2').photo = 'jpegbytes'
+      strapi.state.orphanUploads.push({ id: 777, filename: 'fiona-person-fp2.jpg' })
+      const original = strapi.uploadPhoto
+      strapi.uploadPhoto = (buffer, filename, options = {}) => (options.replaceId ? null : original(buffer, filename, options))
+
+      await runSync({}, deps)
+
+      expect(strapi.state.people.get(person.id).picture).toBe(777)
+      expect(strapi.state.uploads).toEqual([])
+    })
+
+    it('uploads a new photo as R_Firstname_Lastname.jpg', async () => {
+      await syncedWithoutPhoto()
+      fiona.state.persons.get('fp2').photo = 'jpegbytes'
+
+      await runSync({}, deps)
+
+      expect(strapi.state.uploads.map(u => u.filename)).toEqual(['R_Mari_Maasikas.jpg'])
+      expect(strapi.state.uploads[0].replaced).toBe(false)
     })
 
     it('a second run does not touch the person again', async () => {
