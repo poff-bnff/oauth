@@ -20,6 +20,10 @@
  *                attachments (headshot, showcase, ...) for those persons, published or not. Never shows a file.
  *                Add "probe": true (at most 10 persons) to also try the real Headshot download and Biography read
  *                and see whether each step worked (size, or the error message).
+ *                Any run can be started with "background": true: the answer comes at once and the run goes on.
+ *                Ask { "mode": "status" } for the progress of the run that is going and the result of the last one
+ *                (kept in memory only). Use it for anything that may last more than ten minutes: the platform cuts a
+ *                request after about ten minutes while the run itself goes on.
  *                { "mode": "badges" } or { "mode": "badges", "guestbookIds": [..] } — read-only: the badge types of the
  *                active (or the given) guestbooks with their ids, straight from the XAPI (the id is what a rule's
  *                badge_type_id matches on).
@@ -66,15 +70,16 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'badges'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails is the one thing that must never happen by accident: a dry run unless dryRun is explicitly false
   const dryRun = mode === 'renotify' ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []
+  const background = body?.background === true // start the run and answer at once; watch it with mode "status"
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background })
 
   return { ok: true, stats }
 })

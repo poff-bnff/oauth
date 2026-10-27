@@ -126,6 +126,10 @@ function fakeStrapi () {
     getActiveGuestbookIds () { return [...state.activeGuestbookIds] },
     listEditionsWithGuestbook () { return clone(state.editionsWithGuestbook) },
     getSyncJob (key) { return state.syncJob && state.syncJob.key === key ? clone(state.syncJob) : null },
+    getSyncJobs (key) {
+      if (!state.extraJobs) return state.syncJob && state.syncJob.key === key ? [clone(state.syncJob)] : []
+      return [state.syncJob, ...state.extraJobs].filter(j => j && j.key === key).map(clone)
+    },
     saveSyncJob (id, patch) {
       Object.assign(state.syncJob, clone(patch))
       state.writes.push({ op: 'saveSyncJob', id, payload: clone(patch) })
@@ -1129,6 +1133,73 @@ describe('runSync', () => {
 
       expect(stats.persons.created).toBe(5)
       expect(stats.backlog).toEqual({ cap: 2, more: false, planned: 5, runsNeeded: 3 })
+    })
+  })
+
+  describe('more than one job entry with the same key', () => {
+    const entry = (id, overrides = {}) => ({
+      id,
+      key: 'accreditations',
+      name: `entry ${id}`,
+      enabled: true,
+      incremental_interval_minutes: 15,
+      full_run_hour: 3,
+      mutation_cursor: '2026-10-27T10:00:00.000Z',
+      last_incremental_run_at: '2026-10-27T10:00:00.000Z',
+      last_full_run_at: '2026-10-26T01:00:00.000Z',
+      last_stats: null,
+      ...overrides
+    })
+
+    it('keeps the automatic mode off and says why, so a second entry cannot start a run nobody expects', async () => {
+      strapi.state.syncJob = entry(1)
+      strapi.state.extraJobs = [entry(2, { enabled: false })]
+
+      const stats = await runSync({ mode: 'auto' }, deps)
+
+      expect(stats.skipped).toBe(true)
+      expect(stats.reason).toMatch(/2 fiona-sync-job entries/)
+      expect(stats.reason).toMatch(/#1, #2/)
+    })
+
+    it('a manual run still works, warns about the second entry and keeps its state in the entry with the lowest id', async () => {
+      strapi.state.syncJob = entry(1)
+      strapi.state.extraJobs = [entry(2, { enabled: false })]
+      fiona.state.guestbooks.set(GB, guestbookWith())
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.warnings.join('\n')).toMatch(/2 fiona-sync-job entries/)
+      expect(stats.job).toMatchObject({ id: 1, duplicates: [2] })
+      expect(strapi.state.syncJob.last_stats).toBeTruthy()
+    })
+
+    it('shows in the stats which job entry is used and its schedule', async () => {
+      strapi.state.syncJob = entry(7, { enabled: false })
+      fiona.state.guestbooks.set(GB, guestbookWith())
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.job).toEqual({
+        id: 7,
+        name: 'entry 7',
+        enabled: false,
+        incrementalIntervalMinutes: 15,
+        fullRunHour: 3,
+        lastFullRunAt: '2026-10-26T01:00:00.000Z',
+        lastIncrementalRunAt: '2026-10-27T10:00:00.000Z',
+        duplicates: []
+      })
+    })
+
+    it('hands the stats object to the caller as soon as the run starts, so a long run can be watched', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith())
+      let seen = null
+      deps.onStart = (stats) => { seen = stats }
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(seen).toBe(stats)
     })
   })
 
