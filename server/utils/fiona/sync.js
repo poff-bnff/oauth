@@ -159,6 +159,8 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   const now = deps.now || (() => new Date())
   const maxRemovals = Number.isFinite(Number(config.maxRemovals)) && config.maxRemovals !== undefined ? Number(config.maxRemovals) : 50
   const maxBuildsPerRun = Number.isFinite(Number(config.maxBuildsPerRun)) && config.maxBuildsPerRun !== undefined ? Number(config.maxBuildsPerRun) : 20
+  // Strapi person ids whose existing biography the sync never overwrites (an empty one is still filled)
+  const keepBioPersonIds = new Set(splitIds(config.keepBioPersonIds).map(Number))
   const startedAt = now()
   const startedMs = Date.now()
   const stats = newStats(dryRun, mode)
@@ -557,6 +559,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         noPublicationOfEmail: hide.email,
         noPublicationOfPhone: hide.phone
       })
+      if (existing && existing.bio_en && keepBioPersonIds.has(Number(existing.id))) delete payload.bio_en
       const withheld = []
       if (hide.contact || hide.email) withheld.push('email')
       if (fionaPerson.phone && (hide.contact || hide.phone)) withheld.push('phone')

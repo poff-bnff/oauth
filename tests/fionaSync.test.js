@@ -609,6 +609,66 @@ describe('runSync', () => {
     })
   })
 
+  describe('persons whose biography the sync must keep', () => {
+    const seed = (bio) => {
+      strapi.state.users.set(700, { id: 700, email: 'esko@example.com', person: 42, user_roles: [] })
+      strapi.state.people.set(42, {
+        id: 42, firstName: 'Esko', lastName: 'Old', firstNameLastName: 'Esko Old', eMail: 'esko@example.com', bio_en: bio, festival_editions: [], user: 700
+      })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc70', 'fp70', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp70', { firstName: 'Esko', lastName: 'Rips', email: 'esko@example.com', bio: 'Fiona bio', myPoffUserId: '700' })
+    }
+
+    it('keeps the existing biography of a listed person but still updates everything else', async () => {
+      seed('Own bio')
+      deps.config.keepBioPersonIds = '7, 42'
+
+      await runSync({}, deps)
+
+      const person = strapi.state.people.get(42)
+      expect(person.bio_en).toBe('Own bio')
+      expect(person.lastName).toBe('Rips')
+      expect(person.fiona_person_id).toBe('fp70')
+    })
+
+    it('fills the biography of a listed person when it is empty', async () => {
+      seed('')
+      deps.config.keepBioPersonIds = '42'
+
+      await runSync({}, deps)
+
+      expect(strapi.state.people.get(42).bio_en).toBe('Fiona bio')
+    })
+
+    it('overwrites the biography of a person who is not listed', async () => {
+      seed('Own bio')
+      deps.config.keepBioPersonIds = '7, 99'
+
+      await runSync({}, deps)
+
+      expect(strapi.state.people.get(42).bio_en).toBe('Fiona bio')
+    })
+
+    it('overwrites by default when no person is listed', async () => {
+      seed('Own bio')
+
+      await runSync({}, deps)
+
+      expect(strapi.state.people.get(42).bio_en).toBe('Fiona bio')
+    })
+
+    it('does not show the kept biography as a change in the dry run', async () => {
+      seed('Own bio')
+      deps.config.keepBioPersonIds = '42'
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      const action = stats.dryRunActions.find(a => a.personId === 42)
+      expect(action.changed).not.toContain('bio_en')
+      expect(action.diff).not.toHaveProperty('bio_en')
+    })
+  })
+
   it('an immediate second run changes nothing', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', bio: 'b', photo: 'x' })
