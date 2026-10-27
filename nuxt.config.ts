@@ -52,6 +52,8 @@ export default defineNuxtConfig({
     fionaPublicationApiUrl: '', // NUXT_FIONA_PUBLICATION_API_URL — e.g. https://poff-online-api.fiona-online.net/v1
     syncMaxRemovals: '', // NUXT_SYNC_MAX_REMOVALS — cap on unpublishes per sync run (default 50)
     syncMaxBuildsPerRun: '', // NUXT_SYNC_MAX_BUILDS_PER_RUN — site builds per rule and run when the rule leaves target_builds_limit_per_run empty (default 20)
+    syncUnpublishedPhotos: '', // NUXT_SYNC_UNPUBLISHED_PHOTOS — 'true': a full-profile person without a published photo gets the Fiona attachment whose content type is Headshot (default off)
+    syncUnpublishedBios: '', // NUXT_SYNC_UNPUBLISHED_BIOS — 'true': a full-profile person without a published biography gets the Biography memo of its accreditation card (default off)
     syncKeepBioPersonIds: '', // NUXT_SYNC_KEEP_BIO_PERSON_IDS — comma-separated Strapi person ids whose existing biography the Fiona sync never overwrites
     public: {
       url: '',

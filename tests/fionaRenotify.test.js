@@ -66,6 +66,17 @@ describe('renotifyPersons', () => {
     expect(strapi.state.writes).toEqual([])
   })
 
+  it('skips a person id Strapi cannot read (it answers 500 for an id that does not exist) and carries on with the rest', async () => {
+    strapi.state.people.set(1, synced(1))
+    const original = strapi.findPersonById
+    strapi.findPersonById = (id) => { if (Number(id) === 7) throw new Error('500 Internal Server Error'); return original(id) }
+
+    const result = await renotifyPersons({ personIds: [7, 1] }, { strapi, log: silent })
+
+    expect(result.skipped).toEqual([{ personId: 7, reason: 'could not be read: 500 Internal Server Error' }])
+    expect(result.notify.map(n => n.personId)).toEqual([1])
+  })
+
   it('retries the second write once, so a hiccup does not leave a person off Creative Gate', async () => {
     strapi.state.people.set(1, synced(1))
     strapi.state.failWrite = n => n === 2 // the first attempt to restore fails, the retry works
