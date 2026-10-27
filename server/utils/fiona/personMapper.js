@@ -8,11 +8,20 @@
  * Level 1 (basic): firstName, lastName, firstNameLastName, eMail, phoneNr.
  * Level 2 (full):  basic + bio_en (more fields follow in the mapping step).
  *
- * `noPublicationOfContactDetails` (Fiona accreditation flag) keeps email and
- * phone off the public person record; the login user and the user-profile
- * still receive the email.
+ * Three Fiona accreditation flags keep contact data off the public person record:
+ *   noPublicationOfContactDetails  "Do not publish contact details"  → email and phone
+ *   noPublicationOfEmail           "Do not publish email info"       → email
+ *   noPublicationOfPhone           "Do not publish phone info"       → phone
+ * The login user and the user-profile still receive the email.
  */
-export function buildPersonPayload ({ fionaPerson, level, contactEmail, noPublicationOfContactDetails = false }) {
+export function buildPersonPayload ({
+  fionaPerson,
+  level,
+  contactEmail,
+  noPublicationOfContactDetails = false,
+  noPublicationOfEmail = false,
+  noPublicationOfPhone = false
+}) {
   const firstName = fionaPerson?.firstName || null
   const lastName = fionaPerson?.lastName || null
 
@@ -22,10 +31,8 @@ export function buildPersonPayload ({ fionaPerson, level, contactEmail, noPublic
     firstNameLastName: [firstName, lastName].filter(Boolean).join(' ') || null
   }
 
-  if (!noPublicationOfContactDetails) {
-    if (contactEmail) payload.eMail = contactEmail
-    if (fionaPerson?.phone) payload.phoneNr = fionaPerson.phone
-  }
+  if (contactEmail && !noPublicationOfContactDetails && !noPublicationOfEmail) payload.eMail = contactEmail
+  if (fionaPerson?.phone && !noPublicationOfContactDetails && !noPublicationOfPhone) payload.phoneNr = fionaPerson.phone
 
   if (level >= 2) {
     if (fionaPerson?.bio) payload.bio_en = fionaPerson.bio

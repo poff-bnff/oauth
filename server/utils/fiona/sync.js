@@ -55,6 +55,8 @@ function newStats (dryRun, mode) {
     editions: { attached: 0, detached: 0 },
     users: { created: 0, linked: 0, confirmed: 0, unconfirmedSeen: 0, confirmedFieldMissing: 0 },
     profiles: { created: 0, updated: 0 },
+    privacy: { emailWithheld: 0, phoneWithheld: 0 },
+    customFieldKeys: {},
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
     incremental: null,
@@ -81,6 +83,22 @@ function describeError (err) {
     if (snippet && !text.includes(snippet)) text += ` — ${snippet.slice(0, 300)}`
   }
   return text
+}
+
+const COMPARED_FIELDS = ['firstName', 'lastName', 'firstNameLastName', 'eMail', 'phoneNr', 'bio_en']
+const clip = (value) => {
+  if (value === undefined || value === null) return null
+  const text = String(value)
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text
+}
+
+/** Dry run only: Strapi value next to Fiona value for each content field that would change. */
+function contentDiff (existing, payload, changed) {
+  const diff = {}
+  for (const key of COMPARED_FIELDS) {
+    if (changed.includes(key)) diff[key] = { strapi: clip(existing[key]), fiona: clip(payload[key]) }
+  }
+  return diff
 }
 
 /** Keys of `payload` whose value differs from `existing` (relations compared by id). */
@@ -270,10 +288,21 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
 
   // 4. Desired state ---------------------------------------------------------
   const desired = new Map()
-  const privacy = new Map()
+  const privacy = new Map() // fionaPersonId → { contact, email, phone }, true when ANY of the person's accreditations says so
   const erroredAccreditationIds = new Set()
   const erroredPersonIds = new Set()
   const histogram = new Map() // guestbookId → Map(label → { badgeName, badgeId, counts })
+
+  // Which custom field keys the matched accreditations carry (and in how many the box is ticked):
+  // makes a wrong or missing privacy-flag key visible in a dry run.
+  const countCustomFields = (customFields) => {
+    for (const field of Array.isArray(customFields) ? customFields : []) {
+      const entry = stats.customFieldKeys[field.key] || (Object.keys(stats.customFieldKeys).length < 80 ? (stats.customFieldKeys[field.key] = { accreditations: 0, ticked: 0 }) : null)
+      if (!entry) continue
+      entry.accreditations++
+      if (field.value === true || field.value === 1 || ['true', 'yes', 'on', '1'].includes(String(field.value).trim().toLowerCase())) entry.ticked++
+    }
+  }
 
   const countBadges = (guestbookId, badges) => {
     if (!histogram.has(guestbookId)) histogram.set(guestbookId, new Map())
@@ -303,7 +332,13 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       return false
     }
     mergeDesired(desired, detail.personId, { guestbookId, accreditationId, evaluation })
-    privacy.set(detail.personId, Boolean(privacy.get(detail.personId)) || detail.noPublicationOfContactDetails === true)
+    const before = privacy.get(detail.personId) || { contact: false, email: false, phone: false }
+    privacy.set(detail.personId, {
+      contact: before.contact || detail.noPublicationOfContactDetails === true,
+      email: before.email || detail.noPublicationOfEmail === true,
+      phone: before.phone || detail.noPublicationOfPhone === true
+    })
+    countCustomFields(detail.customFields)
     return true
   }
 
@@ -513,12 +548,20 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       const editionIds = uniqueNumbers([...currentEditionIds.filter(id => !detach.includes(id)), ...want.editionIds])
       const newlyAttached = [...want.editionIds].filter(id => !currentEditionIds.includes(Number(id)))
 
+      const hide = privacy.get(fionaPersonId) || { contact: false, email: false, phone: false }
       const payload = buildPersonPayload({
         fionaPerson,
         level: want.level,
         contactEmail,
-        noPublicationOfContactDetails: privacy.get(fionaPersonId) === true
+        noPublicationOfContactDetails: hide.contact,
+        noPublicationOfEmail: hide.email,
+        noPublicationOfPhone: hide.phone
       })
+      const withheld = []
+      if (hide.contact || hide.email) withheld.push('email')
+      if (fionaPerson.phone && (hide.contact || hide.phone)) withheld.push('phone')
+      if (withheld.includes('email')) stats.privacy.emailWithheld++
+      if (withheld.includes('phone')) stats.privacy.phoneWithheld++
       Object.assign(payload, {
         fiona_person_id: fionaPersonId,
         fiona_accreditation_id: joinIds(want.accreditationIds),
@@ -546,7 +589,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
 
       if (dryRun) {
         const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
-        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds) }
+        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}) }
         if (!existing) {
           stats.persons.created++
           log.info(`${would}CREATE ${summary}`)
@@ -554,7 +597,9 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         } else if (changed.length) {
           stats.persons.updated++
           log.info(`${would}UPDATE person #${existing.id} (${changed.join(', ')}) ${summary}`)
-          recordDryRun({ action: 'UPDATE', personId: existing.id, ...plan, changed })
+          const diff = contentDiff(existing, payload, changed)
+          const compare = Object.keys(diff).length ? { diff, strapiUpdatedAt: existing.updated_at || null } : {}
+          recordDryRun({ action: 'UPDATE', personId: existing.id, ...plan, changed, ...compare })
         } else {
           stats.persons.unchanged++
         }

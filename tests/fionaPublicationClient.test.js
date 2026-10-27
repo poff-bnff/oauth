@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeAccreditationRecord, toFionaTimestamp, createPublicationClient } from '../server/utils/fiona/publicationClient.js'
+import { normalizeAccreditationRecord, privacyFlagsFromCustomFields, toFionaTimestamp, createPublicationClient } from '../server/utils/fiona/publicationClient.js'
 
 const lookup = (key, en) => ({ key, translations: [{ language: 'nl', text: `${en} nl` }, { language: 'en', text: en }] })
 
@@ -165,5 +165,53 @@ describe('createPublicationClient', () => {
     expect(await client.listMutations('2026-09-01T00:00:00.000Z')).toEqual([{ entityName: 'Accreditation', entityId: 'acc-1', mutation: 1, entityUpdatedOn: '2026-09-02T00:00:00Z' }])
     expect(await client.getAccreditationBadgeRecord('b1')).toEqual({ accreditationId: 'acc-1' })
     expect(calls[0].url).toBe(`${BASE}/mutations/20260901T000000000Z`)
+  })
+})
+
+describe('privacy flags from the accreditation custom fields', () => {
+  const EMAIL_KEY = 'accreditation-general-do-not-publish-email-info'
+  const PHONE_KEY = 'accreditation-general-do-not-publish-phone-info'
+
+  it('reads "Do not publish email info" and "Do not publish phone info" independently', () => {
+    expect(privacyFlagsFromCustomFields([{ key: EMAIL_KEY, value: true }, { key: PHONE_KEY, value: false }]))
+      .toEqual({ noPublicationOfEmail: true, noPublicationOfPhone: false })
+    expect(privacyFlagsFromCustomFields([{ key: EMAIL_KEY, value: false }, { key: PHONE_KEY, value: true }]))
+      .toEqual({ noPublicationOfEmail: false, noPublicationOfPhone: true })
+  })
+
+  it('accepts text and number values that mean yes', () => {
+    for (const yes of ['true', 'TRUE', 'yes', 'Yes', '1', 1, 'on']) {
+      expect(privacyFlagsFromCustomFields([{ key: EMAIL_KEY, value: yes }]).noPublicationOfEmail).toBe(true)
+    }
+    for (const no of [false, 'false', 'no', '0', 0, '', null, undefined]) {
+      expect(privacyFlagsFromCustomFields([{ key: EMAIL_KEY, value: no }]).noPublicationOfEmail).toBe(false)
+    }
+  })
+
+  it('finds the key whatever the separators and case, and ignores unrelated custom fields', () => {
+    expect(privacyFlagsFromCustomFields([{ key: 'Accreditation_General_Do_Not_Publish_Email_Info', value: true }]).noPublicationOfEmail).toBe(true)
+    expect(privacyFlagsFromCustomFields([{ key: 'do not publish phone info', value: true }]).noPublicationOfPhone).toBe(true)
+    expect(privacyFlagsFromCustomFields([{ key: 'accreditation-general-delivered-by', value: true }])).toEqual({ noPublicationOfEmail: false, noPublicationOfPhone: false })
+  })
+
+  it('is false when the record has no custom fields at all', () => {
+    expect(privacyFlagsFromCustomFields(undefined)).toEqual({ noPublicationOfEmail: false, noPublicationOfPhone: false })
+    expect(privacyFlagsFromCustomFields([])).toEqual({ noPublicationOfEmail: false, noPublicationOfPhone: false })
+  })
+
+  it('puts the flags and the normalised custom fields on the accreditation record', () => {
+    const rec = normalizeAccreditationRecord(rawRecord({
+      customFieldValues: [{ key: EMAIL_KEY, value: true }, { key: 'accreditation-general-delivered-by', value: '2026-10-28' }]
+    }))
+    expect(rec.noPublicationOfEmail).toBe(true)
+    expect(rec.noPublicationOfPhone).toBe(false)
+    expect(rec.customFields).toEqual([{ key: EMAIL_KEY, value: true }, { key: 'accreditation-general-delivered-by', value: '2026-10-28' }])
+  })
+
+  it('defaults to "publishable" when the record carries no custom fields', () => {
+    const rec = normalizeAccreditationRecord(rawRecord())
+    expect(rec.noPublicationOfEmail).toBe(false)
+    expect(rec.noPublicationOfPhone).toBe(false)
+    expect(rec.customFields).toEqual([])
   })
 })

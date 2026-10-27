@@ -49,7 +49,15 @@ function fakeFiona () {
     getAccreditationBadges (accId) { return findAcc(accId).badges },
     getAccreditation (accId) {
       const a = findAcc(accId)
-      return { personId: a.personId, guestbookId: a.guestbookId, noPublicationOfContactDetails: !!a.noPublicationOfContactDetails, films: [] }
+      return {
+        personId: a.personId,
+        guestbookId: a.guestbookId,
+        noPublicationOfContactDetails: !!a.noPublicationOfContactDetails,
+        noPublicationOfEmail: !!a.noPublicationOfEmail,
+        noPublicationOfPhone: !!a.noPublicationOfPhone,
+        customFields: a.customFields || [],
+        films: []
+      }
     },
     getPerson (personId) {
       if (state.failPersons.has(personId)) throw new Error(`person ${personId} unavailable`)
@@ -386,6 +394,140 @@ describe('runSync', () => {
     const user = [...strapi.state.users.values()][0]
     expect(user.email).toBe('pq@example.com')
     expect(strapi.state.profiles.get(user.id).email).toBe('pq@example.com')
+  })
+
+  it('"Do not publish email info" keeps the email off the person but still creates the user and profile with it', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc7', 'fp7', BADGE_TEAM, 'approved', { noPublicationOfEmail: true })))
+    fiona.state.persons.set('fp7', { firstName: 'E', lastName: 'Flag', email: 'e@example.com', phone: '555' })
+
+    const stats = await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    expect(person.eMail).toBeUndefined()
+    expect(person.phoneNr).toBe('555')
+    const user = [...strapi.state.users.values()][0]
+    expect(user.email).toBe('e@example.com')
+    expect(strapi.state.profiles.get(user.id).email).toBe('e@example.com')
+    expect(stats.privacy).toEqual({ emailWithheld: 1, phoneWithheld: 0 })
+  })
+
+  it('"Do not publish phone info" keeps the phone off the person but writes the email', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc8', 'fp8', BADGE_TEAM, 'approved', { noPublicationOfPhone: true })))
+    fiona.state.persons.set('fp8', { firstName: 'P', lastName: 'Flag', email: 'p@example.com', phone: '777' })
+
+    const stats = await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    expect(person.eMail).toBe('p@example.com')
+    expect(person.phoneNr).toBeUndefined()
+    expect(stats.privacy).toEqual({ emailWithheld: 0, phoneWithheld: 1 })
+  })
+
+  it('"Do not publish contact details" counts as both flags', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc9', 'fp9', BADGE_TEAM, 'approved', { noPublicationOfContactDetails: true })))
+    fiona.state.persons.set('fp9', { firstName: 'C', lastName: 'Flag', email: 'c@example.com', phone: '999' })
+
+    const stats = await runSync({}, deps)
+
+    expect(stats.privacy).toEqual({ emailWithheld: 1, phoneWithheld: 1 })
+  })
+
+  it('a flag on any of a person\'s accreditations withholds the value', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc10', 'fp10', BADGE_TEAM, 'approved'),
+      accreditation('acc11', 'fp10', BADGE_TEAM, 'approved', { noPublicationOfEmail: true })
+    ))
+    fiona.state.persons.set('fp10', { firstName: 'T', lastName: 'Two', email: 't@example.com', phone: '1' })
+
+    await runSync({}, deps)
+
+    expect([...strapi.state.people.values()][0].eMail).toBeUndefined()
+  })
+
+  it('reports which custom field keys the matched accreditations carry, so a wrong key name is visible', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc12', 'fp12', BADGE_TEAM, 'approved', { customFields: [{ key: 'do-not-publish-email-info', value: true }, { key: 'delivered-by', value: '2026-10-28' }] }),
+      accreditation('acc13', 'fp13', BADGE_TEAM, 'approved', { customFields: [{ key: 'do-not-publish-email-info', value: false }] })
+    ))
+    fiona.state.persons.set('fp12', { firstName: 'A', lastName: 'A', email: 'a12@example.com' })
+    fiona.state.persons.set('fp13', { firstName: 'B', lastName: 'B', email: 'b13@example.com' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.customFieldKeys).toEqual({
+      'do-not-publish-email-info': { accreditations: 2, ticked: 1 },
+      'delivered-by': { accreditations: 1, ticked: 0 }
+    })
+  })
+
+  it('names the withheld values on the dry-run action', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc14', 'fp14', BADGE_TEAM, 'approved', { noPublicationOfEmail: true })))
+    fiona.state.persons.set('fp14', { firstName: 'D', lastName: 'Run', email: 'd@example.com', phone: '1' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(stats.dryRunActions[0]).toMatchObject({ action: 'CREATE', fionaPersonId: 'fp14', withheld: ['email'] })
+  })
+
+  it('dry run shows, for an existing person, the Strapi and the Fiona value of every content field that would change', async () => {
+    strapi.state.users.set(500, { id: 500, email: 'old@example.com', person: 42, user_roles: [] })
+    strapi.state.people.set(42, {
+      id: 42,
+      firstName: 'Old',
+      lastName: 'Name',
+      firstNameLastName: 'Old Name',
+      eMail: 'old@example.com',
+      phoneNr: '111',
+      bio_en: 'Own bio',
+      updated_at: '2026-05-01T08:00:00.000Z',
+      festival_editions: [],
+      user: 500
+    })
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc3', 'fp3', BADGE_PRO, 'approved')))
+    fiona.state.persons.set('fp3', { firstName: 'New', lastName: 'Name', email: 'new@example.com', phone: '222', bio: 'Fiona bio', myPoffUserId: '500' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    const action = stats.dryRunActions.find(a => a.personId === 42)
+    expect(action.strapiUpdatedAt).toBe('2026-05-01T08:00:00.000Z')
+    expect(action.diff).toEqual({
+      firstName: { strapi: 'Old', fiona: 'New' },
+      firstNameLastName: { strapi: 'Old Name', fiona: 'New Name' },
+      eMail: { strapi: 'old@example.com', fiona: 'new@example.com' },
+      phoneNr: { strapi: '111', fiona: '222' },
+      bio_en: { strapi: 'Own bio', fiona: 'Fiona bio' }
+    })
+  })
+
+  it('clips long values in the dry-run comparison', async () => {
+    strapi.state.users.set(500, { id: 500, email: 'old@example.com', person: 42, user_roles: [] })
+    strapi.state.people.set(42, { id: 42, firstName: 'A', lastName: 'B', firstNameLastName: 'A B', eMail: 'old@example.com', bio_en: 'x'.repeat(1000), festival_editions: [], user: 500 })
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc3', 'fp3', BADGE_PRO, 'approved')))
+    fiona.state.persons.set('fp3', { firstName: 'A', lastName: 'B', email: 'old@example.com', bio: 'y'.repeat(1000), myPoffUserId: '500' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    const { bio_en: bio } = stats.dryRunActions.find(a => a.personId === 42).diff
+    expect(bio.strapi).toBe(`${'x'.repeat(300)}…`)
+    expect(bio.fiona).toBe(`${'y'.repeat(300)}…`)
+  })
+
+  it('has no comparison for a new person or when only relations change', async () => {
+    strapi.state.users.set(500, { id: 500, email: 'a@example.com', person: 42, user_roles: [] })
+    strapi.state.people.set(42, { id: 42, firstName: 'A', lastName: 'B', firstNameLastName: 'A B', eMail: 'a@example.com', festival_editions: [], user: 500 })
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc3', 'fp3', BADGE_TEAM, 'approved'),
+      accreditation('acc4', 'fp4', BADGE_TEAM, 'approved')
+    ))
+    fiona.state.persons.set('fp3', { firstName: 'A', lastName: 'B', email: 'a@example.com', myPoffUserId: '500' })
+    fiona.state.persons.set('fp4', { firstName: 'N', lastName: 'New', email: 'n@example.com' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    for (const action of stats.dryRunActions) {
+      expect(action.diff).toBeUndefined()
+      expect(action.strapiUpdatedAt).toBeUndefined()
+    }
   })
 
   it('an immediate second run changes nothing', async () => {

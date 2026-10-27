@@ -58,6 +58,39 @@ function pickPhotoToken (person, record) {
   return text(favourite?.value ?? record?.image?.value ?? images[0]?.value)
 }
 
+/** Custom field value → boolean ("true", "yes", "on", 1 and true mean yes). */
+function isYes (value) {
+  if (value === true || value === 1) return true
+  if (typeof value !== 'string') return false
+  return ['true', 'yes', 'on', '1'].includes(value.trim().toLowerCase())
+}
+
+/** Letters and digits only, lower case: "accreditation-general-Do_Not_Publish" → "accreditationgeneraldonotpublish". */
+const compactKey = key => String(key ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/** customFieldValues [{key, value}] → [{key, value}] with plain string keys. */
+function normalizeCustomFields (raw) {
+  if (!Array.isArray(raw)) return []
+  return raw.filter(item => item && item.key !== undefined && item.key !== null).map(item => ({ key: String(item.key), value: item.value }))
+}
+
+/**
+ * The festival's own accreditation custom fields "Do not publish email info" and
+ * "Do not publish phone info". Matched by the words in the key, not by an exact key,
+ * so a differently spelled slug still works. (The built-in "Do not publish contact
+ * details" is the separate noPublicationOfContactDetails flag and covers both.)
+ */
+export function privacyFlagsFromCustomFields (customFields) {
+  const flags = { noPublicationOfEmail: false, noPublicationOfPhone: false }
+  for (const field of normalizeCustomFields(customFields)) {
+    const key = compactKey(field.key)
+    if (!/(?:donotpublish|dontpublish|nopublication)(?:of)?/.test(key)) continue
+    if (key.includes('email') && isYes(field.value)) flags.noPublicationOfEmail = true
+    if (key.includes('phone') && isYes(field.value)) flags.noPublicationOfPhone = true
+  }
+  return flags
+}
+
 function normalizePublishedPerson (person, record) {
   const country = person?.address?.country
   return {
@@ -96,6 +129,8 @@ export function normalizeAccreditationRecord (raw) {
     personId: text(raw?.person?.id),
     badges,
     noPublicationOfContactDetails: raw?.noPublicationOfContactDetails === true,
+    ...privacyFlagsFromCustomFields(raw?.customFieldValues),
+    customFields: normalizeCustomFields(raw?.customFieldValues),
     films,
     person: normalizePublishedPerson(raw?.person, raw)
   }
@@ -215,6 +250,9 @@ export function createPublicationClient ({
         personId: record.personId,
         guestbookId: record.guestbookId,
         noPublicationOfContactDetails: record.noPublicationOfContactDetails,
+        noPublicationOfEmail: record.noPublicationOfEmail,
+        noPublicationOfPhone: record.noPublicationOfPhone,
+        customFields: record.customFields,
         films: record.films
       }
     },
