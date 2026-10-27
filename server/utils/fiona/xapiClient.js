@@ -148,6 +148,34 @@ export function pickHeadshot (attachments, favouriteIds = []) {
   return { ...chosen, otherFiles, choice: otherFiles === 0 ? 'only' : (defaults.length ? 'default' : 'latest') }
 }
 
+const MAX_BIOGRAPHY_CHARS = 20000
+
+/** Fiona file tokens are base64 of a binary header starting with "S3" followed by the bucket and the key. */
+function looksLikeFileToken (value) {
+  const raw = String(value ?? '')
+  if (raw.length < 40 || /\s/.test(raw)) return false
+  try {
+    return Buffer.from(raw, 'base64').subarray(0, 2).toString('latin1') === 'S3'
+  } catch (err) {
+    return false
+  }
+}
+
+/**
+ * The biography to use when nothing is published: a Memo attachment of the accreditation whose content type is
+ * "Biography", published (category 2) or not. Several: the latest. Documents, links and every other content type
+ * never count.
+ */
+export function pickBiography (attachments) {
+  const memos = (Array.isArray(attachments) ? attachments : []).filter(item =>
+    String(item?.type || '').toLowerCase().includes('memo') &&
+    String(item?.contentType || '').trim().toLowerCase() === 'biography' &&
+    item?.token
+  )
+  if (!memos.length) return null
+  return [...memos].sort((a, b) => String(b.createdOn || '').localeCompare(String(a.createdOn || '')))[0]
+}
+
 /**
  * Create the XAPI client.
  * @param {object} options
@@ -277,6 +305,27 @@ export function createXapiClient ({
       const url = typeof urlResult === 'string' ? urlResult : pick(urlResult, 'accessUrl', 'url')
       if (!url) return null
       return { buffer: await downloadBuffer(url), filename: `fiona-person-${personId}.jpg`, fileName: picked.fileName, otherFiles: picked.otherFiles, choice: picked.choice }
+    },
+
+    /**
+     * The biography of a person from the Biography memo on its accreditation card(s), published or not; null when
+     * there is none. The text is inline in the attachment, or a file to download (both are handled).
+     * Only the accreditation card is read, never the person card.
+     */
+    async getUnpublishedBiography (accreditationIds = []) {
+      const lists = []
+      for (const id of accreditationIds) lists.push(await listAccreditationAttachments(id))
+      const picked = pickBiography(lists.flat())
+      if (!picked) return null
+      let raw = picked.token
+      if (looksLikeFileToken(raw)) {
+        const urlResult = await get(`/attachment/url?token=${encodeURIComponent(raw)}`)
+        const url = typeof urlResult === 'string' ? urlResult : pick(urlResult, 'accessUrl', 'url')
+        if (!url) return null
+        raw = (await downloadBuffer(url)).toString('utf8')
+      }
+      const text = String(raw).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').trim().slice(0, MAX_BIOGRAPHY_CHARS)
+      return text ? { text, createdOn: picked.createdOn } : null
     },
 
     async getPersonPhoto (personId) {
