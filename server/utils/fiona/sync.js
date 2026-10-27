@@ -86,6 +86,7 @@ function newStats (dryRun, mode) {
     customFieldKeys: {},
     ruleRoles: [],
     build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
+    switches: { unpublishedPhotos: false, unpublishedBios: false },
     photos: { published: 0, headshot: 0, missing: [] },
     bios: { published: 0, accreditation: 0, missing: [] },
     removals: { skipped: false, reason: null },
@@ -216,6 +217,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   const startedAt = now()
   const startedMs = Date.now()
   const stats = newStats(dryRun, mode)
+  stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios) }
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
