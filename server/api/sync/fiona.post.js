@@ -18,6 +18,8 @@
  * One-off tools for persons the sync made (Strapi person ids, at most 100 per call):
  *                { "mode": "photos", "personIds": [..] or "all": true } — read-only: lists what Fiona holds as
  *                attachments (headshot, showcase, ...) for those persons, published or not. Never shows a file.
+ *                Add "probe": true (at most 10 persons) to also try the real Headshot download and Biography read
+ *                and see whether each step worked (size, or the error message).
  *                { "mode": "renotify", "personIds": [..], "dryRun": false } — sends the Creative Gate "created"
  *                email of those persons once more (the edition is taken off and put back). A dry run unless
  *                "dryRun": false is given explicitly.
@@ -66,8 +68,9 @@ export default defineEventHandler(async (event) => {
   const dryRun = mode === 'renotify' ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
+  const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe })
 
   return { ok: true, stats }
 })

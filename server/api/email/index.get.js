@@ -1,8 +1,8 @@
 import crypto from 'crypto'
 import { isUndeliverableEmail } from '../../../utils/emailRules.js'
 
-function hasCompleteProfile(user){
-  let profile = user.user_profile
+function hasCompleteProfile (user) {
+  const profile = user.user_profile
   return profile.email && profile.firstName && profile.lastName && profile.birthdate && profile.phoneNr && profile.gender && profile.picture
 }
 
@@ -13,8 +13,8 @@ export default defineEventHandler(async (event) => {
   const stateCookie = getCookie(event, 'state')
   const userCookie = getCookie(event, 'user_token')
 
-  if(query.user_token){
-    try{
+  if (query.user_token) {
+    try {
       // One value for both the cookie and the oauth.ee URL. The login callback clears the cookie
       // (sometimes leaving the literal string "null"), so a missing cookie must not be sent on.
       const state = (stateCookie && stateCookie !== 'null') ? stateCookie : crypto.randomBytes(16).toString('hex')
@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
         redirect_uri: `${config.public.url}/api/email`,
         response_type: 'code',
         scope: 'openid',
-        state,
+        state
       }).toString()
 
       const redirectUri = `${config.public.oauthUrl}/auth/e-mail?${params}`
@@ -40,9 +40,8 @@ export default defineEventHandler(async (event) => {
       console.error(error)
       throw createError({ statusCode: 500, statusMessage: 'Error with redirect' })
     }
-  }
-  else if(query.code && query.state && query.state == stateCookie){
-    try{
+  } else if (query.code && query.state && query.state == stateCookie) {
+    try {
       setCookie(event, 'redirect_uri', null)
       setCookie(event, 'user_token', null)
       const body = {
@@ -68,39 +67,39 @@ export default defineEventHandler(async (event) => {
       const id = await getUserIdFromToken(userCookie)
       const user = await getStrapiUser(id)
 
-      if(user.user_profile.email && authUser.email == user.user_profile.email){
+      if (user.user_profile.email && authUser.email == user.user_profile.email) {
         setCookie(event, 'state', null)
         return sendRedirect(event, redirectCookie + '&notifier=emailChangeSame', 302)
       }
 
-      if(await emailInUse(authUser.email)){
+      if (await emailInUse(authUser.email)) {
         setCookie(event, 'state', null)
         return sendRedirect(event, redirectCookie + '&notifier=emailChangeTaken', 302)
       }
 
-      const profileBody = {"email":authUser.email}
-      await setStrapiUserProfile (user.user_profile.id, profileBody)
+      const profileBody = { email: authUser.email }
+      await setStrapiUserProfile(user.user_profile.id, profileBody)
 
       const strapiUser = await authenticateStrapiUser(authUser.email)
       const newContact = await getStrapiUser(strapiUser.id)
 
-      if(user.id != newContact.id){
-        let hasProfileOld = hasCompleteProfile(user)
-        let hasProfileNew = hasCompleteProfile(newContact)
+      if (user.id != newContact.id) {
+        const hasProfileOld = hasCompleteProfile(user)
+        const hasProfileNew = hasCompleteProfile(newContact)
 
         let profileId = user.user_profile.id
 
-        if(hasProfileNew && !hasProfileOld){
+        if (hasProfileNew && !hasProfileOld) {
           profileId = newContact.user_profile.id
         }
 
-        let params = new URLSearchParams({
+        const params = new URLSearchParams({
           redirect_uri: redirectCookie,
           new_user: newContact.id,
           old_user: user.id,
           profile: profileId,
           state: stateCookie,
-          from_query: 'email_change',
+          from_query: 'email_change'
         }).toString()
         return sendRedirect(event, config.public.url + '/api/alias/combine?' + params, 302)
       }
@@ -108,7 +107,6 @@ export default defineEventHandler(async (event) => {
       setCookie(event, 'state', null)
 
       return sendRedirect(event, redirectCookie + '&notifier=emailChangeSuccess', 302)
-
     } catch (error) {
       console.error(error)
       throw createError({ statusCode: 500, statusMessage: 'Error with email change' })

@@ -8,7 +8,7 @@ async function fetchVideoUrl (contentType, contentId) {
   const config = useRuntimeConfig()
   const token = await getStrapiToken()
 
-  const fetch = (path) => $fetch(`${config.strapiUrl}${path}`, {
+  const fetch = path => $fetch(`${config.strapiUrl}${path}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
 

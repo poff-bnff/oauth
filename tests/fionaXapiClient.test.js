@@ -401,3 +401,20 @@ describe('createXapiClient biography', () => {
     expect(await client.getUnpublishedBiography(['a1'])).toBeNull()
   })
 })
+
+describe('createXapiClient short-lived file address', () => {
+  const headshot = { Id: 'att-1', Category: 0, Type: { Description: 'Image' }, ContentType: { Description: 'Headshot' }, Title: 'Photo of yourself', OriginalFileName: 'x.jpg', CreatedOn: '2026-09-01T10:00:00Z', Value: 'TOK' }
+  for (const [label, answer] of [['accessUrl', { accessUrl: 'https://s3.example/a.jpg' }], ['AccessUrl', { AccessUrl: 'https://s3.example/a.jpg' }], ['url', { url: 'https://s3.example/a.jpg' }], ['Url', { Url: 'https://s3.example/a.jpg' }], ['plain string', 'https://s3.example/a.jpg']]) {
+    it(`understands the answer as ${label}`, async () => {
+      const downloads = []
+      const fetch = (url) => {
+        if (url.endsWith('/person/p1/attachments')) return [headshot]
+        if (url.includes('/attachment/url?token=')) return answer
+        return {}
+      }
+      const client = createXapiClient({ fetch, apiKey: 'KEY', log: { warn () {} }, download: (url) => { downloads.push(url); return Buffer.from('img') } })
+      await client.getUnpublishedHeadshot('p1', [])
+      expect(downloads).toEqual(['https://s3.example/a.jpg'])
+    })
+  }
+})

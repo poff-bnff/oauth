@@ -91,7 +91,9 @@ function buildDeps () {
     config: {
       maxRemovals: numberOr(config.syncMaxRemovals, 50),
       maxBuildsPerRun: numberOr(config.syncMaxBuildsPerRun, 20),
-      keepBioPersonIds: config.syncKeepBioPersonIds || ''
+      keepBioPersonIds: config.syncKeepBioPersonIds || '',
+      unpublishedPhotos: String(config.syncUnpublishedPhotos).toLowerCase() === 'true',
+      unpublishedBios: String(config.syncUnpublishedBios).toLowerCase() === 'true'
     }
   }
 }
@@ -119,7 +121,7 @@ async function compareFionaSources () {
   return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
 }
 
-export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false } = {}) {
+export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false } = {}) {
   if (syncRunning) {
     log.warn('Sync already running — skipping this invocation')
     return { dryRun, mode, skipped: true, reason: 'already running' }
@@ -133,7 +135,7 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
     if (mode === 'photos') {
       if (!config.fionaApiKey) throw new Error('photos needs NUXT_FIONA_API_KEY')
       const xapi = createXapiClient({ fetch: $fetch, apiKey: config.fionaApiKey, log })
-      return { mode, ...(await describePhotos({ personIds, all, strapi: buildStrapiGateway(), xapi, log })) }
+      return { mode, ...(await describePhotos({ personIds, all, probe, strapi: buildStrapiGateway(), xapi, log })) }
     }
     return await runSync({ dryRun, force, mode }, buildDeps())
   } finally {

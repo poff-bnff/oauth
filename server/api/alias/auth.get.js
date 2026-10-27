@@ -1,13 +1,13 @@
 import jwt from 'jsonwebtoken'
 
-function hasCompleteProfile(user){
-  let profile = user.user_profile
+function hasCompleteProfile (user) {
+  const profile = user.user_profile
   return profile.email && profile.firstName && profile.lastName && profile.birthdate && profile.phoneNr && profile.gender && profile.picture
 }
 
-function getCompleteProfile(user){
-  let profile = user.user_profile
-  let data = {
+function getCompleteProfile (user) {
+  const profile = user.user_profile
+  const data = {
     id: profile.id,
     email: profile.email,
     firstname: profile.firstName,
@@ -53,43 +53,41 @@ export default defineEventHandler(async (event) => {
     const oldId = await getUserIdFromToken(userCookie)
     const oldUser = await getStrapiUser(oldId)
 
-    if(newUser && oldUser){
-      if(newUser.id == oldUser.id){
+    if (newUser && oldUser) {
+      if (newUser.id == oldUser.id) {
         setCookie(event, 'state', null)
         return sendRedirect(event, redirectCookie + '&notifier=addAliasExists', 302)
       }
-      let hasProfileOld = hasCompleteProfile(oldUser)
-      let hasProfileNew = hasCompleteProfile(newUser)
+      const hasProfileOld = hasCompleteProfile(oldUser)
+      const hasProfileNew = hasCompleteProfile(newUser)
       let profileId = oldUser.user_profile.id
 
-      if(hasProfileOld && hasProfileNew){
+      if (hasProfileOld && hasProfileNew) {
         setCookie(event, 'profile_new_cookie', getCompleteProfile(newUser))
         setCookie(event, 'profile_old_cookie', getCompleteProfile(oldUser))
 
-        let params = new URLSearchParams({
+        const params = new URLSearchParams({
           redirect_uri: redirectCookie,
           new_user: newUser.id,
           old_user: oldUser.id,
-          state: stateCookie,
+          state: stateCookie
         }).toString()
         return sendRedirect(event, config.public.url + '/alias?' + params, 302)
-
-      } else if(hasProfileNew){
+      } else if (hasProfileNew) {
         profileId = newUser.user_profile.id
       }
-      let params = new URLSearchParams({
+      const params = new URLSearchParams({
         redirect_uri: redirectCookie,
         new_user: newUser.id,
         old_user: oldUser.id,
         profile: profileId,
-        state: stateCookie,
+        state: stateCookie
       }).toString()
       return sendRedirect(event, config.public.url + '/api/alias/combine?' + params, 302)
     }
 
     setCookie(event, 'state', null)
     return sendRedirect(event, redirectCookie + '&notifier=addAliasFailed', 302)
-
   } catch (error) {
     console.error(error)
 

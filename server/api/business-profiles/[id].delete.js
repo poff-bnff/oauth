@@ -1,4 +1,4 @@
-async function getOwnBusinessProfile(config, token, id, userId) {
+async function getOwnBusinessProfile (config, token, id, userId) {
   const params = new URLSearchParams()
   params.append('id', id)
   params.append('_where[user]', userId)
