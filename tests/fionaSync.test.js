@@ -469,6 +469,67 @@ describe('runSync', () => {
     expect(stats.dryRunActions[0]).toMatchObject({ action: 'CREATE', fionaPersonId: 'fp14', withheld: ['email'] })
   })
 
+  it('dry run shows, for an existing person, the Strapi and the Fiona value of every content field that would change', async () => {
+    strapi.state.users.set(500, { id: 500, email: 'old@example.com', person: 42, user_roles: [] })
+    strapi.state.people.set(42, {
+      id: 42,
+      firstName: 'Old',
+      lastName: 'Name',
+      firstNameLastName: 'Old Name',
+      eMail: 'old@example.com',
+      phoneNr: '111',
+      bio_en: 'Own bio',
+      updated_at: '2026-05-01T08:00:00.000Z',
+      festival_editions: [],
+      user: 500
+    })
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc3', 'fp3', BADGE_PRO, 'approved')))
+    fiona.state.persons.set('fp3', { firstName: 'New', lastName: 'Name', email: 'new@example.com', phone: '222', bio: 'Fiona bio', myPoffUserId: '500' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    const action = stats.dryRunActions.find(a => a.personId === 42)
+    expect(action.strapiUpdatedAt).toBe('2026-05-01T08:00:00.000Z')
+    expect(action.diff).toEqual({
+      firstName: { strapi: 'Old', fiona: 'New' },
+      firstNameLastName: { strapi: 'Old Name', fiona: 'New Name' },
+      eMail: { strapi: 'old@example.com', fiona: 'new@example.com' },
+      phoneNr: { strapi: '111', fiona: '222' },
+      bio_en: { strapi: 'Own bio', fiona: 'Fiona bio' }
+    })
+  })
+
+  it('clips long values in the dry-run comparison', async () => {
+    strapi.state.users.set(500, { id: 500, email: 'old@example.com', person: 42, user_roles: [] })
+    strapi.state.people.set(42, { id: 42, firstName: 'A', lastName: 'B', firstNameLastName: 'A B', eMail: 'old@example.com', bio_en: 'x'.repeat(1000), festival_editions: [], user: 500 })
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc3', 'fp3', BADGE_PRO, 'approved')))
+    fiona.state.persons.set('fp3', { firstName: 'A', lastName: 'B', email: 'old@example.com', bio: 'y'.repeat(1000), myPoffUserId: '500' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    const { bio_en: bio } = stats.dryRunActions.find(a => a.personId === 42).diff
+    expect(bio.strapi).toBe(`${'x'.repeat(300)}…`)
+    expect(bio.fiona).toBe(`${'y'.repeat(300)}…`)
+  })
+
+  it('has no comparison for a new person or when only relations change', async () => {
+    strapi.state.users.set(500, { id: 500, email: 'a@example.com', person: 42, user_roles: [] })
+    strapi.state.people.set(42, { id: 42, firstName: 'A', lastName: 'B', firstNameLastName: 'A B', eMail: 'a@example.com', festival_editions: [], user: 500 })
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc3', 'fp3', BADGE_TEAM, 'approved'),
+      accreditation('acc4', 'fp4', BADGE_TEAM, 'approved')
+    ))
+    fiona.state.persons.set('fp3', { firstName: 'A', lastName: 'B', email: 'a@example.com', myPoffUserId: '500' })
+    fiona.state.persons.set('fp4', { firstName: 'N', lastName: 'New', email: 'n@example.com' })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    for (const action of stats.dryRunActions) {
+      expect(action.diff).toBeUndefined()
+      expect(action.strapiUpdatedAt).toBeUndefined()
+    }
+  })
+
   it('an immediate second run changes nothing', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', bio: 'b', photo: 'x' })

@@ -85,6 +85,22 @@ function describeError (err) {
   return text
 }
 
+const COMPARED_FIELDS = ['firstName', 'lastName', 'firstNameLastName', 'eMail', 'phoneNr', 'bio_en']
+const clip = (value) => {
+  if (value === undefined || value === null) return null
+  const text = String(value)
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text
+}
+
+/** Dry run only: Strapi value next to Fiona value for each content field that would change. */
+function contentDiff (existing, payload, changed) {
+  const diff = {}
+  for (const key of COMPARED_FIELDS) {
+    if (changed.includes(key)) diff[key] = { strapi: clip(existing[key]), fiona: clip(payload[key]) }
+  }
+  return diff
+}
+
 /** Keys of `payload` whose value differs from `existing` (relations compared by id). */
 function changedFields (existing, payload) {
   const changed = []
@@ -581,7 +597,9 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         } else if (changed.length) {
           stats.persons.updated++
           log.info(`${would}UPDATE person #${existing.id} (${changed.join(', ')}) ${summary}`)
-          recordDryRun({ action: 'UPDATE', personId: existing.id, ...plan, changed })
+          const diff = contentDiff(existing, payload, changed)
+          const compare = Object.keys(diff).length ? { diff, strapiUpdatedAt: existing.updated_at || null } : {}
+          recordDryRun({ action: 'UPDATE', personId: existing.id, ...plan, changed, ...compare })
         } else {
           stats.persons.unchanged++
         }
