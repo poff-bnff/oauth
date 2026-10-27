@@ -25,7 +25,7 @@
 
 import { normalizeRules, indexRules, evaluateBadges } from './rules.js'
 import { mergeDesired, planRemovals, splitIds } from './desiredState.js'
-import { buildPersonPayload } from './personMapper.js'
+import { buildPersonPayload, valuesToClear } from './personMapper.js'
 
 export const JOB_KEY = 'accreditations'
 const RELEVANT_ENTITIES = new Set(['Accreditation', 'AccreditationBadge', 'Person'])
@@ -55,7 +55,7 @@ function newStats (dryRun, mode) {
     editions: { attached: 0, detached: 0 },
     users: { created: 0, linked: 0, confirmed: 0, unconfirmedSeen: 0, confirmedFieldMissing: 0 },
     profiles: { created: 0, updated: 0 },
-    privacy: { emailWithheld: 0, phoneWithheld: 0 },
+    privacy: { emailWithheld: 0, phoneWithheld: 0, emailCleared: 0, phoneCleared: 0 },
     customFieldKeys: {},
     build: { triggered: false, ids: [] },
     removals: { skipped: false, reason: null },
@@ -159,6 +159,8 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   const now = deps.now || (() => new Date())
   const maxRemovals = Number.isFinite(Number(config.maxRemovals)) && config.maxRemovals !== undefined ? Number(config.maxRemovals) : 50
   const maxBuildsPerRun = Number.isFinite(Number(config.maxBuildsPerRun)) && config.maxBuildsPerRun !== undefined ? Number(config.maxBuildsPerRun) : 20
+  // Strapi person ids whose existing biography the sync never overwrites (an empty one is still filled)
+  const keepBioPersonIds = new Set(splitIds(config.keepBioPersonIds).map(Number))
   const startedAt = now()
   const startedMs = Date.now()
   const stats = newStats(dryRun, mode)
@@ -557,11 +559,26 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         noPublicationOfEmail: hide.email,
         noPublicationOfPhone: hide.phone
       })
+      if (existing && existing.bio_en && keepBioPersonIds.has(Number(existing.id))) delete payload.bio_en
       const withheld = []
       if (hide.contact || hide.email) withheld.push('email')
       if (fionaPerson.phone && (hide.contact || hide.phone)) withheld.push('phone')
       if (withheld.includes('email')) stats.privacy.emailWithheld++
       if (withheld.includes('phone')) stats.privacy.phoneWithheld++
+      // a box ticked after the value was written: take the stored value off the person again
+      const clear = valuesToClear({
+        existing,
+        fionaPerson,
+        contactEmail,
+        withholdEmail: hide.contact || hide.email,
+        withholdPhone: hide.contact || hide.phone
+      })
+      Object.assign(payload, clear)
+      const cleared = []
+      if ('eMail' in clear) cleared.push('email')
+      if ('phoneNr' in clear) cleared.push('phone')
+      if (cleared.includes('email')) stats.privacy.emailCleared++
+      if (cleared.includes('phone')) stats.privacy.phoneCleared++
       Object.assign(payload, {
         fiona_person_id: fionaPersonId,
         fiona_accreditation_id: joinIds(want.accreditationIds),
@@ -589,7 +606,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
 
       if (dryRun) {
         const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
-        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}) }
+        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}), ...(cleared.length ? { cleared } : {}) }
         if (!existing) {
           stats.persons.created++
           log.info(`${would}CREATE ${summary}`)

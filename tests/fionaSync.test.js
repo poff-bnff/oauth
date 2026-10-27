@@ -408,7 +408,7 @@ describe('runSync', () => {
     const user = [...strapi.state.users.values()][0]
     expect(user.email).toBe('e@example.com')
     expect(strapi.state.profiles.get(user.id).email).toBe('e@example.com')
-    expect(stats.privacy).toEqual({ emailWithheld: 1, phoneWithheld: 0 })
+    expect(stats.privacy).toEqual({ emailWithheld: 1, phoneWithheld: 0, emailCleared: 0, phoneCleared: 0 })
   })
 
   it('"Do not publish phone info" keeps the phone off the person but writes the email', async () => {
@@ -420,7 +420,7 @@ describe('runSync', () => {
     const person = [...strapi.state.people.values()][0]
     expect(person.eMail).toBe('p@example.com')
     expect(person.phoneNr).toBeUndefined()
-    expect(stats.privacy).toEqual({ emailWithheld: 0, phoneWithheld: 1 })
+    expect(stats.privacy).toEqual({ emailWithheld: 0, phoneWithheld: 1, emailCleared: 0, phoneCleared: 0 })
   })
 
   it('"Do not publish contact details" counts as both flags', async () => {
@@ -429,7 +429,7 @@ describe('runSync', () => {
 
     const stats = await runSync({}, deps)
 
-    expect(stats.privacy).toEqual({ emailWithheld: 1, phoneWithheld: 1 })
+    expect(stats.privacy).toEqual({ emailWithheld: 1, phoneWithheld: 1, emailCleared: 0, phoneCleared: 0 })
   })
 
   it('a flag on any of a person\'s accreditations withholds the value', async () => {
@@ -528,6 +528,145 @@ describe('runSync', () => {
       expect(action.diff).toBeUndefined()
       expect(action.strapiUpdatedAt).toBeUndefined()
     }
+  })
+
+  describe('a box ticked after the value was already written', () => {
+    const seed = (personOverrides = {}) => {
+      strapi.state.users.set(600, { id: 600, email: 'old@example.com', person: 60, user_roles: [] })
+      strapi.state.people.set(60, {
+        id: 60,
+        firstName: 'Mari',
+        lastName: 'Tamm',
+        firstNameLastName: 'Mari Tamm',
+        eMail: 'mari@example.com',
+        phoneNr: '+372 555 1234',
+        fiona_person_id: 'fp60',
+        festival_editions: [],
+        user: 600,
+        ...personOverrides
+      })
+      fiona.state.persons.set('fp60', { firstName: 'Mari', lastName: 'Tamm', email: 'mari@example.com', phone: '+3725551234', myPoffUserId: '600' })
+    }
+
+    it('clears the phone the sync wrote earlier, comparing digits only', async () => {
+      seed()
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc60', 'fp60', BADGE_TEAM, 'approved', { noPublicationOfPhone: true })))
+
+      const stats = await runSync({}, deps)
+
+      const person = strapi.state.people.get(60)
+      expect(person.phoneNr).toBeNull()
+      expect(person.eMail).toBe('mari@example.com')
+      expect(stats.privacy).toEqual({ emailWithheld: 0, phoneWithheld: 1, emailCleared: 0, phoneCleared: 1 })
+    })
+
+    it('clears the email the sync wrote earlier, comparing case-insensitively', async () => {
+      seed({ eMail: 'Mari@EXAMPLE.com' })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc60', 'fp60', BADGE_TEAM, 'approved', { noPublicationOfEmail: true })))
+
+      const stats = await runSync({}, deps)
+
+      const person = strapi.state.people.get(60)
+      expect(person.eMail).toBeNull()
+      expect(person.phoneNr).toBe('+3725551234') // not withheld: Fiona's value, in Fiona's format, wins
+      expect(stats.privacy.emailCleared).toBe(1)
+    })
+
+    it('leaves a value that differs from the one in Fiona, because someone typed it themselves', async () => {
+      seed({ eMail: 'own@elsewhere.ee', phoneNr: '+372 999 0000' })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc60', 'fp60', BADGE_TEAM, 'approved', { noPublicationOfContactDetails: true })))
+
+      const stats = await runSync({}, deps)
+
+      const person = strapi.state.people.get(60)
+      expect(person.eMail).toBe('own@elsewhere.ee')
+      expect(person.phoneNr).toBe('+372 999 0000')
+      expect(stats.privacy.emailCleared).toBe(0)
+      expect(stats.privacy.phoneCleared).toBe(0)
+    })
+
+    it('a dry run names the values it would clear and writes nothing', async () => {
+      seed()
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc60', 'fp60', BADGE_TEAM, 'approved', { noPublicationOfContactDetails: true })))
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      const action = stats.dryRunActions.find(a => a.personId === 60)
+      expect(action.cleared).toEqual(['email', 'phone'])
+      expect(strapi.state.people.get(60).phoneNr).toBe('+372 555 1234')
+    })
+
+    it('a second run has nothing left to clear', async () => {
+      seed()
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc60', 'fp60', BADGE_TEAM, 'approved', { noPublicationOfPhone: true })))
+      await runSync({}, deps)
+      const writes = strapi.state.writes.length
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.writes.length).toBe(writes)
+      expect(stats.privacy.phoneCleared).toBe(0)
+    })
+  })
+
+  describe('persons whose biography the sync must keep', () => {
+    const seed = (bio) => {
+      strapi.state.users.set(700, { id: 700, email: 'esko@example.com', person: 42, user_roles: [] })
+      strapi.state.people.set(42, {
+        id: 42, firstName: 'Esko', lastName: 'Old', firstNameLastName: 'Esko Old', eMail: 'esko@example.com', bio_en: bio, festival_editions: [], user: 700
+      })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc70', 'fp70', BADGE_PRO, 'approved')))
+      fiona.state.persons.set('fp70', { firstName: 'Esko', lastName: 'Rips', email: 'esko@example.com', bio: 'Fiona bio', myPoffUserId: '700' })
+    }
+
+    it('keeps the existing biography of a listed person but still updates everything else', async () => {
+      seed('Own bio')
+      deps.config.keepBioPersonIds = '7, 42'
+
+      await runSync({}, deps)
+
+      const person = strapi.state.people.get(42)
+      expect(person.bio_en).toBe('Own bio')
+      expect(person.lastName).toBe('Rips')
+      expect(person.fiona_person_id).toBe('fp70')
+    })
+
+    it('fills the biography of a listed person when it is empty', async () => {
+      seed('')
+      deps.config.keepBioPersonIds = '42'
+
+      await runSync({}, deps)
+
+      expect(strapi.state.people.get(42).bio_en).toBe('Fiona bio')
+    })
+
+    it('overwrites the biography of a person who is not listed', async () => {
+      seed('Own bio')
+      deps.config.keepBioPersonIds = '7, 99'
+
+      await runSync({}, deps)
+
+      expect(strapi.state.people.get(42).bio_en).toBe('Fiona bio')
+    })
+
+    it('overwrites by default when no person is listed', async () => {
+      seed('Own bio')
+
+      await runSync({}, deps)
+
+      expect(strapi.state.people.get(42).bio_en).toBe('Fiona bio')
+    })
+
+    it('does not show the kept biography as a change in the dry run', async () => {
+      seed('Own bio')
+      deps.config.keepBioPersonIds = '42'
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      const action = stats.dryRunActions.find(a => a.personId === 42)
+      expect(action.changed).not.toContain('bio_en')
+      expect(action.diff).not.toHaveProperty('bio_en')
+    })
   })
 
   it('an immediate second run changes nothing', async () => {

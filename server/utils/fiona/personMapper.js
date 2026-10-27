@@ -41,3 +41,21 @@ export function buildPersonPayload ({
 
   return payload
 }
+
+const digitsOnly = value => String(value ?? '').replace(/\D/g, '')
+const sameEmail = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
+
+/**
+ * A box ticked after the sync already wrote the value: the stored email or phone
+ * must come off the person again. Only a stored value that equals what Fiona holds
+ * is cleared (phone compared by digits, email ignoring case), so a value someone
+ * typed in themselves is never touched. Returns { eMail: null } and / or { phoneNr: null }.
+ */
+export function valuesToClear ({ existing, fionaPerson, contactEmail, withholdEmail = false, withholdPhone = false }) {
+  const clear = {}
+  if (!existing) return clear
+  if (withholdEmail && existing.eMail && contactEmail && sameEmail(existing.eMail, contactEmail)) clear.eMail = null
+  const stored = digitsOnly(existing.phoneNr)
+  if (withholdPhone && stored && stored === digitsOnly(fionaPerson?.phone)) clear.phoneNr = null
+  return clear
+}

@@ -78,7 +78,8 @@ function buildDeps () {
     log,
     config: {
       maxRemovals: numberOr(config.syncMaxRemovals, 50),
-      maxBuildsPerRun: numberOr(config.syncMaxBuildsPerRun, 20)
+      maxBuildsPerRun: numberOr(config.syncMaxBuildsPerRun, 20),
+      keepBioPersonIds: config.syncKeepBioPersonIds || ''
     }
   }
 }
