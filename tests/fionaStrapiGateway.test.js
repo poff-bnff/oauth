@@ -168,6 +168,39 @@ describe('createStrapiGateway', () => {
     expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
+  it('finds an unused earlier upload of a photo by its file name: one that no person uses', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /upload/files': [{ id: 4, name: 'fiona-person-x.jpg' }, { id: 5, name: 'fiona-person-x.jpg' }],
+      'GET /people?picture=4': [{ id: 70 }],
+      'GET /people?picture=5': []
+    })
+    const id = await createStrapiGateway({ fetch, ...deps() }).findOrphanPhoto('fiona-person-x.jpg')
+    expect(id).toBe(5)
+    expect(calls[0].url).toBe(`${STRAPI}/upload/files?name=fiona-person-x.jpg&_limit=10`)
+    expect(calls.map(c => c.url)).toContain(`${STRAPI}/people?picture=4&_limit=1`)
+    expect(calls.every(c => c.headers.Authorization === 'Bearer ADMIN')).toBe(true)
+  })
+
+  it('finds nothing when every file of that name is in use, or there is none', async () => {
+    const used = fakeFetch({ 'GET /upload/files': [{ id: 4, name: 'a.jpg' }], 'GET /people?picture=4': [{ id: 70 }] })
+    expect(await createStrapiGateway({ fetch: used.fetch, ...deps() }).findOrphanPhoto('a.jpg')).toBeNull()
+    const none = fakeFetch({ 'GET /upload/files': [] })
+    expect(await createStrapiGateway({ fetch: none.fetch, ...deps() }).findOrphanPhoto('b.jpg')).toBeNull()
+  })
+
+  it('treats a failing lookup as "no unused upload" instead of failing the sync', async () => {
+    const fetch = () => { throw new Error('Strapi hiccup') }
+    expect(await createStrapiGateway({ fetch, ...deps() }).findOrphanPhoto('fiona-person-x.jpg')).toBeNull()
+  })
+
+  it('replaces the file of an existing media entry in place when given its id', async () => {
+    const { fetch, calls } = fakeFetch({ 'POST /upload?id=55': [{ id: 55, name: 'R_Mari_Maasikas' }] })
+    const id = await createStrapiGateway({ fetch, ...deps() }).uploadPhoto(Buffer.from('jpg'), 'R_Mari_Maasikas.jpg', { replaceId: 55 })
+    expect(id).toBe(55)
+    expect(calls[0].url).toBe(`${STRAPI}/upload?id=55`)
+    expect(calls[0].body.get('files').name).toBe('R_Mari_Maasikas.jpg')
+  })
+
   it('uploads a photo as multipart and returns the file id', async () => {
     const { fetch, calls } = fakeFetch({ 'POST /upload': [{ id: 55 }] })
     const id = await createStrapiGateway({ fetch, ...deps() }).uploadPhoto(Buffer.from('jpg'), 'fiona-person-1.jpg')

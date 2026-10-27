@@ -163,10 +163,30 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return { created: false, updated }
     },
 
-    async uploadPhoto (buffer, filename) {
+    /**
+     * An unused earlier upload under this file name: a media entry of that name that no person uses as its picture.
+     * (Strapi stores the file re-encoded, so size is no reliable check; "no person uses it" is.) Used to pick up the
+     * photos of a run that uploaded them but did not attach them. Any failure counts as "none".
+     */
+    async findOrphanPhoto (filename) {
+      try {
+        const files = await get(`/upload/files?name=${encodeURIComponent(filename)}&_limit=10`)
+        for (const file of (Array.isArray(files) ? files : []).filter(item => item?.name === filename)) {
+          const users = await get(`/people?picture=${encodeURIComponent(file.id)}&_limit=1`)
+          if (!Array.isArray(users) || users.length === 0) return file.id
+        }
+        return null
+      } catch (err) {
+        log.warn?.(`[fionaSync] lookup of an unused upload of ${filename} failed: ${err?.message || err}`)
+        return null
+      }
+    },
+
+    /** Upload a photo; with replaceId the file of that media entry is replaced in place (same id, new name and sizes). */
+    async uploadPhoto (buffer, filename, { replaceId = null } = {}) {
       const form = new FormData()
       form.append('files', new Blob([buffer], { type: 'image/jpeg' }), filename)
-      const uploaded = await post('/upload', form)
+      const uploaded = await post(replaceId ? `/upload?id=${encodeURIComponent(replaceId)}` : '/upload', form)
       const file = first(uploaded)
       if (!file?.id) log.warn?.(`[fionaSync] photo upload for ${filename} returned no file id`)
       return file?.id ?? null
