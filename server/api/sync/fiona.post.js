@@ -23,6 +23,8 @@
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
+ *                Add "testScope": "new" to test only persons Strapi does not hold yet (the creation), or "existing" for
+ *                only those it already holds (the adoption); the default is both.
  *                Any run can be started with "background": true: the answer comes at once and the run goes on.
  *                Ask { "mode": "status" } for the progress of the run that is going and the result of the last one
  *                (kept in memory only). Use it for anything that may last more than ten minutes: the platform cuts a
@@ -81,10 +83,11 @@ export default defineEventHandler(async (event) => {
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []
   const testRuleIds = Array.isArray(body?.testRuleIds) ? body.testRuleIds.map(Number).filter(Number.isFinite) : []
   const testMaxPersons = Number(body?.testMaxPersons) > 0 ? Number(body.testMaxPersons) : 0
+  const testScope = ['new', 'existing'].includes(body?.testScope) ? body.testScope : 'all'
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope })
 
   return { ok: true, stats }
 })
