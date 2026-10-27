@@ -26,6 +26,7 @@
 import { normalizeRules, indexRules, evaluateBadges } from './rules.js'
 import { mergeDesired, planRemovals, splitIds } from './desiredState.js'
 import { buildPersonPayload, valuesToClear } from './personMapper.js'
+import { headshotFileName } from './photoName.js'
 
 export const JOB_KEY = 'accreditations'
 const RELEVANT_ENTITIES = new Set(['Accreditation', 'AccreditationBadge', 'Person'])
@@ -704,8 +705,13 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       }
 
       if (photo) {
-        // a photo uploaded earlier but never attached is reused, not uploaded again
-        const fileId = (await strapi.findUploadedPhoto?.(photo.filename, photo.buffer.length)) ?? await strapi.uploadPhoto(photo.buffer, photo.filename)
+        // the photo is named R_Firstname_Lastname.jpg (Strapi makes the square sizes from the R_ prefix and the media
+        // library finds it by the name of the person). A photo of an earlier run that was uploaded under the old name
+        // fiona-person-<id>.jpg but never attached is replaced in place under the new name, not uploaded a second time.
+        const fileName = headshotFileName(fionaPerson.firstName, fionaPerson.lastName, `fiona-${fionaPersonId}`)
+        const unusedId = await strapi.findOrphanPhoto?.(photo.filename)
+        let fileId = unusedId ? await strapi.uploadPhoto(photo.buffer, fileName, { replaceId: unusedId }) : null
+        if (!fileId) fileId = unusedId || await strapi.uploadPhoto(photo.buffer, fileName)
         if (fileId) payload.picture = fileId
       }
 

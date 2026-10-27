@@ -164,25 +164,29 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
     },
 
     /**
-     * An earlier upload of the same photo that is already in the media library (same name, same size within 1.5 KB),
-     * so a photo that was uploaded but never attached is reused instead of being uploaded a second time.
-     * Any failure counts as "none": the photo is then uploaded.
+     * An unused earlier upload under this file name: a media entry of that name that no person uses as its picture.
+     * (Strapi stores the file re-encoded, so size is no reliable check; "no person uses it" is.) Used to pick up the
+     * photos of a run that uploaded them but did not attach them. Any failure counts as "none".
      */
-    async findUploadedPhoto (filename, bytes) {
+    async findOrphanPhoto (filename) {
       try {
         const files = await get(`/upload/files?name=${encodeURIComponent(filename)}&_limit=10`)
-        const hit = (Array.isArray(files) ? files : []).find(file => file?.name === filename && Math.abs(Number(file.size) * 1000 - bytes) <= 1500)
-        return hit?.id ?? null
+        for (const file of (Array.isArray(files) ? files : []).filter(item => item?.name === filename)) {
+          const users = await get(`/people?picture=${encodeURIComponent(file.id)}&_limit=1`)
+          if (!Array.isArray(users) || users.length === 0) return file.id
+        }
+        return null
       } catch (err) {
-        log.warn?.(`[fionaSync] lookup of an earlier upload of ${filename} failed: ${err?.message || err}`)
+        log.warn?.(`[fionaSync] lookup of an unused upload of ${filename} failed: ${err?.message || err}`)
         return null
       }
     },
 
-    async uploadPhoto (buffer, filename) {
+    /** Upload a photo; with replaceId the file of that media entry is replaced in place (same id, new name and sizes). */
+    async uploadPhoto (buffer, filename, { replaceId = null } = {}) {
       const form = new FormData()
       form.append('files', new Blob([buffer], { type: 'image/jpeg' }), filename)
-      const uploaded = await post('/upload', form)
+      const uploaded = await post(replaceId ? `/upload?id=${encodeURIComponent(replaceId)}` : '/upload', form)
       const file = first(uploaded)
       if (!file?.id) log.warn?.(`[fionaSync] photo upload for ${filename} returned no file id`)
       return file?.id ?? null
