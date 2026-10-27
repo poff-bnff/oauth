@@ -220,14 +220,22 @@ export function decideAutoMode (job, nowDate) {
   return { skipped: true, reason: 'not due — incremental runs are off (interval is 0) and no full run is due' }
 }
 
-export async function runSync ({ dryRun = false, force = false, mode = 'full', backlog = false } = {}, deps) {
+/**
+ * @param {object} [options.only]  a TEST run: { ruleIds, maxPersons }. Only persons that one of these rules matches are
+ *   handled, at most maxPersons are written, and no state is saved in the job entry (a test can neither start, delay
+ *   nor shorten the real import). Everything else (users, roles, editions, photos, emails, builds) is the real thing.
+ */
+export async function runSync ({ dryRun = false, force = false, mode = 'full', backlog = false, only = null } = {}, deps) {
+  if (only && !(Array.isArray(only.ruleIds) && only.ruleIds.length)) throw new Error('a test run needs at least one rule id')
   const { fiona, strapi, config = {} } = deps
   const log = deps.log || console
   const now = deps.now || (() => new Date())
   const maxRemovals = Number.isFinite(Number(config.maxRemovals)) && config.maxRemovals !== undefined ? Number(config.maxRemovals) : 50
   const maxBuildsPerRun = Number.isFinite(Number(config.maxBuildsPerRun)) && config.maxBuildsPerRun !== undefined ? Number(config.maxBuildsPerRun) : 20
   // at most this many persons are written per run (0 = no cap); the run then stops and says more work remains
-  const maxPersonsPerRun = Number.isFinite(Number(config.maxPersonsPerRun)) && config.maxPersonsPerRun !== undefined ? Number(config.maxPersonsPerRun) : 50
+  let maxPersonsPerRun = Number.isFinite(Number(config.maxPersonsPerRun)) && config.maxPersonsPerRun !== undefined ? Number(config.maxPersonsPerRun) : 50
+  const testRuleIds = only ? new Set(only.ruleIds.map(Number)) : null
+  if (only && Number(only.maxPersons) > 0) maxPersonsPerRun = Number(only.maxPersons)
   let backlogRun = Boolean(backlog)
   // Strapi person ids whose existing biography the sync never overwrites (an empty one is still filled)
   const keepBioPersonIds = new Set(splitIds(config.keepBioPersonIds).map(Number))
@@ -237,6 +245,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   deps.onStart?.(stats) // lets a caller watch the stats of a long run while it is still going
   stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios) }
   stats.backlog = { cap: maxPersonsPerRun, more: false }
+  if (only) stats.test = { ruleIds: [...testRuleIds], maxPersons: maxPersonsPerRun, outsideRules: 0 }
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
@@ -311,7 +320,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
 
   const finish = async ({ save = true } = {}) => {
     stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
-    if (save && !dryRun && job && typeof strapi.saveSyncJob === 'function') {
+    if (save && !dryRun && !only && job && typeof strapi.saveSyncJob === 'function') {
       const patch = {
         last_stats: stats,
         last_error: stats.errorMessages[0] || null,
@@ -625,9 +634,12 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   }))
 
   // 6. Upsert desired persons -----------------------------------------------
+  if (testRuleIds) stats.test.outsideRules = [...desired.values()].filter(entry => ![...entry.matchedRuleIds].some(id => testRuleIds.has(Number(id)))).length
   let written = 0 // persons this run writes: created, or updated because something differs
   for (const [fionaPersonId, want] of desired) {
     if (erroredPersonIds.has(fionaPersonId)) continue
+    // a test run handles only the persons the chosen rules match
+    if (testRuleIds && ![...want.matchedRuleIds].some(id => testRuleIds.has(Number(id)))) continue
     // the cap of persons written per run is reached: stop here and say so; the next run carries on (see decideAutoMode)
     if (!dryRun && maxPersonsPerRun > 0 && written >= maxPersonsPerRun) {
       stats.backlog.more = true
