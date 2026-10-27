@@ -143,14 +143,14 @@ describe('evaluateBadges', () => {
 describe('build options of a rule', () => {
   it('reads the build switch and the per-run limit', () => {
     const { rules } = normalizeRules([
-      rawRule({ id: 1, build_after_sync: true, build_limit_per_run: 5 }),
+      rawRule({ id: 1, target_builds: true, target_builds_limit_per_run: 5 }),
       rawRule({ id: 2 }),
-      rawRule({ id: 3, build_after_sync: true, build_limit_per_run: 0 }),
-      rawRule({ id: 4, build_after_sync: true, build_limit_per_run: '7' }),
-      rawRule({ id: 5, build_after_sync: false, build_limit_per_run: 9 }),
-      rawRule({ id: 6, build_after_sync: true, build_limit_per_run: null })
+      rawRule({ id: 3, target_builds: true, target_builds_limit_per_run: 0 }),
+      rawRule({ id: 4, target_builds: true, target_builds_limit_per_run: '7' }),
+      rawRule({ id: 5, target_builds: false, target_builds_limit_per_run: 9 }),
+      rawRule({ id: 6, target_builds: true, target_builds_limit_per_run: null })
     ])
-    expect(rules.map(r => [r.id, r.buildAfterSync, r.buildLimitPerRun])).toEqual([
+    expect(rules.map(r => [r.id, r.targetBuilds, r.targetBuildsLimitPerRun])).toEqual([
       [1, true, 5], [2, false, null], [3, true, null], [4, true, 7], [5, false, 9], [6, true, null]
     ])
   })

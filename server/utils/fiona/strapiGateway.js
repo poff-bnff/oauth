@@ -57,6 +57,10 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return await put(`/fiona-sync-jobs/${encodeURIComponent(id)}`, patch)
     },
 
+    async saveRule (id, patch) {
+      return await put(`/fiona-sync-rules/${encodeURIComponent(id)}`, patch)
+    },
+
     async getActiveGuestbookIds () {
       return await getActiveFionaGuestbooks()
     },
