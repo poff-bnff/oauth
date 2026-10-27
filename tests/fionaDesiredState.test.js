@@ -126,3 +126,18 @@ describe('planRemovals', () => {
     expect(actions).toHaveLength(0)
   })
 })
+
+describe('mergeDesired and the rules that matched in full', () => {
+  it('unions the full-profile rule ids of all accreditations of a person', () => {
+    const desired = new Map()
+    mergeDesired(desired, 'p1', { guestbookId: GB_A, accreditationId: 'a1', evaluation: evaluation({ level: 2, fullRuleIds: [1] }) })
+    mergeDesired(desired, 'p1', { guestbookId: GB_B, accreditationId: 'a2', evaluation: evaluation({ level: 2, fullRuleIds: [3, 1] }) })
+    expect([...desired.get('p1').fullRuleIds].sort()).toEqual([1, 3])
+  })
+
+  it('keeps an empty set for a basic-only person', () => {
+    const desired = new Map()
+    mergeDesired(desired, 'p2', { guestbookId: GB_A, accreditationId: 'a1', evaluation: evaluation({ level: 1 }) })
+    expect([...desired.get('p2').fullRuleIds]).toEqual([])
+  })
+})

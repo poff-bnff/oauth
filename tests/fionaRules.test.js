@@ -139,3 +139,32 @@ describe('evaluateBadges', () => {
     expect(result.matchedRuleIds).toEqual([5, 6])
   })
 })
+
+describe('build options of a rule', () => {
+  it('reads the build switch and the per-run limit', () => {
+    const { rules } = normalizeRules([
+      rawRule({ id: 1, build_after_sync: true, build_limit_per_run: 5 }),
+      rawRule({ id: 2 }),
+      rawRule({ id: 3, build_after_sync: true, build_limit_per_run: 0 }),
+      rawRule({ id: 4, build_after_sync: true, build_limit_per_run: '7' }),
+      rawRule({ id: 5, build_after_sync: false, build_limit_per_run: 9 }),
+      rawRule({ id: 6, build_after_sync: true, build_limit_per_run: null })
+    ])
+    expect(rules.map(r => [r.id, r.buildAfterSync, r.buildLimitPerRun])).toEqual([
+      [1, true, 5], [2, false, null], [3, true, null], [4, true, 7], [5, false, 9], [6, true, null]
+    ])
+  })
+
+  it('evaluation lists the rules whose full-profile statuses matched, not the basic-only matches', () => {
+    const { rules } = normalizeRules([
+      rawRule({ id: 1, badge_type_id: GUID_PRO, sync_statuses: 'approved, paid', full_profile_statuses: 'paid' }),
+      rawRule({ id: 2, badge_type_id: GUID_PRO, sync_statuses: 'approved, paid', full_profile_statuses: '' })
+    ])
+    const index = indexRules(rules)
+    const paid = evaluateBadges([{ badgeId: GUID_PRO, statusText: 'Paid' }], index)
+    expect(paid.matchedRuleIds).toEqual([1, 2])
+    expect(paid.fullRuleIds).toEqual([1])
+    const approved = evaluateBadges([{ badgeId: GUID_PRO, statusText: 'Approved' }], index)
+    expect(approved.fullRuleIds).toEqual([])
+  })
+})

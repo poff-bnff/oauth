@@ -17,7 +17,7 @@
  *
  * Phases: rules → active guestbooks + badge lists → managed-person snapshot →
  * desired state (full scan or mutations) → removal plan → upserts → remaining
- * removals → per-person site builds → job state.
+ * removals → per-rule site builds (limit per run, waiting list in the job entry) → job state.
  *
  * All external access goes through `deps.fiona` and `deps.strapi` so the
  * whole flow is testable with in-memory fakes. No Nuxt globals here.
@@ -41,6 +41,33 @@ const relationIds = list => (Array.isArray(list) ? list : []).map(relationId).fi
 const sameIds = (a, b) => joinIds(uniqueNumbers(a)) === joinIds(uniqueNumbers(b))
 const isNotFound = err => err?.statusCode === 404 || err?.status === 404 || err?.response?.status === 404
 
+/** The job's build_queue (JSON): [{ personId, ruleIds }], tolerant of anything else. */
+function normalizeBuildQueue (raw) {
+  let list = raw
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw) } catch (err) { return [] }
+  }
+  if (!Array.isArray(list)) return []
+  const byPerson = new Map()
+  for (const item of list) {
+    const personId = Number(item?.personId)
+    if (!Number.isInteger(personId) || personId <= 0) continue
+    const ruleIds = (Array.isArray(item.ruleIds) ? item.ruleIds : []).map(Number).filter(Number.isFinite)
+    const entry = byPerson.get(personId) || { personId, ruleIds: [] }
+    entry.ruleIds = uniqueNumbers([...entry.ruleIds, ...ruleIds])
+    byPerson.set(personId, entry)
+  }
+  return [...byPerson.values()]
+}
+
+/** Waiting list plus this run's candidates; only rules that still build count, entries without any are dropped. */
+function mergeBuildQueue (queue, candidates, buildRules) {
+  const merged = normalizeBuildQueue([...queue, ...candidates])
+  return merged
+    .map(entry => ({ personId: entry.personId, ruleIds: entry.ruleIds.filter(id => buildRules.has(id)) }))
+    .filter(entry => entry.ruleIds.length)
+}
+
 function newStats (dryRun, mode) {
   return {
     dryRun,
@@ -58,7 +85,7 @@ function newStats (dryRun, mode) {
     privacy: { emailWithheld: 0, phoneWithheld: 0, emailCleared: 0, phoneCleared: 0 },
     customFieldKeys: {},
     ruleRoles: [],
-    build: { triggered: false, ids: [] },
+    build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
     removals: { skipped: false, reason: null },
     incremental: null,
     editionsWithGuestbook: [],
@@ -228,6 +255,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   stats.mode = mode
 
   let scanCompleted = false
+  let buildQueue = null // the waiting list to save with the job entry; null = leave it as it is
 
   const finish = async ({ save = true } = {}) => {
     stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
@@ -238,6 +266,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         [mode === 'full' ? 'last_full_run_at' : 'last_incremental_run_at']: startedAt.toISOString()
       }
       if (scanCompleted) patch.mutation_cursor = startedAt.toISOString()
+      if (buildQueue !== null) patch.build_queue = buildQueue
       try {
         await strapi.saveSyncJob(job.id, patch)
       } catch (err) {
@@ -528,7 +557,11 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   if (plan.skipped) warn(plan.reason)
   const actionByFionaId = new Map(plan.actions.map(action => [action.fionaPersonId, action]))
 
-  const buildIds = []
+  // Site builds: only persons changed by a rule with "build after sync" are candidates; persons the sync takes off
+  // Creative Gate are listed in removedIds and never built here.
+  const buildRules = new Map(rules.filter(rule => rule.buildAfterSync).map(rule => [rule.id, rule]))
+  const buildCandidates = []
+  const removedIds = []
 
   // 6. Upsert desired persons -----------------------------------------------
   for (const [fionaPersonId, want] of desired) {
@@ -651,6 +684,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         }
         stats.editions.attached += newlyAttached.length
         stats.editions.detached += detach.length
+        if (want.level === 2 && (!existing || changed.length) && [...want.fullRuleIds].some(id => buildRules.has(id))) stats.build.candidates++
         continue
       }
 
@@ -713,7 +747,11 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         stats.users.linked++
       }
 
-      if ((want.level === 2 && personChanged) || detach.length) buildIds.push(Number(person.id))
+      if (detach.length) removedIds.push(Number(person.id))
+      if (want.level === 2 && personChanged) {
+        const ruleIds = [...want.fullRuleIds].filter(id => buildRules.has(id))
+        if (ruleIds.length) buildCandidates.push({ personId: Number(person.id), ruleIds })
+      }
     } catch (err) {
       fail(`person ${fionaPersonId}`, err)
     }
@@ -754,7 +792,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         const nextRoles = uniqueNumbers(currentRoles.filter(id => !action.removeRoleIds.includes(Number(id))))
         if (!sameIds(currentRoles, nextRoles)) await strapi.setUserRoles(userId, nextRoles)
       }
-      buildIds.push(Number(person.id))
+      removedIds.push(Number(person.id))
       log.info(label)
     } catch (err) {
       fail(`removal for person #${person.id}`, err)
@@ -762,19 +800,45 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
   }
 
   // 8. Builds ----------------------------------------------------------------
-  stats.build.ids = uniqueNumbers(buildIds)
-  if (!dryRun && stats.build.ids.length) {
-    if (stats.build.ids.length <= maxBuildsPerRun) {
-      for (const id of stats.build.ids) {
-        try {
-          await strapi.updatePerson(id, { fiona_synced_at: now().toISOString() }) // no skipbuild → per-person site build
-        } catch (err) {
-          fail(`build touch for person #${id}`, err)
-        }
+  // Each rule builds at most its limit of changed persons per run (empty limit = the global default); the rest wait
+  // in the job's build_queue for the next runs. Persons the sync takes off Creative Gate are never built here: they
+  // leave the site at the next manual full build, so a mistake in Fiona or in the automation cannot take pages away.
+  stats.build.removedWithoutBuild = uniqueNumbers(removedIds)
+  if (stats.build.removedWithoutBuild.length) {
+    warn(`${stats.build.removedWithoutBuild.length} persons were taken off Creative Gate — their pages stay on the site until your next full build + publish`)
+  }
+  const waitingBefore = normalizeBuildQueue(job?.build_queue)
+  if (dryRun) {
+    stats.build.queued = mergeBuildQueue(waitingBefore, [], buildRules).length
+  } else {
+    stats.build.candidates = buildCandidates.length
+    const allowance = new Map([...buildRules].map(([id, rule]) => [id, rule.buildLimitPerRun ?? maxBuildsPerRun]))
+    const waiting = []
+    const built = []
+    for (const entry of mergeBuildQueue(waitingBefore, buildCandidates, buildRules)) {
+      const ruleId = entry.ruleIds.find(id => allowance.get(id) > 0)
+      if (ruleId === undefined) {
+        waiting.push(entry)
+        continue
       }
-      stats.build.triggered = true
-    } else {
-      warn(`${stats.build.ids.length} persons changed, above the per-run build cap of ${maxBuildsPerRun} — run a full build + publish from the Strapi admin`)
+      allowance.set(ruleId, allowance.get(ruleId) - 1)
+      try {
+        await strapi.updatePerson(entry.personId, { fiona_synced_at: now().toISOString() }) // no skipbuild → per-person site build
+        built.push(entry.personId)
+      } catch (err) {
+        fail(`build touch for person #${entry.personId}`, err)
+      }
+    }
+    stats.build.ids = built
+    stats.build.triggered = built.length > 0
+    stats.build.queued = waiting.length
+    // the waiting list lives in the job entry's build_queue field; an entry without that field (not created yet)
+    // cannot keep it, and writing an unknown field must not break saving the rest of the job state
+    if (job && 'build_queue' in job && typeof strapi.saveSyncJob === 'function') {
+      buildQueue = waiting
+      if (waiting.length) log.info(`${built.length} persons built now, ${waiting.length} wait for the next runs`)
+    } else if (waiting.length) {
+      warn(`${waiting.length} persons are not built yet and the fiona-sync-job entry has no build_queue field to keep them waiting — run a full build + publish from the Strapi admin`)
     }
   }
 
