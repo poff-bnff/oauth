@@ -79,6 +79,36 @@ describe('describePhotos', () => {
     expect(result.errors).toEqual([{ personId: 10, message: 'Fiona down' }])
   })
 
+  it('with probe: true it also tries to fetch the Headshot and the biography and says how that went, without returning any content', async () => {
+    const { strapi, xapi } = fakes()
+    xapi.getUnpublishedHeadshot = (id, accreditationIds) => (id === 'fp-10' ? { buffer: Buffer.from('12345'), fileName: 'h.jpg', choice: 'only', otherFiles: 0, accreditationIds } : null)
+    xapi.getUnpublishedBiography = ids => (ids.includes('acc-a') ? { text: 'A short biography' } : null)
+
+    const result = await describePhotos({ personIds: [10, 11], probe: true, strapi, xapi, log: silent })
+
+    expect(result.persons[0].headshot).toEqual({ ok: true, bytes: 5, fileName: 'h.jpg', choice: 'only', otherFiles: 0 })
+    expect(result.persons[0].biography).toEqual({ ok: true, chars: 17 })
+    expect(result.persons[1].headshot).toEqual({ ok: false, reason: 'no Headshot image' })
+    expect(result.persons[1].biography).toEqual({ ok: false, reason: 'no Biography memo' })
+    expect(JSON.stringify(result)).not.toMatch(/A short biography/)
+  })
+
+  it('with probe: true a failing fetch is reported with its message, not thrown', async () => {
+    const { strapi, xapi } = fakes()
+    xapi.getUnpublishedHeadshot = () => { throw new Error('download failed: HTTP 403') }
+    xapi.getUnpublishedBiography = () => null
+
+    const result = await describePhotos({ personIds: [10], probe: true, strapi, xapi, log: silent })
+
+    expect(result.persons[0].headshot).toEqual({ ok: false, error: 'download failed: HTTP 403' })
+  })
+
+  it('probe: true is limited to 10 persons because it downloads files', async () => {
+    const { strapi, xapi } = fakes()
+    strapi.findManagedPeople = () => Array.from({ length: 11 }, (_, i) => ({ id: 100 + i, firstName: 'P', lastName: String(i), fiona_person_id: `fp-${i}`, fiona_accreditation_id: '' }))
+    await expect(describePhotos({ all: true, probe: true, strapi, xapi, log: silent })).rejects.toThrow(/at most 10/)
+  })
+
   it('refuses more than 100 persons in one call', async () => {
     const { strapi, xapi } = fakes()
     await expect(describePhotos({ personIds: Array.from({ length: 101 }, (_, i) => i + 1), strapi, xapi, log: silent })).rejects.toThrow(/at most 100/)

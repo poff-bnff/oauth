@@ -1,7 +1,6 @@
 // helpful article: https://www.freecodecamp.org/news/handle-file-uploads-on-the-backend-in-node-js-nuxt/
 
 export default defineEventHandler(async (event) => {
-
   const flatPostData = await getFlatPostData(event)
 
   const formType = flatPostData.addProType
@@ -23,8 +22,8 @@ export default defineEventHandler(async (event) => {
   }
   try {
     console.log(`api::addpro ${formType} PUT - sending postData:`, postData) // eslint-disable-line no-console
-    if (user['ok_to_contact'] != flatPostData['ok_to_contact']) {
-      await setStrapiUser({ 'id': user.id, 'ok_to_contact': flatPostData['ok_to_contact'] })
+    if (user.ok_to_contact != flatPostData.ok_to_contact) {
+      await setStrapiUser({ id: user.id, ok_to_contact: flatPostData.ok_to_contact })
     }
 
     if (formType == 'organisation') {
@@ -41,13 +40,13 @@ export default defineEventHandler(async (event) => {
     returnValue.newCollectionIds = newCollectionIds
   } catch (error) {
     console.log(`api::addPro (${formType}) PUT - error ${error}`) // eslint-disable-line no-console
-    throw createError({ statusCode: 500, statusMessage: `Error setting ${formType}`})
+    throw createError({ statusCode: 500, statusMessage: `Error setting ${formType}` })
   }
   console.log('api::addpro return', returnValue)
   return returnValue
 })
 
-async function getFlatPostData(event) {
+async function getFlatPostData (event) {
   const body = await readMultipartFormData(event)
 
   const bodyData = JSON.parse(
@@ -64,10 +63,10 @@ async function getFlatPostData(event) {
   for (let ix = 0; ix < body.length; ix++) {
     flatPostData[body[ix].name] = body[ix]
   }
-  return flatPostData;
+  return flatPostData
 }
 
-function validateAllowedFormType(formType) {
+function validateAllowedFormType (formType) {
   if (formType !== 'organisation' && formType !== 'person') {
     console.log(`api::addPro validateError not suported type: ${formType}`)
     throw createError({
@@ -77,9 +76,9 @@ function validateAllowedFormType(formType) {
   }
 }
 
-function validateUserIsFound(user) {
+function validateUserIsFound (user) {
   if (!user) {
-    console.log(`api::addPro validateError User not found`)
+    console.log('api::addPro validateError User not found')
     throw createError({
       statusCode: 404,
       statusMessage: 'person::PUT User not Found'
@@ -87,7 +86,7 @@ function validateUserIsFound(user) {
   }
 }
 
-async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
+async function getOrganisationPostData (flatPostData, user, newCollectionIds) {
   if (!user.organisation || Object.keys(user.organisation).length === 0) {
     console.log(`api::organisation GET - creating organisation for user ${user.id}`) // eslint-disable-line no-console
     user.organisation = await createStrapiOrganisation(user)
@@ -97,7 +96,7 @@ async function getOrganisationPostData(flatPostData, user, newCollectionIds) {
   return await getAddProOrganisationPostData(flatPostData, originalObject, newCollectionIds)
 }
 
-async function getPersonPostData(flatPostData, user, newCollectionIds) {
+async function getPersonPostData (flatPostData, user, newCollectionIds) {
   if (!user.person || Object.keys(user.person).length === 0) {
     console.log(`api::person GET - creating person for user ${user.id}`) // eslint-disable-line no-console
     user.person = await createStrapiPerson(user)
@@ -105,5 +104,4 @@ async function getPersonPostData(flatPostData, user, newCollectionIds) {
 
   const originalObject = await getStrapiPerson(user.person.id)
   return await getAddProPersonPostData(flatPostData, originalObject, newCollectionIds)
-
 }

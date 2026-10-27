@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
   return result
 })
 
-function ownerValidationMessage(result) {
+function ownerValidationMessage (result) {
   if (result.error === 'ownerProfileIncomplete') {
     return `This existing user profile is missing: ${(result.missing || []).join(', ')}`
   }

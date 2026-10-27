@@ -4,7 +4,7 @@ export default defineEventHandler(async (event) => {
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
   if (!user.person || Object.keys(user.person).length === 0) {
-    return {'type': 'new'}
+    return { type: 'new' }
   }
 
   let person = await getStrapiPerson(user.person.id)

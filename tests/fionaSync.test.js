@@ -922,6 +922,15 @@ describe('runSync', () => {
     })
   })
 
+  it('shows in its stats whether the unpublished photo and biography switches are on', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith())
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: false, unpublishedBios: false })
+
+    deps.config.unpublishedPhotos = true
+    deps.config.unpublishedBios = true
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true })
+  })
+
   it('an immediate second run changes nothing', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', bio: 'b', photo: 'x' })
