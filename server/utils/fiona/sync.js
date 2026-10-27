@@ -88,7 +88,7 @@ function newStats (dryRun, mode) {
     build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
     switches: { unpublishedPhotos: false, unpublishedBios: false },
     photos: { published: 0, headshot: 0, missing: [] },
-    bios: { published: 0, accreditation: 0, missing: [] },
+    bios: { accreditation: 0, missing: [] },
     removals: { skipped: false, reason: null },
     incremental: null,
     editionsWithGuestbook: [],
@@ -573,7 +573,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
     try {
       const fionaPerson = await fiona.getPerson(fionaPersonId, { accreditationIds: [...want.accreditationIds], level: want.level })
       if (want.level === 2) {
-        if (fionaPerson.bio) stats.bios[fionaPerson.bioSource === 'accreditation' ? 'accreditation' : 'published']++
+        if (fionaPerson.bio) stats.bios.accreditation++
         else if (stats.bios.missing.length < 100) stats.bios.missing.push([fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' '))
       }
 
@@ -626,7 +626,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
         noPublicationOfPhone: hide.phone
       })
       if (existing && existing.bio_en && keepBioPersonIds.has(Number(existing.id))) delete payload.bio_en
-      // a biography from the accreditation card (not published) only fills an empty one; it never replaces a text that is already there
+      // a biography from the accreditation card only fills an empty one; it never replaces a text that is already there
       if (existing && existing.bio_en && fionaPerson.bioSource === 'accreditation') delete payload.bio_en
       const withheld = []
       if (hide.contact || hide.email) withheld.push('email')
@@ -676,7 +676,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
 
       if (dryRun) {
         const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
-        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}), ...(cleared.length ? { cleared } : {}), ...(photo?.source ? { photo: photo.source } : {}), ...(want.level === 2 && fionaPerson.bio ? { bio: fionaPerson.bioSource === 'accreditation' ? 'accreditation' : 'published', bioChars: String(fionaPerson.bio).length } : {}), ...(photo?.choice === 'default' || photo?.choice === 'latest' ? { photoChoice: photo.choice } : {}) }
+        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}), ...(cleared.length ? { cleared } : {}), ...(photo?.source ? { photo: photo.source } : {}), ...(want.level === 2 && fionaPerson.bio ? { bio: 'accreditation', bioChars: String(fionaPerson.bio).length } : {}), ...(photo?.choice === 'default' || photo?.choice === 'latest' ? { photoChoice: photo.choice } : {}) }
         if (!existing) {
           stats.persons.created++
           log.info(`${would}CREATE ${summary}`)
