@@ -234,6 +234,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   const startedAt = now()
   const startedMs = Date.now()
   const stats = newStats(dryRun, mode)
+  deps.onStart?.(stats) // lets a caller watch the stats of a long run while it is still going
   stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios) }
   stats.backlog = { cap: maxPersonsPerRun, more: false }
   const would = dryRun ? 'DRY RUN would ' : ''
@@ -251,12 +252,40 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
 
   // 0. Job entry + mode ------------------------------------------------------
   let job = null
-  if (typeof strapi.getSyncJob === 'function') {
-    try {
+  let jobDuplicates = []
+  try {
+    if (typeof strapi.getSyncJobs === 'function') {
+      const jobs = await strapi.getSyncJobs(JOB_KEY)
+      job = jobs[0] || null
+      jobDuplicates = jobs.slice(1).map(entry => entry.id)
+    } else if (typeof strapi.getSyncJob === 'function') {
       job = await strapi.getSyncJob(JOB_KEY)
-    } catch (err) {
-      fail('could not read the fiona-sync-job entry', err)
     }
+  } catch (err) {
+    fail('could not read the fiona-sync-job entry', err)
+  }
+  stats.job = job
+    ? {
+        id: job.id,
+        name: job.name ?? null,
+        enabled: job.enabled,
+        incrementalIntervalMinutes: job.incremental_interval_minutes ?? null,
+        fullRunHour: job.full_run_hour ?? null,
+        lastFullRunAt: job.last_full_run_at ?? null,
+        lastIncrementalRunAt: job.last_incremental_run_at ?? null,
+        duplicates: jobDuplicates
+      }
+    : null
+  const duplicateMessage = jobDuplicates.length
+    ? `${jobDuplicates.length + 1} fiona-sync-job entries share the key "${JOB_KEY}" (#${[job.id, ...jobDuplicates].join(', #')}): which one counts is not defined, delete the ones you do not want`
+    : null
+  if (duplicateMessage) warn(duplicateMessage)
+  if (mode === 'auto' && duplicateMessage) {
+    // never let a second entry start a run nobody expects: the automatic mode stays off until only one is left
+    stats.skipped = true
+    stats.reason = `${duplicateMessage} — the automatic mode is off until only one is left`
+    stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
+    return stats
   }
   if (mode === 'auto') {
     const decision = decideAutoMode(job, startedAt)

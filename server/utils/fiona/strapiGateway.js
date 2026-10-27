@@ -49,6 +49,12 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
     },
 
     /** The `fiona-sync-job` entry for a job key (cursor, interval, on/off), or null. */
+    /** All job entries with this key, lowest id first: more than one is a mistake the sync reports. */
+    async getSyncJobs (key) {
+      const list = await getOrNull(`/fiona-sync-jobs?key=${encodeURIComponent(key)}&_sort=id:asc&_limit=5`)
+      return Array.isArray(list) ? list : []
+    },
+
     async getSyncJob (key) {
       return first(await getOrNull(`/fiona-sync-jobs?key=${encodeURIComponent(key)}&_limit=1`)) // 404 = collection not created yet
     },

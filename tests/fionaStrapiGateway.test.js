@@ -55,6 +55,14 @@ describe('createStrapiGateway', () => {
     expect(await gateway.getSyncJob('films')).toBeNull()
   })
 
+  it('lists all job entries with a key, lowest id first, so a second entry is noticed', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /fiona-sync-jobs?key=accreditations': [{ id: 1, enabled: true }, { id: 2, enabled: false }] })
+    const jobs = await createStrapiGateway({ fetch, ...deps() }).getSyncJobs('accreditations')
+    expect(jobs.map(j => j.id)).toEqual([1, 2])
+    expect(calls[0].url).toBe(`${STRAPI}/fiona-sync-jobs?key=accreditations&_sort=id:asc&_limit=5`)
+    expect(await createStrapiGateway({ fetch: fakeFetch().fetch, ...deps() }).getSyncJobs('films')).toEqual([])
+  })
+
   it('saves a job patch with the admin token', async () => {
     const { fetch, calls } = fakeFetch({ 'PUT /fiona-sync-jobs/4': { id: 4 } })
     await createStrapiGateway({ fetch, ...deps() }).saveSyncJob(4, { mutation_cursor: '2026-09-13T10:00:00.000Z', last_error: null })
