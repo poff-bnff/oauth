@@ -25,7 +25,14 @@ export async function describePhotos ({ personIds = [], all = false, strapi, xap
     if (!ids.length) throw new Error('describePhotos needs personIds or all: true')
     if (ids.length > MAX_PERSONS) throw new Error(`describePhotos handles at most ${MAX_PERSONS} persons per call`)
     for (const id of ids) {
-      const person = await strapi.findPersonById(id)
+      let person
+      try {
+        person = await strapi.findPersonById(id)
+      } catch (err) {
+        // Strapi answers 500, not 404, for an id that does not exist
+        skipped.push({ personId: id, reason: `could not be read: ${err?.message || err}` })
+        continue
+      }
       if (!person) skipped.push({ personId: id, reason: 'not found' })
       else if (!person.fiona_person_id) skipped.push({ personId: id, reason: 'not managed by the Fiona sync' })
       else people.push(person)

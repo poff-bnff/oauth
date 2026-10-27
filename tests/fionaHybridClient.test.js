@@ -90,4 +90,49 @@ describe('createHybridClient', () => {
     expect(await client.getMyPoffUserId('p')).toBeNull()
     expect(await client.getPersonPhoto('p')).toBeNull()
   })
+
+  describe('photos', () => {
+    const opts = { accreditationIds: ['acc'], level: 2 }
+    const xapiWithHeadshot = (tracker, overrides = {}) => xapiStub(tracker, {
+      getUnpublishedHeadshot: (...a) => { tracker.record('xapi.getUnpublishedHeadshot')(...a); return { buffer: Buffer.from('hs'), filename: 'fiona-person-p.jpg', fileName: 'h.jpg', otherFiles: 0 } },
+      ...overrides
+    })
+
+    it('uses the published photo first and never asks the XAPI', async () => {
+      const tracker = calls()
+      const client = createHybridClient({ publication: publicationStub(), xapi: xapiWithHeadshot(tracker), allowUnpublishedPhotos: true, log: { warn () {} } })
+      const photo = await client.getPersonPhoto('p', opts)
+      expect(photo).toMatchObject({ source: 'published' })
+      expect(tracker.log).toEqual([])
+    })
+
+    it('without the switch a person without a published photo gets none and the XAPI is not asked', async () => {
+      const tracker = calls()
+      const client = createHybridClient({ publication: publicationStub({ getPersonPhoto: () => null }), xapi: xapiWithHeadshot(tracker), log: { warn () {} } })
+      expect(await client.getPersonPhoto('p', opts)).toBeNull()
+      expect(tracker.log).toEqual([])
+    })
+
+    it('with the switch on, a full-profile person without a published photo gets the XAPI Headshot, marked as such', async () => {
+      const tracker = calls()
+      const client = createHybridClient({ publication: publicationStub({ getPersonPhoto: () => null }), xapi: xapiWithHeadshot(tracker), allowUnpublishedPhotos: true, log: { warn () {} } })
+      const photo = await client.getPersonPhoto('p', opts)
+      expect(photo).toMatchObject({ source: 'headshot', filename: 'fiona-person-p.jpg' })
+      expect(tracker.log).toEqual([['xapi.getUnpublishedHeadshot', 'p', ['acc']]])
+    })
+
+    it('a basic-level person gets no XAPI lookup', async () => {
+      const tracker = calls()
+      const client = createHybridClient({ publication: publicationStub({ getPersonPhoto: () => null }), xapi: xapiWithHeadshot(tracker), allowUnpublishedPhotos: true, log: { warn () {} } })
+      expect(await client.getPersonPhoto('p', { accreditationIds: ['acc'], level: 1 })).toBeNull()
+      expect(tracker.log).toEqual([])
+    })
+
+    it('an XAPI failure leaves the person without a photo and does not stop the sync', async () => {
+      const tracker = calls()
+      const failing = xapiWithHeadshot(tracker, { getUnpublishedHeadshot: () => { throw new Error('Fiona down') } })
+      const client = createHybridClient({ publication: publicationStub({ getPersonPhoto: () => null }), xapi: failing, allowUnpublishedPhotos: true, log: { warn () {} } })
+      expect(await client.getPersonPhoto('p', opts)).toBeNull()
+    })
+  })
 })

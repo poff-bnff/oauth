@@ -9,7 +9,8 @@
  *   - no published email  → XAPI person (communication items) for the login email
  *   - no MyPoff link      → XAPI external authentications (prevents a second
  *                           login account for someone who already has one)
- * Photos are editorial content and come from the Publication API only.
+ * Photos are editorial content: the published one comes first. Only when the switch allowUnpublishedPhotos is on, a
+ * full-profile person without a published photo gets the attachment whose content type is Headshot, published or not.
  * XAPI failures never fail the sync: the published data is kept and a
  * warning is logged.
  */
@@ -23,7 +24,7 @@ async function fallback (log, label, personId, fn, fallbackValue) {
   }
 }
 
-export function createHybridClient ({ publication, xapi = null, log = console }) {
+export function createHybridClient ({ publication, xapi = null, log = console, allowUnpublishedPhotos = false }) {
   if (!publication) throw new Error('createHybridClient: publication client is required')
 
   return {
@@ -56,8 +57,12 @@ export function createHybridClient ({ publication, xapi = null, log = console })
       return await fallback(log, 'MyPoff link', personId, () => xapi.getMyPoffUserId(personId), null)
     },
 
-    async getPersonPhoto (personId) {
-      return (await publication.getPersonPhoto(personId)) || null
+    async getPersonPhoto (personId, { accreditationIds = [], level = 1 } = {}) {
+      const published = await publication.getPersonPhoto(personId)
+      if (published) return { ...published, source: 'published' }
+      if (!allowUnpublishedPhotos || level < 2 || typeof xapi?.getUnpublishedHeadshot !== 'function') return null
+      const headshot = await fallback(log, 'Headshot', personId, () => xapi.getUnpublishedHeadshot(personId, accreditationIds), null)
+      return headshot ? { ...headshot, source: 'headshot' } : null
     }
   }
 }

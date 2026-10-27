@@ -1,6 +1,6 @@
 const windows = new Map() // key -> { count, resetAt }
 
-export function hitLimit(key, max, windowMs) {
+export function hitLimit (key, max, windowMs) {
   const now = Date.now()
   let w = windows.get(key)
   if (!w || now >= w.resetAt) { w = { count: 0, resetAt: now + windowMs }; windows.set(key, w) }

@@ -25,6 +25,7 @@ function fakeFiona () {
     persons: new Map(), // id → { firstName, lastName, email, phone, bio, myPoffUserId, photo }
     failGuestbooks: new Set(),
     failPersons: new Set(),
+    photoCalls: [],
     knownGuestbooks: null, // null = same as configured guestbooks
     mutations: [] // returned by listMutations regardless of `since`
   }
@@ -78,9 +79,10 @@ function fakeFiona () {
       for (const [gbId, g] of state.guestbooks) for (const a of g.accreditations) if (a.personId === personId) out.push({ id: a.id, guestbookId: gbId })
       return out
     },
-    getPersonPhoto (personId) {
+    getPersonPhoto (personId, options) {
+      state.photoCalls.push({ personId, ...options })
       const p = state.persons.get(personId)
-      return p?.photo ? { buffer: Buffer.from(p.photo), filename: `fiona-person-${personId}.jpg` } : null
+      return p?.photo ? { buffer: Buffer.from(p.photo), filename: `fiona-person-${personId}.jpg`, source: p.photoSource, choice: p.photoChoice } : null
     }
   }
 }
@@ -799,6 +801,62 @@ describe('runSync', () => {
       const stats = await runSync({ dryRun: true }, deps)
 
       expect(stats.warnings.join('\n')).not.toMatch(/role #7/)
+    })
+  })
+
+  describe('photos', () => {
+    it('asks for the photo with the accreditation ids and the level of the person', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
+      fiona.state.persons.set('fp2', { firstName: 'A', lastName: 'A', email: 'a@a.ee', photo: 'jpg', photoSource: 'published' })
+
+      await runSync({}, deps)
+
+      expect(fiona.state.photoCalls).toEqual([{ personId: 'fp2', accreditationIds: ['acc2'], level: 2 }])
+    })
+
+    it('counts where the photos came from and names the full-profile persons that have none', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(
+        accreditation('acc2', 'fp2', BADGE_PRO, 'Paid'),
+        accreditation('acc7', 'fp7', BADGE_PRO, 'Paid'),
+        accreditation('acc8', 'fp8', BADGE_PRO, 'Paid')
+      ))
+      fiona.state.persons.set('fp2', { firstName: 'Pub', lastName: 'Lished', email: 'a@a.ee', photo: 'jpg', photoSource: 'published' })
+      fiona.state.persons.set('fp7', { firstName: 'Head', lastName: 'Shot', email: 'b@b.ee', photo: 'jpg', photoSource: 'headshot' })
+      fiona.state.persons.set('fp8', { firstName: 'No', lastName: 'Photo', email: 'c@c.ee' })
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.photos).toEqual({ published: 1, headshot: 1, missing: ['No Photo'] })
+    })
+
+    it('a person who already has a picture is not asked again', async () => {
+      strapi.state.users.set(900, { id: 900, email: 'p@p.ee', person: 90, user_roles: [] })
+      strapi.state.people.set(90, { id: 90, firstName: 'Has', lastName: 'Pic', eMail: 'p@p.ee', picture: 5, festival_editions: [], user: 900 })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc9', 'fp9', BADGE_PRO, 'Paid')))
+      fiona.state.persons.set('fp9', { firstName: 'Has', lastName: 'Pic', email: 'p@p.ee', myPoffUserId: '900', photo: 'jpg' })
+
+      await runSync({}, deps)
+
+      expect(fiona.state.photoCalls).toEqual([])
+    })
+
+    it('a dry run also says when there was a choice between several headshots and how it was made', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
+      fiona.state.persons.set('fp2', { firstName: 'Karin', lastName: 'P', email: 'a@a.ee', photo: 'jpg', photoSource: 'headshot', photoChoice: 'default' })
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.dryRunActions[0]).toMatchObject({ photo: 'headshot', photoChoice: 'default' })
+    })
+
+    it('a dry run says which source each photo would come from and writes nothing', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
+      fiona.state.persons.set('fp2', { firstName: 'Head', lastName: 'Shot', email: 'a@a.ee', photo: 'jpg', photoSource: 'headshot' })
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.dryRunActions[0]).toMatchObject({ action: 'CREATE', photo: 'headshot' })
+      expect(strapi.state.uploads).toEqual([])
     })
   })
 

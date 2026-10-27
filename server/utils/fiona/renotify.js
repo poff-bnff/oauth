@@ -27,7 +27,14 @@ export async function renotifyPersons ({ personIds, dryRun = true, editionId = C
   const result = { dryRun, notify: [], skipped: [], done: [], errors: [] }
   const candidates = []
   for (const id of ids) {
-    const person = await strapi.findPersonById(id)
+    let person
+    try {
+      person = await strapi.findPersonById(id)
+    } catch (err) {
+      // Strapi answers 500, not 404, for an id that does not exist
+      result.skipped.push({ personId: id, reason: `could not be read: ${err?.message || err}` })
+      continue
+    }
     if (!person) result.skipped.push({ personId: id, reason: 'not found' })
     else if (!person.fiona_person_id) result.skipped.push({ personId: id, reason: 'not managed by the Fiona sync' })
     else if (!editionIds(person.festival_editions).includes(editionId)) result.skipped.push({ personId: id, reason: 'does not hold the Creative Gate edition' })

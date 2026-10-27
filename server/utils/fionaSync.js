@@ -60,7 +60,7 @@ function buildFionaClient () {
       ...(config.fionaPublicationApiUrl ? { baseUrl: config.fionaPublicationApiUrl } : {}),
       log
     })
-    return createHybridClient({ publication, xapi, log })
+    return createHybridClient({ publication, xapi, log, allowUnpublishedPhotos: String(config.syncUnpublishedPhotos).toLowerCase() === 'true' })
   }
   throw new Error(`NUXT_FIONA_CLIENT=${client} is not supported — use 'xapi' or 'publication'`)
 }
