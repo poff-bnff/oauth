@@ -9,6 +9,8 @@
  *   - no published email  → XAPI person (communication items) for the login email
  *   - no MyPoff link      → XAPI external authentications (prevents a second
  *                           login account for someone who already has one)
+ * A biography is read the same way: the published one comes first; only when allowUnpublishedBios is on, a full-profile
+ * person without one gets the Biography memo from its accreditation card, published or not.
  * Photos are editorial content: the published one comes first. Only when the switch allowUnpublishedPhotos is on, a
  * full-profile person without a published photo gets the attachment whose content type is Headshot, published or not.
  * XAPI failures never fail the sync: the published data is kept and a
@@ -24,7 +26,7 @@ async function fallback (log, label, personId, fn, fallbackValue) {
   }
 }
 
-export function createHybridClient ({ publication, xapi = null, log = console, allowUnpublishedPhotos = false }) {
+export function createHybridClient ({ publication, xapi = null, log = console, allowUnpublishedPhotos = false, allowUnpublishedBios = false }) {
   if (!publication) throw new Error('createHybridClient: publication client is required')
 
   return {
@@ -38,17 +40,23 @@ export function createHybridClient ({ publication, xapi = null, log = console, a
     getAccreditationBadgeRecord: (...args) => publication.getAccreditationBadgeRecord(...args),
     getPersonAccreditations: (...args) => publication.getPersonAccreditations(...args),
 
-    async getPerson (personId) {
-      const person = await publication.getPerson(personId)
-      if (person.email || !xapi) return person
-      const extra = await fallback(log, 'person', personId, () => xapi.getPerson(personId), null)
-      if (!extra) return person
-      return {
-        ...person,
-        email: extra.email || null,
-        phone: person.phone || extra.phone || null,
-        emailSource: extra.email ? 'xapi' : undefined
+    async getPerson (personId, { accreditationIds = [], level = 1 } = {}) {
+      let result = await publication.getPerson(personId)
+      if (!result.email && xapi) {
+        const extra = await fallback(log, 'person', personId, () => xapi.getPerson(personId), null)
+        if (extra) {
+          result = {
+            ...result,
+            email: extra.email || null,
+            phone: result.phone || extra.phone || null,
+            emailSource: extra.email ? 'xapi' : undefined
+          }
+        }
       }
+      if (result.bio) return { ...result, bioSource: 'published' }
+      if (!allowUnpublishedBios || level < 2 || typeof xapi?.getUnpublishedBiography !== 'function') return result
+      const card = await fallback(log, 'biography', personId, () => xapi.getUnpublishedBiography(accreditationIds), null)
+      return card?.text ? { ...result, bio: card.text, bioSource: 'accreditation' } : result
     },
 
     async getMyPoffUserId (personId) {

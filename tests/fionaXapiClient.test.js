@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeBadges, normalizeAccreditation, normalizePerson, pickPhotoAttachment, normalizeAttachments, pickHeadshot, createXapiClient } from '../server/utils/fiona/xapiClient.js'
+import { normalizeBadges, normalizeAccreditation, normalizePerson, pickPhotoAttachment, normalizeAttachments, pickHeadshot, pickBiography, createXapiClient } from '../server/utils/fiona/xapiClient.js'
 
 describe('normalizeBadges', () => {
   it('maps the PascalCase XAPI badge shape to badgeId / badgeName / statusText', () => {
@@ -313,5 +313,91 @@ describe('createXapiClient photos', () => {
     await client.getPersonPhoto('p1')
 
     expect(calls).toContain(`${BASE}/attachment/url?token=TOK`)
+  })
+})
+
+describe('pickBiography', () => {
+  const memo = (overrides = {}) => ({ id: 'm', category: 0, type: 'Memo', contentType: 'Biography', title: 'Biography', fileName: null, createdOn: '2026-10-26T10:00:00Z', token: 'Some text', ...overrides })
+
+  it('takes a Memo whose content type is Biography, published (category 2) or not', () => {
+    expect(pickBiography([memo({ category: 0 })])).toMatchObject({ token: 'Some text' })
+    expect(pickBiography([memo({ category: 2 })])).toMatchObject({ token: 'Some text' })
+  })
+
+  it('ignores other content types, other attachment types and empty memos', () => {
+    expect(pickBiography([
+      memo({ contentType: 'Filmography' }),
+      memo({ contentType: null }),
+      memo({ type: 'Document', fileName: 'bio.pdf' }),
+      memo({ type: 'URL' }),
+      memo({ token: null })
+    ])).toBeNull()
+  })
+
+  it('matches the label ignoring case and spaces and takes the latest of several', () => {
+    const picked = pickBiography([
+      memo({ contentType: ' BIOGRAPHY ', token: 'old', createdOn: '2026-09-01T10:00:00Z' }),
+      memo({ contentType: 'biography', token: 'new', createdOn: '2026-10-26T10:00:00Z' })
+    ])
+    expect(picked.token).toBe('new')
+  })
+
+  it('returns null for nothing at all', () => {
+    expect(pickBiography([])).toBeNull()
+    expect(pickBiography(undefined)).toBeNull()
+  })
+})
+
+describe('createXapiClient biography', () => {
+  const BASE = 'https://poff-xapi.fiona-app.com/api'
+  // a Fiona file token: base64 of "S3" + binary + the bucket and key
+  const FILE_TOKEN = Buffer.concat([Buffer.from([0x53, 0x33, 0x01, 0x10, 0x00]), Buffer.from('fiona-online\u0000attachments/6304be74-09c9-4238-8e98-2a.txt')]).toString('base64')
+  const bio = (overrides = {}) => ({ Id: 'm1', Category: 0, Type: { Description: 'Memo' }, ContentType: { Description: 'Biography' }, Title: 'Biography', CreatedOn: '2026-10-26T10:00:00Z', Value: 'Tereza is a Czech producer.\r\n\r\nShe works in Prague.  ', ...overrides })
+  const make = (route) => {
+    const calls = []
+    const downloads = []
+    const fetch = (url) => {
+      calls.push(url)
+      const response = route(url.replace(BASE, ''))
+      if (response === undefined) throw new Error(`unexpected ${url}`)
+      return response
+    }
+    const download = (url) => { downloads.push(url); return Buffer.from('Biography from a file.\n') }
+    return { client: createXapiClient({ fetch, apiKey: 'KEY', log: { warn () {} }, download }), calls, downloads }
+  }
+
+  it('reads the text of a Biography memo that Fiona delivers inline, tidied up', async () => {
+    const { client, downloads } = make((path) => { if (path === '/accreditation/a1/attachments') return [bio()] })
+
+    const result = await client.getUnpublishedBiography(['a1'])
+
+    expect(result.text).toBe('Tereza is a Czech producer.\n\nShe works in Prague.')
+    expect(downloads).toEqual([])
+  })
+
+  it('downloads the text when Fiona delivers the memo as a file', async () => {
+    const { client, calls, downloads } = make((path) => {
+      if (path === '/accreditation/a1/attachments') return [bio({ Value: FILE_TOKEN })]
+      if (path.startsWith('/attachment/url?token=')) return { accessUrl: 'https://s3.example/bio.txt' }
+    })
+
+    const result = await client.getUnpublishedBiography(['a1'])
+
+    expect(result.text).toBe('Biography from a file.')
+    expect(calls[1]).toMatch(/\/attachment\/url\?token=/)
+    expect(downloads).toEqual(['https://s3.example/bio.txt'])
+  })
+
+  it('looks at the accreditation card only, never at the person card', async () => {
+    const { client, calls } = make((path) => { if (path === '/accreditation/a1/attachments') return [bio()] })
+
+    await client.getUnpublishedBiography(['a1'])
+
+    expect(calls.every(url => !url.includes('/person/'))).toBe(true)
+  })
+
+  it('returns null when no accreditation has a Biography memo', async () => {
+    const { client } = make((path) => { if (path === '/accreditation/a1/attachments') return [bio({ ContentType: { Description: 'Filmography' } })] })
+    expect(await client.getUnpublishedBiography(['a1'])).toBeNull()
   })
 })
