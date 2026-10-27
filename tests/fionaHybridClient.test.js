@@ -118,7 +118,20 @@ describe('createHybridClient', () => {
       const client = createHybridClient({ publication: publicationStub({ getPersonPhoto: () => null }), xapi: xapiWithHeadshot(tracker), allowUnpublishedPhotos: true, log: { warn () {} } })
       const photo = await client.getPersonPhoto('p', opts)
       expect(photo).toMatchObject({ source: 'headshot', filename: 'fiona-person-p.jpg' })
-      expect(tracker.log).toEqual([['xapi.getUnpublishedHeadshot', 'p', ['acc']]])
+      expect(tracker.log).toEqual([['xapi.getUnpublishedHeadshot', 'p', ['acc'], { download: true }]])
+    })
+
+    it('passes download: false on to both interfaces, so a dry run does not download anything', async () => {
+      const seen = []
+      const tracker = calls()
+      const publication = publicationStub({ getPersonPhoto: (id, o) => { seen.push(['publication', o]); return null } })
+      const xapi = xapiWithHeadshot(tracker, { getUnpublishedHeadshot: (id, ids, o) => { seen.push(['xapi', o]); return { buffer: null, filename: 'f.jpg' } } })
+      const client = createHybridClient({ publication, xapi, allowUnpublishedPhotos: true, log: { warn () {} } })
+
+      const photo = await client.getPersonPhoto('p', { accreditationIds: ['acc'], level: 2, download: false })
+
+      expect(photo).toMatchObject({ source: 'headshot' })
+      expect(seen).toEqual([['publication', { download: false }], ['xapi', { download: false }]])
     })
 
     it('a basic-level person gets no XAPI lookup', async () => {

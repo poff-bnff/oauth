@@ -66,11 +66,11 @@ export function createHybridClient ({ publication, xapi = null, log = console, a
       return await fallback(log, 'MyPoff link', personId, () => xapi.getMyPoffUserId(personId), null)
     },
 
-    async getPersonPhoto (personId, { accreditationIds = [], level = 1 } = {}) {
-      const published = await publication.getPersonPhoto(personId)
+    async getPersonPhoto (personId, { accreditationIds = [], level = 1, download = true } = {}) {
+      const published = await publication.getPersonPhoto(personId, { download })
       if (published) return { ...published, source: 'published' }
       if (!allowUnpublishedPhotos || level < 2 || typeof xapi?.getUnpublishedHeadshot !== 'function') return null
-      const headshot = await fallback(log, 'Headshot', personId, () => xapi.getUnpublishedHeadshot(personId, accreditationIds), null)
+      const headshot = await fallback(log, 'Headshot', personId, () => xapi.getUnpublishedHeadshot(personId, accreditationIds, { download }), null)
       return headshot ? { ...headshot, source: 'headshot' } : null
     }
   }
