@@ -86,6 +86,7 @@ function newStats (dryRun, mode) {
     customFieldKeys: {},
     ruleRoles: [],
     build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
+    photos: { published: 0, headshot: 0, missing: [] },
     removals: { skipped: false, reason: null },
     incremental: null,
     editionsWithGuestbook: [],
@@ -653,10 +654,12 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
       let photo = null
       if (!existing?.picture) {
         try {
-          photo = await fiona.getPersonPhoto(fionaPersonId)
+          photo = await fiona.getPersonPhoto(fionaPersonId, { accreditationIds: [...want.accreditationIds], level: want.level })
         } catch (err) {
           warn(`person ${fionaPersonId}: photo unavailable (${err.message})`)
         }
+        if (photo) stats.photos[photo.source === 'headshot' ? 'headshot' : 'published']++
+        else if (want.level === 2 && stats.photos.missing.length < 100) stats.photos.missing.push([fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' '))
       }
 
       const changed = existing ? changedFields(existing, payload) : null
@@ -664,7 +667,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full' } 
 
       if (dryRun) {
         const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
-        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}), ...(cleared.length ? { cleared } : {}) }
+        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}), ...(cleared.length ? { cleared } : {}), ...(photo?.source ? { photo: photo.source } : {}), ...(photo?.choice === 'default' || photo?.choice === 'latest' ? { photoChoice: photo.choice } : {}) }
         if (!existing) {
           stats.persons.created++
           log.info(`${would}CREATE ${summary}`)

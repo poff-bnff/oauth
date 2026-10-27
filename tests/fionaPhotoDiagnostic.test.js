@@ -58,6 +58,17 @@ describe('describePhotos', () => {
     expect(result.skipped).toEqual([{ personId: 12, reason: 'not managed by the Fiona sync' }, { personId: 99, reason: 'not found' }])
   })
 
+  it('skips a person id Strapi cannot read and carries on with the rest', async () => {
+    const { strapi, xapi } = fakes()
+    const original = strapi.findPersonById
+    strapi.findPersonById = (id) => { if (Number(id) === 7) throw new Error('500 Internal Server Error'); return original(id) }
+
+    const result = await describePhotos({ personIds: [7, 11], strapi, xapi, log: silent })
+
+    expect(result.skipped).toEqual([{ personId: 7, reason: 'could not be read: 500 Internal Server Error' }])
+    expect(result.persons.map(p => p.personId)).toEqual([11])
+  })
+
   it('keeps going when Fiona fails for one person and reports the error', async () => {
     const { strapi, xapi } = fakes()
     xapi.listPersonAttachments = (id) => { if (id === 'fp-10') throw new Error('Fiona down'); return [] }

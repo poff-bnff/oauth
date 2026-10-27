@@ -1,13 +1,14 @@
 import { URLSearchParams } from 'url'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
+import { isUndeliverableEmail } from '../../utils/emailRules.js'
 import { CART_LIMITS } from './cartLimits.js'
 import { userPictureBaseName } from './userPicture.js'
-import { isUndeliverableEmail } from '../../utils/emailRules.js'
+import { checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
 
 const config = useRuntimeConfig()
 
-const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59;
+const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59
 
 const STRAPI_TOKEN = {
   token: null,
@@ -103,7 +104,7 @@ export async function emailInUse (email) {
 // const getStrapiAdminToken = async () => { ... };
 
 // A simple delay utility for retry logic
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 // --- STRAPI ROLE UTILITY ---
 
@@ -174,31 +175,31 @@ export async function fetchFionaBadges (guestbookId, userId) {
 
   // 1. Group the badges by name and collect unique statuses using a Map/Object
   const groupedBadgesMap = fionaBadges.reduce((acc, badge) => {
-    const badgeName = badge.GuestbookBadge?.Description;
-    const statusDescription = badge.Status?.Description;
+    const badgeName = badge.GuestbookBadge?.Description
+    const statusDescription = badge.Status?.Description
 
     if (!badgeName || !statusDescription) {
-        return acc;
+      return acc
     }
 
     if (!acc[badgeName]) {
       acc[badgeName] = {
         badge_name: badgeName,
         statuses: new Set()
-      };
+      }
     }
-    acc[badgeName].statuses.add(statusDescription);
+    acc[badgeName].statuses.add(statusDescription)
 
-    return acc;
-  }, {});
+    return acc
+  }, {})
 
   // 2. Convert the grouped object (which contains Sets) into the final array format
   const finalBadgesArray = Object.values(groupedBadgesMap).map(item => ({
     badge_name: item.badge_name,
     statuses: Array.from(item.statuses)
-  }));
+  }))
 
-  return finalBadgesArray;
+  return finalBadgesArray
 }
 
 export async function getActiveFionaGuestbooks () {
@@ -288,14 +289,14 @@ export async function validateUserRoles (user, allStrapiRoles, existingUserRoles
   const rolesToAssign = []
 
   // Create a quick lookup set for the IDs of the user's existing roles
-  const existingRoleIds = new Set(existingUserRoles.map(role => role.id));
+  const existingRoleIds = new Set(existingUserRoles.map(role => role.id))
 
   for (const role of allStrapiRoles) {
     const roleHasBadgesDefined = Array.isArray(role.user_badges) && role.user_badges.length > 0
 
     // Requirement 3: Skip badge-based roles for aliases
     if (isAlias && roleHasBadgesDefined) {
-        continue;
+      continue
     }
 
     if (roleHasBadgesDefined) {
@@ -337,14 +338,14 @@ export async function validateUserRoles (user, allStrapiRoles, existingUserRoles
  */
 function areRoleArraysEqual (array1, array2) {
   if (array1.length !== array2.length) {
-    return false;
+    return false
   }
 
   // Convert one array to a Set for efficient lookup
-  const set1 = new Set(array1);
+  const set1 = new Set(array1)
 
   // Check if every element in array2 is present in set1
-  return array2.every(id => set1.has(id));
+  return array2.every(id => set1.has(id))
 }
 
 // --- MASTER ORCHESTRATOR (Updated for Optimization and Resilience) ---
@@ -370,8 +371,8 @@ export async function updateUserAndAliasesRoles (mainUser) {
   }
 
   // 2. Load/Aggregate all badges ONTO the main user object (Resilience)
-  let userWithBadges = mainUser;
-  let allUserBadges = [];
+  let userWithBadges = mainUser
+  let allUserBadges = []
 
   try {
     userWithBadges = await loadFionaBadges(mainUser)
@@ -382,12 +383,12 @@ export async function updateUserAndAliasesRoles (mainUser) {
   }
 
   // --- Process Main User ---
-  const mainUserId = mainUser.id;
+  const mainUserId = mainUser.id
 
   // 3. Fetch current user details to get existing roles
   const mainUserCurrentDetails = await getStrapiUser(mainUserId)
   const mainUserExistingRoles = mainUserCurrentDetails?.user_roles || []
-  const mainUserExistingRoleIds = mainUserExistingRoles.map(role => role.id); // Array of current IDs
+  const mainUserExistingRoleIds = mainUserExistingRoles.map(role => role.id) // Array of current IDs
 
   // 4. Validate roles
   const mainUserRoleIds = await validateUserRoles(
@@ -411,18 +412,18 @@ export async function updateUserAndAliasesRoles (mainUser) {
 
   // --- Process Alias Users ---
   for (const alias of aliasUsers) {
-    const aliasId = alias.id;
+    const aliasId = alias.id
 
     // 6. Fetch current alias details to get existing roles. getStrapiUser would resolve this
     // aliasId back to the main account (mainUser is set), comparing the alias against the main's
     // roles instead of its own — getStrapiSingleUser fetches the alias record as-is.
     const aliasCurrentDetails = await getStrapiSingleUser(aliasId)
     const aliasExistingRoles = aliasCurrentDetails?.user_roles || []
-    const aliasExistingRoleIds = aliasExistingRoles.map(role => role.id); // Array of current IDs
+    const aliasExistingRoleIds = aliasExistingRoles.map(role => role.id) // Array of current IDs
 
     const aliasUserContext = {
-        id: aliasId,
-        badges: allUserBadges
+      id: aliasId,
+      badges: allUserBadges
     }
 
     // 7. Validate alias roles
@@ -436,10 +437,10 @@ export async function updateUserAndAliasesRoles (mainUser) {
     // 8. Compare and conditionally update (NEW LOGIC)
     if (aliasId && !areRoleArraysEqual(aliasRoleIds, aliasExistingRoleIds)) {
       try {
-          await setStrapiUserRoles(aliasId, aliasRoleIds)
-          console.log(`✅ Successfully updated roles (CHANGE DETECTED) for Alias User ID: ${aliasId}`)
+        await setStrapiUserRoles(aliasId, aliasRoleIds)
+        console.log(`✅ Successfully updated roles (CHANGE DETECTED) for Alias User ID: ${aliasId}`)
       } catch (error) {
-          console.error(`Error updating roles for Alias User ID: ${aliasId}`, error)
+        console.error(`Error updating roles for Alias User ID: ${aliasId}`, error)
       }
     } else {
       console.log(`ℹ️ Roles for Alias User ID: ${aliasId} are up-to-date. Skipping update.`)
@@ -575,7 +576,7 @@ export async function getStrapiUserForFiona (baseUserId, token) {
   return data
 }
 
-export async function getStrapiUser(id) {
+export async function getStrapiUser (id) {
   if (!id) {
     throw createError({ statusCode: 404, statusMessage: 'No user ID provided' })
   }
@@ -635,9 +636,9 @@ export async function getStrapiIndividual (id) {
   }
 
   if (user.mainUser) {
-    const mainUser =  await getStrapiUser(user.mainUser.id)
+    const mainUser = await getStrapiUser(user.mainUser.id)
 
-    if(mainUser){
+    if (mainUser) {
       user.user_profile = mainUser.user_profile
     }
   }
@@ -675,7 +676,7 @@ export async function deleteStrapiUserProfile (id) {
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
-    },
+    }
   })
 }
 
@@ -746,7 +747,7 @@ export async function uploadStrapiImage (file, ref, refId, fileInfo) {
   }
 }
 
-export async function refreshStrapiImageFileInfo(id, fileInfo) {
+export async function refreshStrapiImageFileInfo (id, fileInfo) {
   console.log('ID', id)
   console.log('fileinfo', fileInfo)
   const token = await getStrapiToken()
@@ -776,7 +777,7 @@ export async function deleteStrapiImage (fileId) {
     console.log('deleteStrapiImage') // eslint-disable-line no-console
     const pics = await $fetch(`${config.strapiUrl}/upload/files/${fileId}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}` }
     })
     return pics[0]
   } catch (error) {
@@ -980,7 +981,6 @@ export function getCartOwner (event) {
 }
 
 export function getUserIdFromToken (token) {
-
   if (!token) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
 
   try {
@@ -1175,12 +1175,12 @@ function normalizeMaksekeskusMethods (methods) {
   // same bank doesn't appear twice (test server returns many country variants).
   const seen = new Set()
   return methods
-    .map(method => {
+    .map((method) => {
       const logoSlug = method.logo_url?.match(/\/([^/]+)\.[a-z]+$/i)?.[1]?.toLowerCase()
       const name = formatPaymentMethodName(logoSlug || method.name)
       return { id: buildMaksekeskusMethodId(method), name, country: method.country, logo: method.logo_url }
     })
-    .filter(method => {
+    .filter((method) => {
       if (seen.has(method.name)) return false
       seen.add(method.name)
       return true
@@ -1266,27 +1266,27 @@ export async function buyProduct (body) {
 // and Smart-ID logins create) is treated like a blank one.
 const hasDeliverableEmail = profile => !isUndeliverableEmail(profile.email)
 
-export function hasCompleteCheckoutBuyerProfile(profile = {}) {
+export function hasCompleteCheckoutBuyerProfile (profile = {}) {
   return !!(hasDeliverableEmail(profile) && profile.firstName && profile.lastName && profile.birthdate && profile.phoneNr && profile.gender && profile.picture)
 }
 
-export function missingBuyerProfileFields(profile = {}) {
+export function missingBuyerProfileFields (profile = {}) {
   return ['email', 'firstName', 'lastName', 'birthdate', 'phoneNr', 'gender', 'picture']
     .filter(field => field === 'email' ? !hasDeliverableEmail(profile) : !profile[field])
 }
 
 // 4-field check used by the "Your profile" checkout step gate and the payment-time guard.
 // Leave hasCompleteCheckoutBuyerProfile (7-field) untouched for other callers.
-export function hasCheckoutBuyerProfile(profile = {}) {
+export function hasCheckoutBuyerProfile (profile = {}) {
   return !!(hasDeliverableEmail(profile) && profile.firstName && profile.lastName && profile.picture)
 }
 
-export function missingCheckoutBuyerProfileFields(profile = {}) {
+export function missingCheckoutBuyerProfileFields (profile = {}) {
   return ['email', 'firstName', 'lastName', 'picture']
     .filter(field => field === 'email' ? !hasDeliverableEmail(profile) : !profile[field])
 }
 
-function missingOwnerProfileFields(profile = {}) {
+function missingOwnerProfileFields (profile = {}) {
   return ['email', 'firstName', 'lastName', 'picture'].filter(field => !profile[field])
 }
 
@@ -1297,7 +1297,7 @@ function missingOwnerProfileFields(profile = {}) {
 // without a photo and the recipient can change it afterwards.
 //
 // Exported for testing: this is a privacy rule, not an implementation detail.
-export function ownerProfileFieldsToFill(profile, submitted) {
+export function ownerProfileFieldsToFill (profile, submitted) {
   const current = profile || {}
   const given = submitted || {}
   const updates = {}
@@ -1313,27 +1313,27 @@ export function ownerProfileFieldsToFill(profile, submitted) {
   return updates
 }
 
-function normalizeCheckoutEmail(value) {
+function normalizeCheckoutEmail (value) {
   return String(value || '').trim().toLowerCase()
 }
 
-function validCheckoutEmail(value) {
+function validCheckoutEmail (value) {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalizeCheckoutEmail(value))
 }
 
-async function getStrapiCollectionItem(collection, id) {
+async function getStrapiCollectionItem (collection, id) {
   const token = await getStrapiAdminToken()
   return await $fetch(`${config.strapiUrl}/${collection}/${id}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
 }
 
-function normalizeStrapiList(value) {
+function normalizeStrapiList (value) {
   if (!value) return []
   return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean)
 }
 
-async function getStrapiCollectionItemsByIds(collection, ids = []) {
+async function getStrapiCollectionItemsByIds (collection, ids = []) {
   const uniqueIds = [...new Set(ids.map(id => String(id || '')).filter(Boolean))]
   if (!uniqueIds.length) return new Map()
 
@@ -1349,7 +1349,7 @@ async function getStrapiCollectionItemsByIds(collection, ids = []) {
   return new Map(normalizeStrapiList(rows).map(row => [String(row.id), row]))
 }
 
-async function getCheckoutProductCategoriesByIds(ids = []) {
+async function getCheckoutProductCategoriesByIds (ids = []) {
   const idsToFetch = [...new Set(ids.map(id => String(id || '')).filter(Boolean))]
   if (!idsToFetch.length) return new Map()
 
@@ -1365,7 +1365,7 @@ async function getCheckoutProductCategoriesByIds(ids = []) {
   return categories
 }
 
-async function getAvailableCheckoutProduct(categoryId) {
+async function getAvailableCheckoutProduct (categoryId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_limit', '1')
@@ -1383,7 +1383,7 @@ async function getAvailableCheckoutProduct(categoryId) {
   return Array.isArray(products) ? products[0] : products
 }
 
-export function getCheckoutProductCurrentPrice(category) {
+export function getCheckoutProductCurrentPrice (category) {
   const now = new Date()
   const prices = category?.priceAtPeriod || []
   const current = prices.find(item => item.startDateTime && item.endDateTime && new Date(item.startDateTime) < now && new Date(item.endDateTime) > now)
@@ -1392,14 +1392,14 @@ export function getCheckoutProductCurrentPrice(category) {
 
 // True only when today falls within an active sales period. No sales period set,
 // or all periods past/future, means the product is not for sale right now (blocked).
-export function isCategoryOnSale(category) {
+export function isCategoryOnSale (category) {
   const periods = category?.salesPeriod || []
   if (!periods.length) return false
   const now = new Date()
   return periods.some(p => p.startDateTime && p.endDateTime && new Date(p.startDateTime) < now && new Date(p.endDateTime) > now)
 }
 
-async function validateCheckoutBusinessProfile(userId, billingProfileId) {
+async function validateCheckoutBusinessProfile (userId, billingProfileId) {
   if (!billingProfileId) return null
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
@@ -1411,14 +1411,14 @@ async function validateCheckoutBusinessProfile(userId, billingProfileId) {
   return Array.isArray(profiles) && profiles[0] ? profiles[0].id : null
 }
 
-export function validateCheckoutDeliveryLocation(pickupLocations, selectedLocationId) {
+export function validateCheckoutDeliveryLocation (pickupLocations, selectedLocationId) {
   const ids = (pickupLocations || []).map(location => String(location.id))
   if (!ids.length) return null
   if (!selectedLocationId) return false
   return ids.includes(String(selectedLocationId)) ? selectedLocationId : false
 }
 
-export async function validateCheckoutOwner(userId, categoryId, owner = {}) {
+export async function validateCheckoutOwner (userId, categoryId, owner = {}) {
   const productCategory = await getStrapiCollectionItem('product-categories', categoryId)
   const result = await resolveCheckoutOwner(userId, productCategory, owner, { dryRun: true })
   if (result.error) return result
@@ -1433,7 +1433,7 @@ function maskEmail (value) {
   return `${local.slice(0, 1)}***@${domain}`
 }
 
-async function resolveCheckoutOwner(userId, productCategory, owner = {}, options = {}) {
+async function resolveCheckoutOwner (userId, productCategory, owner = {}, options = {}) {
   // Traces every decision on the gift path, so one reproduction explains itself in the runtime log
   // instead of needing a devtools session. Deliberately unconditional: this path has now produced
   // two hard-to-see failures, and the cost is a couple of lines per gifted item.
@@ -1569,7 +1569,7 @@ async function resolveCheckoutOwner(userId, productCategory, owner = {}, options
 
 // `userId` is the users-permissions user id, NOT the profile id: the filename convention keys on
 // the user, and the two ids differ.
-async function uploadCheckoutOwnerPhoto(photo, profileId, email, userId) {
+async function uploadCheckoutOwnerPhoto (photo, profileId, email, userId) {
   if (!photo?.data) return null
   const match = String(photo.data).match(/^data:([^;]+);base64,(.+)$/)
   if (!match || !match[1].includes('image/')) return null
@@ -1585,7 +1585,7 @@ async function uploadCheckoutOwnerPhoto(photo, profileId, email, userId) {
 
 // owner: { userId } | { cartToken } | a bare userId (back-compat) | null (force-clear). When an owner is
 // given, only the owner's own hold is released (never someone else's reclaimed hold).
-async function clearCheckoutProductReservation(productId, owner = null) {
+async function clearCheckoutProductReservation (productId, owner = null) {
   const userId = (owner && typeof owner === 'object') ? owner.userId : owner
   const cartToken = (owner && typeof owner === 'object') ? owner.cartToken : null
   const token = await getStrapiAdminToken()
@@ -1614,7 +1614,7 @@ async function clearCheckoutProductReservation(productId, owner = null) {
   })
 }
 
-async function refreshCheckoutProductReservation(productId, userId, price) {
+async function refreshCheckoutProductReservation (productId, userId, price) {
   const token = await getStrapiAdminToken()
   const product = await $fetch(`${config.strapiUrl}/products/${productId}`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -1638,7 +1638,7 @@ async function refreshCheckoutProductReservation(productId, userId, price) {
   })
 }
 
-async function createMaksekeskusTransaction({ body, categoryId, productId, productCatSeller, price, userId, userEmail, billingProfileId, deliveryLocationId, ownerResult }) {
+async function createMaksekeskusTransaction ({ body, categoryId, productId, productCatSeller, price, userId, userEmail, billingProfileId, deliveryLocationId, ownerResult }) {
   const host = String(config.maksekeskusHost || 'https://api.test.maksekeskus.ee').replace(/\/$/, '')
   const mkUrl = host.startsWith('http') ? `${host}/v1/transactions` : `https://${host}/v1/transactions`
   const mkId = config.maksekeskusId
@@ -1691,11 +1691,11 @@ async function createMaksekeskusTransaction({ body, categoryId, productId, produ
   }
 }
 
-function buildMaksekeskusMethodId(method) {
+function buildMaksekeskusMethodId (method) {
   return [method.country, method.name].join('_').toUpperCase()
 }
 
-async function getOrCreateStatusCollectionItem(collection, status) {
+async function getOrCreateStatusCollectionItem (collection, status) {
   const token = await getStrapiAdminToken()
   const fields = ['status', 'name']
   let supportedField = null
@@ -1722,7 +1722,7 @@ async function getOrCreateStatusCollectionItem(collection, status) {
   })
 }
 
-async function getStatusCollectionItemByField(collection, field, status, token) {
+async function getStatusCollectionItemByField (collection, field, status, token) {
   const params = new URLSearchParams()
   params.append(field, status)
   params.append('_limit', '1')
@@ -1746,18 +1746,18 @@ async function getStatusCollectionItemByField(collection, field, status, token) 
 }
 
 const _cartStatusCache = new Map()
-async function getCartStatus(name) {
+async function getCartStatus (name) {
   if (_cartStatusCache.has(name)) return _cartStatusCache.get(name)
   const result = await getOrCreateStatusCollectionItem('cart-statuses', name)
   _cartStatusCache.set(name, result)
   return result
 }
 
-async function getOrderStatus(name) {
+async function getOrderStatus (name) {
   return await getOrCreateStatusCollectionItem('order-statuses', name)
 }
 
-async function resolveCheckoutDomainId(domainName) {
+async function resolveCheckoutDomainId (domainName) {
   if (!domainName) return null
   const token = await getStrapiAdminToken()
   const host = String(domainName)
@@ -1792,28 +1792,27 @@ async function resolveCheckoutDomainId(domainName) {
 }
 
 export { checkoutTimeoutSeconds, checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
-import { checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
 
-function checkoutCartProductIds(cart) {
+function checkoutCartProductIds (cart) {
   return (cart?.cartProducts || []).map(item => item.product?.id || item.product).filter(Boolean)
 }
 
-async function releaseCheckoutCartReservations(cart) {
+async function releaseCheckoutCartReservations (cart) {
   const userId = cart?.users_permissions_user?.id || cart?.users_permissions_user || null
   const cartToken = cart?.cartToken || null
   const owner = userId ? { userId } : { cartToken } // release this cart's own holds (user or guest token)
   await Promise.all(checkoutCartProductIds(cart).map(productId => clearCheckoutProductReservation(productId, owner).catch(() => null)))
 }
 
-async function refreshCheckoutCartReservations(cart, userId) {
-  await Promise.all((cart?.cartProducts || []).map(item => {
+async function refreshCheckoutCartReservations (cart, userId) {
+  await Promise.all((cart?.cartProducts || []).map((item) => {
     const productId = item.product?.id || item.product
     if (!productId) return null
     return refreshCheckoutProductReservation(productId, userId, item.priceInCart).catch(() => null)
   }))
 }
 
-async function markCheckoutCartExpired(cart) {
+async function markCheckoutCartExpired (cart) {
   if (!cart?.id) return
   const token = await getStrapiAdminToken()
   const expiredStatus = await getCartStatus('expired')
@@ -1830,20 +1829,20 @@ async function markCheckoutCartExpired(cart) {
   }).catch(() => null)
 }
 
-async function expireCheckoutCart(cart) {
+async function expireCheckoutCart (cart) {
   if (!cart) return
   await releaseCheckoutCartReservations(cart)
   await markCheckoutCartExpired(cart)
 }
 
-export async function getCleanupState() {
+export async function getCleanupState () {
   const token = await getStrapiAdminToken()
   return await $fetch(`${config.strapiUrl}/cleanup-state`, {
     headers: { Authorization: `Bearer ${token}` }
   }).catch(() => null)
 }
 
-export async function saveCleanupState(data) {
+export async function saveCleanupState (data) {
   const token = await getStrapiAdminToken()
   return await $fetch(`${config.strapiUrl}/cleanup-state`, {
     method: 'PUT',
@@ -1852,7 +1851,7 @@ export async function saveCleanupState(data) {
   }).catch(() => null)
 }
 
-export async function runStartupCartRecovery() {
+export async function runStartupCartRecovery () {
   const token = await getStrapiAdminToken()
   const activeStatus = await getCartStatus('active')
   const params = new URLSearchParams()
@@ -1875,7 +1874,7 @@ export async function runStartupCartRecovery() {
   return (Array.isArray(carts) ? carts : []).length
 }
 
-export async function expireStaleCheckoutCarts() {
+export async function expireStaleCheckoutCarts () {
   const token = await getStrapiAdminToken()
   const activeStatus = await getCartStatus('active')
   const params = new URLSearchParams()
@@ -1892,7 +1891,7 @@ export async function expireStaleCheckoutCarts() {
   return { checked: carts.length, expired: staleCarts.length }
 }
 
-async function getCurrentCheckoutCart(owner, options = {}) {
+async function getCurrentCheckoutCart (owner, options = {}) {
   if (!owner) return null
   const token = await getStrapiAdminToken()
   const activeStatus = await getCartStatus(options.status || 'active')
@@ -1917,11 +1916,11 @@ async function getCurrentCheckoutCart(owner, options = {}) {
   return cart
 }
 
-function isValidClientCartToken(token) {
+function isValidClientCartToken (token) {
   return typeof token === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(token)
 }
 
-async function resetCheckoutCartToActive(cart, overrides = {}) {
+async function resetCheckoutCartToActive (cart, overrides = {}) {
   const token = await getStrapiAdminToken()
   const activeStatus = await getCartStatus('active')
   const now = new Date().toISOString()
@@ -1941,7 +1940,7 @@ async function resetCheckoutCartToActive(cart, overrides = {}) {
   })
 }
 
-async function getUserCartAnyStatus(userId) {
+async function getUserCartAnyStatus (userId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('users_permissions_user', userId)
@@ -1951,7 +1950,7 @@ async function getUserCartAnyStatus(userId) {
   return Array.isArray(carts) ? carts[0] : carts
 }
 
-async function getCartByTokenAnyStatus(cartToken) {
+async function getCartByTokenAnyStatus (cartToken) {
   if (!isValidClientCartToken(cartToken)) return null
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
@@ -1962,7 +1961,7 @@ async function getCartByTokenAnyStatus(cartToken) {
   return Array.isArray(carts) ? carts[0] : carts
 }
 
-async function fetchCheckoutCarts(params, token) {
+async function fetchCheckoutCarts (params, token) {
   const leanParams = new URLSearchParams(params)
   leanParams.append('lean', 'checkout')
   try {
@@ -1977,7 +1976,7 @@ async function fetchCheckoutCarts(params, token) {
   }
 }
 
-async function ensureCurrentCheckoutCart(owner, body = {}) {
+async function ensureCurrentCheckoutCart (owner, body = {}) {
   const strapiToken = await getStrapiAdminToken()
   const existing = await getCurrentCheckoutCart(owner)
   if (existing) return { cart: existing, newToken: null }
@@ -2030,8 +2029,8 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
   } catch (createError) {
     let raced = null
     try {
-      raced = await getCurrentCheckoutCart(owner)
-        || (owner?.userId
+      raced = await getCurrentCheckoutCart(owner) ||
+        (owner?.userId
           ? await getUserCartAnyStatus(owner.userId)
           : await getCartByTokenAnyStatus(owner?.cartToken))
     } catch { /* lookup failed too — fall through to rethrow the original create error */ }
@@ -2056,11 +2055,11 @@ async function ensureCurrentCheckoutCart(owner, body = {}) {
   }
 }
 
-function isNumericId(value) {
+function isNumericId (value) {
   return /^\d+$/.test(String(value || ''))
 }
 
-async function fetchProductCategoryByAnyId(categoryId, codePrefix) {
+async function fetchProductCategoryByAnyId (categoryId, codePrefix) {
   const token = await getStrapiAdminToken()
   if (isNumericId(categoryId)) return await getStrapiCollectionItem('product-categories', categoryId)
 
@@ -2076,13 +2075,13 @@ async function fetchProductCategoryByAnyId(categoryId, codePrefix) {
 const _categoryCache = new Map()
 const CATEGORY_CACHE_TTL_MS = 30_000
 
-export function __clearCheckoutCaches() {
+export function __clearCheckoutCaches () {
   _categoryCache.clear()
   _lastReservationRefresh.clear()
   _paymentMethodsCache = null
 }
 
-async function getProductCategoryByAnyId(categoryId, codePrefix) {
+async function getProductCategoryByAnyId (categoryId, codePrefix) {
   const key = `${categoryId ?? ''}|${codePrefix ?? ''}`
   const hit = _categoryCache.get(key)
   if (hit && hit.expires > Date.now()) return hit.value
@@ -2093,7 +2092,7 @@ async function getProductCategoryByAnyId(categoryId, codePrefix) {
 
 // Atomically claim (reserve) products for an owner — a logged-in user (userId) OR a guest cart token
 // (cartToken). Guests now hold products just like users.
-async function claimCheckoutProducts({ category, productIds, userId, cartToken, quantity, price }) {
+async function claimCheckoutProducts ({ category, productIds, userId, cartToken, quantity, price }) {
   const token = await getStrapiAdminToken()
   const owner = userId ? { userId } : { cartToken }
   const body = (productIds && productIds.length)
@@ -2108,7 +2107,7 @@ async function claimCheckoutProducts({ category, productIds, userId, cartToken, 
 }
 
 // Move a guest's token-held products onto the now-logged-in user (one atomic UPDATE in Strapi).
-async function transferGuestReservations(cartToken, userId) {
+async function transferGuestReservations (cartToken, userId) {
   if (!cartToken || !userId) return []
   const token = await getStrapiAdminToken()
   const res = await $fetch(`${config.strapiUrl}/products/claim`, {
@@ -2119,7 +2118,7 @@ async function transferGuestReservations(cartToken, userId) {
   return res?.claimed || []
 }
 
-async function getAvailableCheckoutProducts(category, limit = 1, excludedProductIds = []) {
+async function getAvailableCheckoutProducts (category, limit = 1, excludedProductIds = []) {
   const token = await getStrapiAdminToken()
   const excluded = new Set(excludedProductIds.map(id => String(id)))
   const buildParams = (queryLimit) => {
@@ -2156,13 +2155,13 @@ async function getAvailableCheckoutProducts(category, limit = 1, excludedProduct
   return await fetchProducts(buildParams(limit + excludedProductIds.length + 5))
 }
 
-function checkoutCategoryTitle(category, locale = 'et') {
+function checkoutCategoryTitle (category, locale = 'et') {
   if (!category) return ''
   if (category.name && typeof category.name === 'object') return category.name[locale] || category.name.et || category.name.en || category.name.ru || ''
   return category[`name_${locale}`] || category.name_et || category.name_en || category.namePrivate || ''
 }
 
-function checkoutLocalizedText(value, locale = 'et') {
+function checkoutLocalizedText (value, locale = 'et') {
   if (!value) return ''
   if (typeof value === 'object') return value[locale] || value.et || value.en || value.ru || ''
   // A number here is an unpopulated relation id, not a label. Returning it put raw ids into the
@@ -2171,11 +2170,11 @@ function checkoutLocalizedText(value, locale = 'et') {
   return value
 }
 
-function checkoutPublicStrapiUrl() {
+function checkoutPublicStrapiUrl () {
   return String(config.strapiUrl || '').replace('host.docker.internal', 'localhost').replace(/\/$/, '')
 }
 
-function checkoutMediaUrl(media) {
+function checkoutMediaUrl (media) {
   const file = Array.isArray(media) ? media[0] : media
   if (!file) return ''
   if (file.hash && file.ext) return `https://assets.poff.ee/img/${file.hash}${file.ext}`
@@ -2184,7 +2183,7 @@ function checkoutMediaUrl(media) {
   return ''
 }
 
-function checkoutCategoryImageUrl(category, locale = 'et') {
+function checkoutCategoryImageUrl (category, locale = 'et') {
   const images = category?.images || {}
   return checkoutMediaUrl(
     images[`image_${locale}`] ||
@@ -2196,7 +2195,7 @@ function checkoutCategoryImageUrl(category, locale = 'et') {
   )
 }
 
-function normalizeCheckoutLocation(location, locale = 'et') {
+function normalizeCheckoutLocation (location, locale = 'et') {
   if (!location) return null
   const name = checkoutLocalizedText(location.name, locale) || location.name_et || location.name_en || ''
   // hall and town are relations on the location, and product-categories are fetched with one level
@@ -2212,7 +2211,7 @@ function normalizeCheckoutLocation(location, locale = 'et') {
   }
 }
 
-function normalizeCheckoutMethodGroup(paymentMethods = {}) {
+function normalizeCheckoutMethodGroup (paymentMethods = {}) {
   return [
     ...(paymentMethods.banklinks || []),
     ...(paymentMethods.cards || []),
@@ -2224,7 +2223,7 @@ function normalizeCheckoutMethodGroup(paymentMethods = {}) {
 // Money sums must survive Maksekeskus's `###.##` validation. A raw float reduce of
 // three 0.10 items yields 0.30000000000000004, which /v1/transactions rejects with
 // code 1001 ("field: amount, expected: ###.##") — so the customer cannot pay at all.
-export function sumCheckoutPrices(rows = []) {
+export function sumCheckoutPrices (rows = []) {
   const total = rows.reduce((sum, row) => {
     const price = Number(row?.price)
     // A single unparseable price would otherwise poison the whole sum with NaN,
@@ -2234,7 +2233,7 @@ export function sumCheckoutPrices(rows = []) {
   return Math.round(total * 100) / 100
 }
 
-async function serializeCheckoutCart(cart, locale = 'et') {
+async function serializeCheckoutCart (cart, locale = 'et') {
   if (!cart) return null
   const products = cart.cartProducts || []
   const items = []
@@ -2304,12 +2303,12 @@ async function serializeCheckoutCart(cart, locale = 'et') {
   }
 }
 
-export async function getCheckoutCart(owner, locale = 'et') {
+export async function getCheckoutCart (owner, locale = 'et') {
   const cart = await getCurrentCheckoutCart(owner)
   return await serializeCheckoutCart(cart, locale)
 }
 
-async function countCheckoutCartCategoryItems(cart, categoryId) {
+async function countCheckoutCartCategoryItems (cart, categoryId) {
   if (!categoryId) return 0
   let count = 0
   const unknownIds = []
@@ -2339,11 +2338,11 @@ async function countCheckoutCartCategoryItems(cart, categoryId) {
   return count + normalizeStrapiList(products).length
 }
 
-function checkoutCategoryCartLimit(category) {
+function checkoutCategoryCartLimit (category) {
   return category?.cartLimit != null && category.cartLimit !== '' ? Number(category.cartLimit) : null
 }
 
-async function getAvailableCheckoutProductCount(category, excludedProductIds = []) {
+async function getAvailableCheckoutProductCount (category, excludedProductIds = []) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('code_null', 'false')
@@ -2367,7 +2366,7 @@ async function getAvailableCheckoutProductCount(category, excludedProductIds = [
   }
 }
 
-export async function getCheckoutCategoryAvailability(owner, categoryId, codePrefix) {
+export async function getCheckoutCategoryAvailability (owner, categoryId, codePrefix) {
   const category = await getProductCategoryByAnyId(categoryId || codePrefix, codePrefix)
   if (!category?.id) return { code: 400, case: 'noCategoryId', availableCount: 0 }
   const cart = owner ? await getCurrentCheckoutCart(owner) : null
@@ -2391,23 +2390,23 @@ export async function getCheckoutCategoryAvailability(owner, categoryId, codePre
 // TODO: if oauth ever runs >1 App Platform instance this mutex won't span processes;
 // escalate to a Postgres advisory lock or optimistic cartUpdatedAt version-check + retry.
 const cartLocks = new Map()
-function withCartLock(key, fn) {
+function withCartLock (key, fn) {
   const prev = cartLocks.get(key) || Promise.resolve()
   const next = prev.catch(() => {}).then(fn)
   cartLocks.set(key, next.finally(() => { if (cartLocks.get(key) === next) cartLocks.delete(key) }))
   return next
 }
-function ownerLockKey(owner) {
+function ownerLockKey (owner) {
   if (owner?.userId) return `userId:${owner.userId}`
   if (owner?.cartToken) return `token:${owner.cartToken}`
   return 'new'
 }
 
-function wantsMinimalCartMutationResponse(body = {}) {
+function wantsMinimalCartMutationResponse (body = {}) {
   return body.response === 'minimal'
 }
 
-function minimalCartMutationResponse(cart, newToken = null) {
+function minimalCartMutationResponse (cart, newToken = null) {
   const response = {
     ok: true,
     cartId: cart?.id || null,
@@ -2418,7 +2417,7 @@ function minimalCartMutationResponse(cart, newToken = null) {
   return response
 }
 
-export async function addCheckoutCartItem(owner, body = {}) {
+export async function addCheckoutCartItem (owner, body = {}) {
   const quantity = Math.max(1, Math.min(20, Number(body.quantity || 1)))
   const category = await getProductCategoryByAnyId(body.categoryId || body.codePrefix, body.codePrefix)
   if (!category?.id) return { code: 400, case: 'noCategoryId' }
@@ -2494,7 +2493,7 @@ export async function addCheckoutCartItem(owner, body = {}) {
   return result
 }
 
-export async function removeCheckoutCartItem(owner, body = {}) {
+export async function removeCheckoutCartItem (owner, body = {}) {
   if (!owner) return { code: 401, case: 'unauthorized' }
   const result = await withCartLock(ownerLockKey(owner), async () => {
     const cart = await getCurrentCheckoutCart(owner)
@@ -2557,7 +2556,7 @@ export async function removeCheckoutCartItem(owner, body = {}) {
   return result
 }
 
-export async function clearCheckoutCart(owner) {
+export async function clearCheckoutCart (owner) {
   const result = await withCartLock(ownerLockKey(owner), async () => {
     const cart = await getCurrentCheckoutCart(owner)
     if (!cart) return { ok: true }
@@ -2581,7 +2580,7 @@ export async function clearCheckoutCart(owner) {
 const _lastReservationRefresh = new Map()
 const RESERVATION_REFRESH_INTERVAL_MS = 5 * 60_000
 
-async function refreshHeldCartReservations(owner, cart) {
+async function refreshHeldCartReservations (owner, cart) {
   if ((!owner?.userId && !owner?.cartToken) || !cart?.id) return
   const last = _lastReservationRefresh.get(cart.id) || 0
   if (Date.now() - last < RESERVATION_REFRESH_INTERVAL_MS) return
@@ -2593,7 +2592,7 @@ async function refreshHeldCartReservations(owner, cart) {
   await claimCheckoutProducts({ productIds, userId: owner.userId, cartToken: owner.cartToken, price: rows[0]?.priceInCart ?? null }).catch(() => null)
 }
 
-export async function touchCheckoutCartSession(owner, locale = 'et') {
+export async function touchCheckoutCartSession (owner, locale = 'et') {
   if (!owner) return { items: [], total: 0 }
   const cart = await getCurrentCheckoutCart(owner)
   if (!cart) return { items: [], total: 0 }
@@ -2612,7 +2611,7 @@ export async function touchCheckoutCartSession(owner, locale = 'et') {
 // Whether this cart's products have already been sold — which means the cart was paid for, not
 // abandoned. Returns true when it cannot tell: failing to recover a stranded cart is a small
 // inconvenience, putting a completed purchase back in someone's basket is not.
-async function checkoutCartAlreadySold(cart) {
+async function checkoutCartAlreadySold (cart) {
   const ids = (cart.cartProducts || [])
     .map(row => (row.product && typeof row.product === 'object') ? row.product.id : row.product)
     .filter(id => id != null)
@@ -2634,7 +2633,7 @@ async function checkoutCartAlreadySold(cart) {
   }
 }
 
-export async function reactivateStrandedCheckoutCart(userId) {
+export async function reactivateStrandedCheckoutCart (userId) {
   if (!userId) return null
   const stranded = await getCurrentCheckoutCart({ userId }, { status: 'checkout_started' })
   if (!stranded || !(stranded.cartProducts || []).length) return null
@@ -2661,7 +2660,7 @@ export async function reactivateStrandedCheckoutCart(userId) {
 // null is "we could not ask". Rendering the second as the first is how a customer's company
 // profile appeared to vanish mid-checkout — it was there the whole time, and came back on its own
 // once Strapi was less busy.
-async function getOwnBusinessProfiles(userId) {
+async function getOwnBusinessProfiles (userId) {
   const token = await getStrapiAdminToken()
   const params = new URLSearchParams()
   params.append('_where[user]', userId)
@@ -2687,7 +2686,7 @@ async function getOwnBusinessProfiles(userId) {
   }
 }
 
-export async function getCheckoutContext(userId, locale = 'et') {
+export async function getCheckoutContext (userId, locale = 'et') {
   if (!userId) return { code: 401, case: 'unauthorized' }
   const [user, initialCart, businessProfiles, paymentMethods] = await Promise.all([
     getStrapiUser(userId),
@@ -2714,7 +2713,7 @@ export async function getCheckoutContext(userId, locale = 'et') {
   }
 }
 
-async function createCartMaksekeskusTransaction({ body, userEmail, userId, billingProfileId, orderId, cartId, orderProducts, amount }) {
+async function createCartMaksekeskusTransaction ({ body, userEmail, userId, billingProfileId, orderId, cartId, orderProducts, amount }) {
   const host = String(config.maksekeskusHost || 'https://api.test.maksekeskus.ee').replace(/\/$/, '')
   const mkUrl = host.startsWith('http') ? `${host}/v1/transactions` : `https://${host}/v1/transactions`
   const mkId = config.maksekeskusId
@@ -2765,7 +2764,7 @@ async function createCartMaksekeskusTransaction({ body, userEmail, userId, billi
   }
 }
 
-export async function payCheckoutCart(userId, body = {}) {
+export async function payCheckoutCart (userId, body = {}) {
   if (!userId) return { code: 401, case: 'unauthorized' }
   if (!body.paymentMethodId) return { code: 400, case: 'noPaymentMethodId' }
 
@@ -2970,14 +2969,14 @@ const makeUnique = (arr, prop) => {
 }
 
 export async function mergeUserMy (user) {
-  const aliasIds = [];
-  var aliasUsers = [];
+  const aliasIds = []
+  let aliasUsers = []
 
-  user.aliasUsers.forEach(alias =>{
+  user.aliasUsers.forEach((alias) => {
     aliasIds.push(alias.id)
   })
 
-  if(aliasIds.length){
+  if (aliasIds.length) {
     aliasUsers = await getStrapiCollections(aliasIds, 'users')
   }
 
@@ -2986,7 +2985,7 @@ export async function mergeUserMy (user) {
   const films = [...(user.My.films || []), ...(user.my_films || [])]
   const screenings = [...(user.My.screenings || []), ...(user.my_screenings || [])]
 
-  aliasUsers.forEach(alias =>{
+  aliasUsers.forEach((alias) => {
     alias.My = alias.My || {}
     products.push(...(alias.My.products || []))
     products.push(...(alias.my_products || []))
@@ -3093,17 +3092,17 @@ export async function getStrapiFilmographies (ids) {
   return getStrapiCollections(ids, 'filmographies')
 }
 
-export async function getStrapiClients(ids) {
-  return getStrapiCollections(ids,'clients')
+export async function getStrapiClients (ids) {
+  return getStrapiCollections(ids, 'clients')
 }
 
-export async function getStrapiCollections(ids, apiEndpoint) {
+export async function getStrapiCollections (ids, apiEndpoint) {
   if (!ids) return null
   const token = await getStrapiToken()
 
-  var params = new URLSearchParams();
+  const params = new URLSearchParams()
   for (const id of ids) {
-    params.append("id_in", id);
+    params.append('id_in', id)
   }
 
   const url = `${config.strapiUrl}/${apiEndpoint}?` + params.toString()
@@ -3113,12 +3112,12 @@ export async function getStrapiCollections(ids, apiEndpoint) {
   return collections
 }
 
-export async function getStrapiOrganisationByField(field, name) {
+export async function getStrapiOrganisationByField (field, name) {
   if (!name) return null
   const token = await getStrapiToken()
 
-  var params = new URLSearchParams();
-  params.append(`${field}_in`, name);
+  const params = new URLSearchParams()
+  params.append(`${field}_in`, name)
 
   const url = `${config.strapiUrl}/organisations?` + params.toString()
   const organisations = await $fetch(url, {
@@ -3130,10 +3129,10 @@ export async function getStrapiOrganisationByField(field, name) {
   }
 
   const organisation = await createStrapiOrganisationWithData({
-    'namePrivate': name,
-    'name_et': name,
-    'name_en': name,
-    'name_ru': name
+    namePrivate: name,
+    name_et: name,
+    name_en: name,
+    name_ru: name
   })
   console.log('getStrapiOrganisationByField CREATED', organisation)
   return organisation
@@ -3150,7 +3149,7 @@ export async function getStrapiOrganisation (id) {
   return organisation
 }
 
-export async function setStrapiOrganisation(organisationData) {
+export async function setStrapiOrganisation (organisationData) {
   if (!organisationData) return null
   const token = await getStrapiToken()
 
@@ -3168,7 +3167,7 @@ export async function setStrapiOrganisation(organisationData) {
   return organisation
 }
 
-export async function createStrapiOrganisationWithData(data) {
+export async function createStrapiOrganisationWithData (data) {
   console.log('createStrapiOrganisationWithData')
   console.log(data)
   const token = await getStrapiToken()
@@ -3271,28 +3270,28 @@ export async function putStrapiCollection (collectionName, collectionData) {
       'Content-Type': 'application/json'
     },
     body: collectionData
-  }).catch((err) => console.log('ERROR:', err.data, collectionData));
-  //console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
+  }).catch(err => console.log('ERROR:', err.data, collectionData))
+  // console.info('putStrapiCollection returning', collectionName, result) // eslint-disable-line no-console
   return result
 }
 
-export async function getUniqSlug(slug, contentTypeUID, field) {
+export async function getUniqSlug (slug, contentTypeUID, field) {
   const reserverdSlugs = [
-      "artikkel", "about", "artikl", "intervjuud", "interviews",
-      "projects", "industry-projects", "toetajad", "supporters", "supportersru",
-      "featured-persons-archive", "toetajalood", "sponsorstories", "sponsorstoriesru", "shop",
-      "filmid", "films", "filmy", "discamp-events-search", "my-events",
-      "otsi_filmi", "search_film", "iskat_film", "news", "mycalendar",
-      "search-projects", "minu_seansid", "my_screenings", "moi_seanss", "locations",
-      "menu2", "praktika", "training_positions", "praktika_ru", "kursused",
-      "courses", "sockets", "filmikool-courses-search", "otsi_seanssi", "search_screening",
-      "iskat_seanss", "whos-here", "otsi_filmi_arhiivist", "search_film_archive", "iskat_film_arhiv",
-      "virtual-booth", "menu", "locations-search", "letschat", "creative_gate",
-      "dc-persons", "programmid", "programmes", "programmy", "persons-search",
-      "search-projects-archive", "persons-search-cg", "poff-soovitab", "poff-soovitab-en", "poff-soovitab-ru",
-      "screenings", "minupoff", "mypoff", "moipoff", "my_profile",
-      "cg_uudised", "cg_news", "cg_novosti", "industry-events-search", "uudised",
-      "news", "novosti"
+    'artikkel', 'about', 'artikl', 'intervjuud', 'interviews',
+    'projects', 'industry-projects', 'toetajad', 'supporters', 'supportersru',
+    'featured-persons-archive', 'toetajalood', 'sponsorstories', 'sponsorstoriesru', 'shop',
+    'filmid', 'films', 'filmy', 'discamp-events-search', 'my-events',
+    'otsi_filmi', 'search_film', 'iskat_film', 'news', 'mycalendar',
+    'search-projects', 'minu_seansid', 'my_screenings', 'moi_seanss', 'locations',
+    'menu2', 'praktika', 'training_positions', 'praktika_ru', 'kursused',
+    'courses', 'sockets', 'filmikool-courses-search', 'otsi_seanssi', 'search_screening',
+    'iskat_seanss', 'whos-here', 'otsi_filmi_arhiivist', 'search_film_archive', 'iskat_film_arhiv',
+    'virtual-booth', 'menu', 'locations-search', 'letschat', 'creative_gate',
+    'dc-persons', 'programmid', 'programmes', 'programmy', 'persons-search',
+    'search-projects-archive', 'persons-search-cg', 'poff-soovitab', 'poff-soovitab-en', 'poff-soovitab-ru',
+    'screenings', 'minupoff', 'mypoff', 'moipoff', 'my_profile',
+    'cg_uudised', 'cg_news', 'cg_novosti', 'industry-events-search', 'uudised',
+    'news', 'novosti'
   ]
   try {
     if (reserverdSlugs.includes(slug.toLowerCase())) {
@@ -3307,8 +3306,8 @@ export async function getUniqSlug(slug, contentTypeUID, field) {
         'Content-Type': 'application/json'
       },
       body: {
-        contentTypeUID: contentTypeUID,
-        field: field,
+        contentTypeUID,
+        field,
         value: slug
       }
     })
@@ -3323,7 +3322,7 @@ export async function getUniqSlug(slug, contentTypeUID, field) {
 
 // ── Guest cart claim (WS4) ────────────────────────────────────────────────────
 
-async function deleteGuestCart(cartId) {
+async function deleteGuestCart (cartId) {
   const token = await getStrapiAdminToken()
   return $fetch(`${config.strapiUrl}/carts/${cartId}`, {
     method: 'DELETE',
@@ -3334,7 +3333,7 @@ async function deleteGuestCart(cartId) {
 // Idempotent: safe to call twice (second call is a no-op once the token is cleared).
 // droppedItems: products that were in the guest cart but no longer available.
 // Resolve a (possibly un-populated) cart line's product category.
-async function resolveCartLineCategory(item) {
+async function resolveCartLineCategory (item) {
   let product = item.product
   if (!product || typeof product !== 'object') {
     const pid = item.product?.id || item.product
@@ -3347,7 +3346,7 @@ async function resolveCartLineCategory(item) {
   return null
 }
 
-async function claimGuestLine(item, userId) {
+async function claimGuestLine (item, userId) {
   const productId = item.product?.id || item.product
   if (!productId) return null
   const category = await resolveCartLineCategory(item)
@@ -3362,7 +3361,7 @@ async function claimGuestLine(item, userId) {
   return { productId: claimed[0].id, price }
 }
 
-export async function claimGuestCart(userId, cartToken) {
+export async function claimGuestCart (userId, cartToken) {
   if (!userId || !cartToken) return { claimed: false, droppedItems: [] }
 
   const guestCart = await getCurrentCheckoutCart({ cartToken })
@@ -3391,7 +3390,6 @@ export async function claimGuestCart(userId, cartToken) {
   }
 
   if (!userCart) {
-
     const validRows = []
     for (const item of guestProducts) {
       // Bind this guest line to an actual available product of its category (atomic claim).
@@ -3441,8 +3439,10 @@ export async function claimGuestCart(userId, cartToken) {
 
     if (addedRows.length) {
       const existingRows = (userCart.cartProducts || []).map(item => ({
-        id: item.id, product: item.product?.id || item.product,
-        priceInCart: item.priceInCart, timeToCart: item.timeToCart
+        id: item.id,
+        product: item.product?.id || item.product,
+        priceInCart: item.priceInCart,
+        timeToCart: item.timeToCart
       }))
       await $fetch(`${config.strapiUrl}/carts/${userCart.id}`, {
         method: 'PUT',
@@ -3459,7 +3459,7 @@ export async function claimGuestCart(userId, cartToken) {
   return { claimed: true, cart, droppedItems }
 }
 
-export async function deleteStaleGuestCarts() {
+export async function deleteStaleGuestCarts () {
   const token = await getStrapiAdminToken()
   const expiredStatus = await getCartStatus('expired')
   const cutoff = new Date(Date.now() - CART_LIMITS.hardDeleteAfterDays * 24 * 60 * 60_000).toISOString()

@@ -101,21 +101,51 @@ export function pickPhotoAttachment (attachments) {
 
 /**
  * Attachment list of a person or an accreditation (published or not) →
- * [{ category, type, title, fileName, createdOn, token }]. The token is only for downloading and never shown in diagnostics.
+ * [{ id, category, type, contentType, title, fileName, createdOn, token }].
+ * type is Image / Document / URL / Memo; contentType is the label staff give in Fiona (Headshot, Showcase, ...).
+ * The token is only for downloading and never shown in diagnostics.
  */
 export function normalizeAttachments (raw) {
   if (!Array.isArray(raw)) return []
   return raw.map((item) => {
     const type = pick(item, 'type', 'Type') || {}
+    const contentType = pick(item, 'contentType', 'ContentType')
     return {
+      id: text(pick(item, 'id', 'Id')),
       category: Number(pick(item, 'category', 'Category')),
       type: text(pick(type, 'description', 'Description')),
+      contentType: typeof contentType === 'string'
+        ? (contentType.trim() || null)
+        : (contentType ? text(pick(contentType, 'description', 'Description', 'key', 'Key', 'name', 'Name')) : null),
       title: text(pick(item, 'title', 'Title')),
       fileName: text(pick(item, 'originalFileName', 'OriginalFileName')),
       createdOn: text(pick(item, 'createdOn', 'CreatedOn')),
       token: text(pick(item, 'value', 'Value'))
     }
   })
+}
+
+/**
+ * The Headshot to use when nothing is published: an attachment of type Image whose content type is "Headshot"
+ * (whatever its title or file name). Several: the default one, the image Fiona marks with the star (favouriteIds are
+ * the ids of those); when no default is detected among them, the LATEST. otherFiles counts the other distinct files
+ * and choice says 'only', 'default' or 'latest', so a dry run can show how the choice was made. Documents, links,
+ * notes and every other content type never count.
+ */
+export function pickHeadshot (attachments, favouriteIds = []) {
+  const headshots = (Array.isArray(attachments) ? attachments : []).filter(item =>
+    String(item?.type || '').toLowerCase().includes('image') &&
+    String(item?.contentType || '').trim().toLowerCase() === 'headshot' &&
+    item?.token
+  )
+  if (!headshots.length) return null
+  const favourites = new Set((Array.isArray(favouriteIds) ? favouriteIds : []).filter(Boolean).map(String))
+  const defaults = headshots.filter(item => item.id && favourites.has(String(item.id)))
+  const pool = defaults.length ? defaults : headshots
+  const chosen = [...pool].sort((a, b) => String(b.createdOn || '').localeCompare(String(a.createdOn || '')))[0]
+  const label = item => item.fileName || item.id
+  const otherFiles = new Set(headshots.map(label).filter(name => name !== label(chosen))).size
+  return { ...chosen, otherFiles, choice: otherFiles === 0 ? 'only' : (defaults.length ? 'default' : 'latest') }
 }
 
 /**
@@ -162,6 +192,14 @@ export function createXapiClient ({
     if (!response.ok) throw new Error(`download failed: HTTP ${response.status}`)
     return Buffer.from(await response.arrayBuffer())
   })
+
+  async function listPersonAttachments (personId) {
+    return normalizeAttachments(await get(`/person/${encodeURIComponent(personId)}/attachments`))
+  }
+
+  async function listAccreditationAttachments (accreditationId) {
+    return normalizeAttachments(await get(`/accreditation/${encodeURIComponent(accreditationId)}/attachments`))
+  }
 
   return {
     /** All guestbooks visible to this API key (diagnostics). */
@@ -213,19 +251,39 @@ export function createXapiClient ({
       }
     },
 
-    async listPersonAttachments (personId) {
-      return normalizeAttachments(await get(`/person/${encodeURIComponent(personId)}/attachments`))
-    },
+    listPersonAttachments,
+    listAccreditationAttachments,
 
-    async listAccreditationAttachments (accreditationId) {
-      return normalizeAttachments(await get(`/accreditation/${encodeURIComponent(accreditationId)}/attachments`))
+    /** The Headshot of a person (own attachments and its accreditations'), published or not; null when there is none. */
+    async getUnpublishedHeadshot (personId, accreditationIds = []) {
+      const lists = [await listPersonAttachments(personId)]
+      for (const id of accreditationIds) lists.push(await listAccreditationAttachments(id))
+      // the default (starred) image is named on the person and on the accreditation; a failed lookup just means
+      // "no default detected", the latest headshot is used then
+      const favouriteIds = []
+      for (const path of [`/person/${encodeURIComponent(personId)}`, ...accreditationIds.map(id => `/accreditation/${encodeURIComponent(id)}`)]) {
+        try {
+          const detail = await get(path)
+          const favourite = pick(detail, 'FavoriteImageAttachment', 'favoriteImageAttachment')
+          const id = text(pick(favourite || {}, 'Id', 'id')) || text(pick(detail, 'FavoriteImageAttachmentId', 'favoriteImageAttachmentId'))
+          if (id) favouriteIds.push(id)
+        } catch (err) {
+          log.warn?.(`[fiona] default image lookup ${path} failed: ${err?.message || err}`)
+        }
+      }
+      const picked = pickHeadshot(lists.flat(), favouriteIds)
+      if (!picked) return null
+      const urlResult = await get(`/attachment/url?token=${encodeURIComponent(picked.token)}`)
+      const url = typeof urlResult === 'string' ? urlResult : pick(urlResult, 'accessUrl', 'url')
+      if (!url) return null
+      return { buffer: await downloadBuffer(url), filename: `fiona-person-${personId}.jpg`, fileName: picked.fileName, otherFiles: picked.otherFiles, choice: picked.choice }
     },
 
     async getPersonPhoto (personId) {
       const attachments = await get(`/person/${encodeURIComponent(personId)}/attachments`)
       const token = pickPhotoAttachment(attachments)
       if (!token) return null
-      const urlResult = await get(`/attachment/${encodeURIComponent(token)}`)
+      const urlResult = await get(`/attachment/url?token=${encodeURIComponent(token)}`)
       const url = typeof urlResult === 'string' ? urlResult : pick(urlResult, 'accessUrl', 'url')
       if (!url) return null
       return { buffer: await downloadBuffer(url), filename: `fiona-person-${personId}.jpg` }
