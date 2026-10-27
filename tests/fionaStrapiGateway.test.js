@@ -168,6 +168,29 @@ describe('createStrapiGateway', () => {
     expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
+  it('finds an earlier upload of the same photo by name and size, so it is not uploaded twice', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /upload/files': [{ id: 4, name: 'fiona-person-x.jpg', size: 10.5 }, { id: 5, name: 'fiona-person-x.jpg', size: 372.04 }]
+    })
+    const id = await createStrapiGateway({ fetch, ...deps() }).findUploadedPhoto('fiona-person-x.jpg', 372043)
+    expect(id).toBe(5)
+    expect(calls[0].url).toBe(`${STRAPI}/upload/files?name=fiona-person-x.jpg&_limit=10`)
+    expect(calls[0].headers.Authorization).toBe('Bearer ADMIN')
+  })
+
+  it('finds no earlier upload when the name matches but the size does not, or when there is none', async () => {
+    const { fetch } = fakeFetch({ 'GET /upload/files': [{ id: 4, name: 'fiona-person-x.jpg', size: 10.5 }] })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+    expect(await gateway.findUploadedPhoto('fiona-person-x.jpg', 372043)).toBeNull()
+    const empty = createStrapiGateway({ fetch: fakeFetch({ 'GET /upload/files': [] }).fetch, ...deps() })
+    expect(await empty.findUploadedPhoto('fiona-person-y.jpg', 100)).toBeNull()
+  })
+
+  it('treats a failing lookup as "no earlier upload" instead of failing the sync', async () => {
+    const fetch = () => { throw new Error('Strapi hiccup') }
+    expect(await createStrapiGateway({ fetch, ...deps() }).findUploadedPhoto('fiona-person-x.jpg', 100)).toBeNull()
+  })
+
   it('uploads a photo as multipart and returns the file id', async () => {
     const { fetch, calls } = fakeFetch({ 'POST /upload': [{ id: 55 }] })
     const id = await createStrapiGateway({ fetch, ...deps() }).uploadPhoto(Buffer.from('jpg'), 'fiona-person-1.jpg')

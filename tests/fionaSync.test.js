@@ -100,6 +100,7 @@ function fakeStrapi () {
     users: new Map(),
     profiles: new Map(), // userId → profile
     uploads: [],
+    orphanUploads: [], // files already in the media library that no person uses: { id, filename, size }
     writes: [],
     emails: [], // Creative Gate "created" emails Strapi's hooks would send: { userId, personId }
     publisherRoleIds: new Set([ROLE_CG]), // roles with publish_cg_person
@@ -210,6 +211,10 @@ function fakeStrapi () {
       const id = nextId()
       state.uploads.push({ id, filename, size: buffer.length })
       return id
+    },
+    findUploadedPhoto (filename, bytes) {
+      const hit = state.orphanUploads.find(file => file.filename === filename && file.size === bytes)
+      return hit ? hit.id : null
     }
   }
 }
@@ -850,6 +855,65 @@ describe('runSync', () => {
       const stats = await runSync({ dryRun: true }, deps)
 
       expect(stats.dryRunActions[0]).toMatchObject({ action: 'CREATE', bio: 'accreditation', bioChars: 13 })
+    })
+  })
+
+  describe('attaching a photo to an existing person', () => {
+    const syncedWithoutPhoto = async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
+      fiona.state.persons.set('fp2', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com' })
+      await runSync({}, deps)
+      return [...strapi.state.people.values()][0]
+    }
+
+    it('writes the photo to a person that was already in sync, even when nothing else changed', async () => {
+      const person = await syncedWithoutPhoto()
+      expect(person.picture).toBeUndefined()
+      fiona.state.persons.get('fp2').photo = 'jpegbytes'
+      fiona.state.persons.get('fp2').photoSource = 'headshot'
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.get(person.id).picture).toBe(strapi.state.uploads[0].id)
+      expect(stats.persons.updated).toBe(1)
+      expect(stats.persons.unchanged).toBe(0)
+    })
+
+    it('a dry run lists the photo as an update of the person and uploads nothing', async () => {
+      await syncedWithoutPhoto()
+      fiona.state.persons.get('fp2').photo = 'jpegbytes'
+      fiona.state.persons.get('fp2').photoSource = 'headshot'
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.persons.updated).toBe(1)
+      expect(stats.dryRunActions[0]).toMatchObject({ action: 'UPDATE', changed: ['picture'], photo: 'headshot' })
+      expect(strapi.state.uploads).toEqual([])
+    })
+
+    it('does not upload the photo again when it is already in the media library, it attaches that file', async () => {
+      const person = await syncedWithoutPhoto()
+      fiona.state.persons.get('fp2').photo = 'jpegbytes'
+      strapi.state.orphanUploads.push({ id: 777, filename: 'fiona-person-fp2.jpg', size: Buffer.from('jpegbytes').length })
+
+      await runSync({}, deps)
+
+      expect(strapi.state.uploads).toEqual([])
+      expect(strapi.state.people.get(person.id).picture).toBe(777)
+    })
+
+    it('a second run does not touch the person again', async () => {
+      await syncedWithoutPhoto()
+      fiona.state.persons.get('fp2').photo = 'jpegbytes'
+      await runSync({}, deps)
+      const writes = strapi.state.writes.length
+      const uploads = strapi.state.uploads.length
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.writes.length).toBe(writes)
+      expect(strapi.state.uploads.length).toBe(uploads)
+      expect(stats.persons.unchanged).toBe(1)
     })
   })
 
