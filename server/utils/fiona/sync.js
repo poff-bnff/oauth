@@ -221,8 +221,8 @@ export function decideAutoMode (job, nowDate) {
 }
 
 /**
- * @param {object} [options.only]  a TEST run: { ruleIds, maxPersons }. Only persons that one of these rules matches are
- *   handled, at most maxPersons are written, and no state is saved in the job entry (a test can neither start, delay
+ * @param {object} [options.only]  a TEST run: { ruleIds, maxPersons, scope }. Only persons that one of these rules matches are
+ *   handled (scope 'new' = only persons Strapi does not hold yet, 'existing' = only those it already holds), at most maxPersons are written, and no state is saved in the job entry (a test can neither start, delay
  *   nor shorten the real import). Everything else (users, roles, editions, photos, emails, builds) is the real thing.
  */
 export async function runSync ({ dryRun = false, force = false, mode = 'full', backlog = false, only = null } = {}, deps) {
@@ -235,6 +235,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   // at most this many persons are written per run (0 = no cap); the run then stops and says more work remains
   let maxPersonsPerRun = Number.isFinite(Number(config.maxPersonsPerRun)) && config.maxPersonsPerRun !== undefined ? Number(config.maxPersonsPerRun) : 50
   const testRuleIds = only ? new Set(only.ruleIds.map(Number)) : null
+  const testScope = only && ['new', 'existing'].includes(only.scope) ? only.scope : 'all'
   if (only && Number(only.maxPersons) > 0) maxPersonsPerRun = Number(only.maxPersons)
   let backlogRun = Boolean(backlog)
   // Strapi person ids whose existing biography the sync never overwrites (an empty one is still filled)
@@ -245,7 +246,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   deps.onStart?.(stats) // lets a caller watch the stats of a long run while it is still going
   stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios) }
   stats.backlog = { cap: maxPersonsPerRun, more: false }
-  if (only) stats.test = { ruleIds: [...testRuleIds], maxPersons: maxPersonsPerRun, outsideRules: 0 }
+  if (only) stats.test = { ruleIds: [...testRuleIds], maxPersons: maxPersonsPerRun, scope: testScope, outsideRules: 0, alreadyInStrapi: 0 }
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
@@ -688,6 +689,10 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
         log.error(`person ${fionaPersonId}: email ${contactEmail} belongs to person #${existing.id} synced from Fiona person ${existing.fiona_person_id} — skipped`)
         continue
       }
+
+      // a test run can be limited to persons Strapi does not hold yet (the creation) or to those it already holds (the adoption)
+      if (testScope === 'new' && existing) { stats.test.alreadyInStrapi++; continue }
+      if (testScope === 'existing' && !existing) continue
 
       const action = actionByFionaId.get(fionaPersonId)
       const detach = action ? action.detachEditionIds : []

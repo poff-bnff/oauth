@@ -1235,7 +1235,7 @@ describe('runSync', () => {
       const names = [...strapi.state.people.values()].map(p => p.firstName).sort()
       expect(names).toEqual(['P2', 'P3'])
       expect(stats.persons.created).toBe(2)
-      expect(stats.test).toEqual({ ruleIds: [2], maxPersons: 2, outsideRules: 2 })
+      expect(stats.test).toEqual({ ruleIds: [2], maxPersons: 2, scope: 'all', outsideRules: 2, alreadyInStrapi: 0 })
     })
 
     it('saves no state in the job entry, so a test cannot start, delay or shorten the real import', async () => {
@@ -1265,6 +1265,34 @@ describe('runSync', () => {
 
       expect(stats.dryRunActions.map(a => a.name)).toEqual(['P2 X', 'P3 X', 'P4 X'])
       expect(stats.persons.created).toBe(3)
+    })
+
+    it('can be limited to persons that are not in Strapi yet, so the test shows the creation of new persons', async () => {
+      mixed()
+      strapi.state.users.set(900, { id: 900, email: 'p2@x.ee', person: 92, user_roles: [] })
+      strapi.state.people.set(92, { id: 92, firstName: 'P2', lastName: 'X', eMail: 'p2@x.ee', festival_editions: [], user: 900 })
+      fiona.state.persons.get('fp2').myPoffUserId = '900'
+
+      const stats = await runSync({ only: { ruleIds: [2], maxPersons: 5, scope: 'new' } }, deps)
+
+      const created = [...strapi.state.people.values()].filter(p => p.id !== 92).map(p => p.firstName).sort()
+      expect(created).toEqual(['P3', 'P4'])
+      expect(strapi.state.people.get(92).fiona_person_id).toBeUndefined()
+      expect(stats.test.scope).toBe('new')
+      expect(stats.test.alreadyInStrapi).toBe(1)
+    })
+
+    it('can be limited to persons that already exist, so the test shows how a profile is adopted', async () => {
+      mixed()
+      strapi.state.users.set(900, { id: 900, email: 'p2@x.ee', person: 92, user_roles: [] })
+      strapi.state.people.set(92, { id: 92, firstName: 'P2', lastName: 'X', eMail: 'p2@x.ee', festival_editions: [], user: 900 })
+      fiona.state.persons.get('fp2').myPoffUserId = '900'
+
+      const stats = await runSync({ only: { ruleIds: [2], maxPersons: 5, scope: 'existing' } }, deps)
+
+      expect(strapi.state.people.size).toBe(1)
+      expect(strapi.state.people.get(92).fiona_person_id).toBe('fp2')
+      expect(stats.persons.created).toBe(0)
     })
 
     it('needs at least one rule id', async () => {
