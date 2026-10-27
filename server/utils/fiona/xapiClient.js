@@ -100,6 +100,25 @@ export function pickPhotoAttachment (attachments) {
 }
 
 /**
+ * Attachment list of a person or an accreditation (published or not) →
+ * [{ category, type, title, fileName, createdOn, token }]. The token is only for downloading and never shown in diagnostics.
+ */
+export function normalizeAttachments (raw) {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    const type = pick(item, 'type', 'Type') || {}
+    return {
+      category: Number(pick(item, 'category', 'Category')),
+      type: text(pick(type, 'description', 'Description')),
+      title: text(pick(item, 'title', 'Title')),
+      fileName: text(pick(item, 'originalFileName', 'OriginalFileName')),
+      createdOn: text(pick(item, 'createdOn', 'CreatedOn')),
+      token: text(pick(item, 'value', 'Value'))
+    }
+  })
+}
+
+/**
  * Create the XAPI client.
  * @param {object} options
  * @param {Function} options.fetch        `$fetch`-compatible function (url, options) → parsed body
@@ -192,6 +211,14 @@ export function createXapiClient ({
         log.warn?.(`[fiona] external authentications for person ${personId} unavailable: ${err.message}`)
         return null
       }
+    },
+
+    async listPersonAttachments (personId) {
+      return normalizeAttachments(await get(`/person/${encodeURIComponent(personId)}/attachments`))
+    },
+
+    async listAccreditationAttachments (accreditationId) {
+      return normalizeAttachments(await get(`/accreditation/${encodeURIComponent(accreditationId)}/attachments`))
     },
 
     async getPersonPhoto (personId) {

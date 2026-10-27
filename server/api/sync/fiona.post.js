@@ -14,6 +14,13 @@
  *                "compare" is a read-only diagnostic listing the differences between the
  *                XAPI and the Publication API for the active guestbooks.
  *                { "force": true } — lift the per-run removal cap.
+ *
+ * One-off tools for persons the sync made (Strapi person ids, at most 100 per call):
+ *                { "mode": "photos", "personIds": [..] or "all": true } — read-only: lists what Fiona holds as
+ *                attachments (headshot, showcase, ...) for those persons, published or not. Never shows a file.
+ *                { "mode": "renotify", "personIds": [..], "dryRun": false } — sends the Creative Gate "created"
+ *                email of those persons once more (the edition is taken off and put back). A dry run unless
+ *                "dryRun": false is given explicitly.
  */
 
 import crypto from 'crypto'
@@ -53,11 +60,14 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody(event).catch(() => ({}))
-  const dryRun = body?.dryRun === true
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos'].includes(body?.mode) ? body.mode : 'full'
+  // re-sending emails is the one thing that must never happen by accident: a dry run unless dryRun is explicitly false
+  const dryRun = mode === 'renotify' ? body?.dryRun !== false : body?.dryRun === true
+  const personIds = Array.isArray(body?.personIds) ? body.personIds : []
+  const all = body?.all === true
 
-  const stats = await runFionaSync({ dryRun, force, mode })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all })
 
   return { ok: true, stats }
 })
