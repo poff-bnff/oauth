@@ -27,6 +27,8 @@ import { createHybridClient } from './fiona/hybridClient.js'
 import { createStrapiGateway } from './fiona/strapiGateway.js'
 import { runSync } from './fiona/sync.js'
 import { compareSources } from './fiona/compare.js'
+import { renotifyPersons } from './fiona/renotify.js'
+import { describePhotos } from './fiona/photoDiagnostic.js'
 
 const config = useRuntimeConfig()
 
@@ -63,15 +65,19 @@ function buildFionaClient () {
   throw new Error(`NUXT_FIONA_CLIENT=${client} is not supported — use 'xapi' or 'publication'`)
 }
 
-function buildDeps () {
-  const fiona = buildFionaClient()
-  const strapi = createStrapiGateway({
+function buildStrapiGateway () {
+  return createStrapiGateway({
     fetch: $fetch,
     config,
     getAdminToken: getStrapiAdminToken,
     getActiveFionaGuestbooks,
     log
   })
+}
+
+function buildDeps () {
+  const fiona = buildFionaClient()
+  const strapi = buildStrapiGateway()
   return {
     fiona,
     strapi,
@@ -107,7 +113,7 @@ async function compareFionaSources () {
   return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
 }
 
-export async function runFionaSync ({ dryRun = false, force = false, mode = 'full' } = {}) {
+export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false } = {}) {
   if (syncRunning) {
     log.warn('Sync already running — skipping this invocation')
     return { dryRun, mode, skipped: true, reason: 'already running' }
@@ -115,6 +121,14 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
   syncRunning = true
   try {
     if (mode === 'compare') return await compareFionaSources()
+    // One-off tools for persons the sync made (Strapi person ids): send the Creative Gate "created" email again,
+    // and list what Fiona holds as photos (read-only, XAPI).
+    if (mode === 'renotify') return { mode, ...(await renotifyPersons({ personIds, dryRun }, { strapi: buildStrapiGateway(), log })) }
+    if (mode === 'photos') {
+      if (!config.fionaApiKey) throw new Error('photos needs NUXT_FIONA_API_KEY')
+      const xapi = createXapiClient({ fetch: $fetch, apiKey: config.fionaApiKey, log })
+      return { mode, ...(await describePhotos({ personIds, all, strapi: buildStrapiGateway(), xapi, log })) }
+    }
     return await runSync({ dryRun, force, mode }, buildDeps())
   } finally {
     syncRunning = false

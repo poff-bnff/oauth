@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeBadges, normalizeAccreditation, normalizePerson, pickPhotoAttachment, createXapiClient } from '../server/utils/fiona/xapiClient.js'
+import { normalizeBadges, normalizeAccreditation, normalizePerson, pickPhotoAttachment, normalizeAttachments, createXapiClient } from '../server/utils/fiona/xapiClient.js'
 
 describe('normalizeBadges', () => {
   it('maps the PascalCase XAPI badge shape to badgeId / badgeName / statusText', () => {
@@ -102,5 +102,42 @@ describe('pickPhotoAttachment', () => {
   it('returns null when there is no image', () => {
     expect(pickPhotoAttachment([{ category: 2, contentType: { description: 'PDF' }, value: 'x' }])).toBeNull()
     expect(pickPhotoAttachment(undefined)).toBeNull()
+  })
+})
+
+describe('normalizeAttachments', () => {
+  it('maps PascalCase and camelCase attachments to category, type, title, file name and token', () => {
+    const raw = [
+      { Category: 2, Type: { Description: 'Image' }, Title: 'Headshot Tõnis', OriginalFileName: 'tonis.jpg', CreatedOn: '2026-09-01T10:00:00Z', Value: 'TOKEN1' },
+      { category: 0, type: { description: 'Document' }, title: 'CV', originalFileName: 'cv.pdf', value: 'TOKEN2' }
+    ]
+    expect(normalizeAttachments(raw)).toEqual([
+      { category: 2, type: 'Image', title: 'Headshot Tõnis', fileName: 'tonis.jpg', createdOn: '2026-09-01T10:00:00Z', token: 'TOKEN1' },
+      { category: 0, type: 'Document', title: 'CV', fileName: 'cv.pdf', createdOn: null, token: 'TOKEN2' }
+    ])
+  })
+
+  it('returns an empty list for anything that is not a list', () => {
+    expect(normalizeAttachments(undefined)).toEqual([])
+    expect(normalizeAttachments(null)).toEqual([])
+    expect(normalizeAttachments({})).toEqual([])
+  })
+})
+
+describe('createXapiClient attachment lists', () => {
+  const make = (response) => {
+    const calls = []
+    const fetch = (url) => { calls.push(url); return response }
+    return { client: createXapiClient({ fetch, apiKey: 'KEY', log: { warn () {} } }), calls }
+  }
+
+  it('lists the attachments of a person and of an accreditation, published or not', async () => {
+    const { client, calls } = make([{ category: 0, type: { description: 'Image' }, title: 'a', originalFileName: 'a.jpg', value: 'T' }])
+    expect(await client.listPersonAttachments('p 1')).toHaveLength(1)
+    expect(await client.listAccreditationAttachments('acc-1')).toHaveLength(1)
+    expect(calls).toEqual([
+      'https://poff-xapi.fiona-app.com/api/person/p%201/attachments',
+      'https://poff-xapi.fiona-app.com/api/accreditation/acc-1/attachments'
+    ])
   })
 })
