@@ -28,7 +28,9 @@ export function buildPersonPayload ({
   const payload = {
     firstName,
     lastName,
-    firstNameLastName: [firstName, lastName].filter(Boolean).join(' ') || null
+    firstNameLastName: [firstName, lastName].filter(Boolean).join(' ') || null,
+    // the "public" box of the person in Strapi; the site and the editors expect it ticked on every synced person
+    public: true
   }
 
   if (contactEmail && !noPublicationOfContactDetails && !noPublicationOfEmail) payload.eMail = contactEmail
