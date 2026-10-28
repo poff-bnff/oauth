@@ -1720,6 +1720,21 @@ describe('runSync', () => {
       expect(touches()).toHaveLength(builtBefore)
     })
 
+    it('builds a person whose public flag was switched off, because the person comes back on the site', async () => {
+      strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
+      one()
+      await runSync({}, deps)
+      const [person] = [...strapi.state.people.values()]
+      const builtBefore = touches().length
+      person.public = false
+
+      const stats = await runSync({}, deps)
+
+      expect(person.public).toBe(true)
+      expect(stats.build.candidates).toBe(1)
+      expect(touches()).toHaveLength(builtBefore + 1)
+    })
+
     it('still builds a person when something else changes along with the public flag', async () => {
       strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
       one()
