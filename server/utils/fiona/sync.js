@@ -760,6 +760,8 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       // the picture joins the payload only after the upload (real runs), so a photo that is the only difference would
       // look like "nothing changed" and never be written: count it as a change of the person here
       if (photo && existing && !changed.includes('picture')) changed.push('picture')
+      // ticking "public" on a person that was synced before it existed changes nothing on the site, so it is no reason to build the page again
+      const onlyPublicChanged = Boolean(changed?.length) && changed.every(key => key === 'public')
       if (!dryRun && (!existing || changed.length > 0)) written++
       const summary = `person ${fionaPersonId} ${fionaPerson.firstName} ${fionaPerson.lastName} level ${want.level} editions=[${editionIds.join(', ')}] roles=[${[...want.roleIds].join(', ')}]`
 
@@ -785,7 +787,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
         }
         stats.editions.attached += newlyAttached.length
         stats.editions.detached += detach.length
-        if (want.level === 2 && (!existing || changed.length) && [...want.fullRuleIds].some(id => buildRules.has(id))) stats.build.candidates++
+        if (want.level === 2 && (!existing || (changed.length && !onlyPublicChanged)) && [...want.fullRuleIds].some(id => buildRules.has(id))) stats.build.candidates++
         continue
       }
 
@@ -855,7 +857,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       }
 
       if (detach.length) removedIds.push(Number(person.id))
-      if (want.level === 2 && personChanged) {
+      if (want.level === 2 && personChanged && !onlyPublicChanged) {
         const ruleIds = [...want.fullRuleIds].filter(id => buildRules.has(id))
         if (ruleIds.length) buildCandidates.push({ personId: Number(person.id), ruleIds })
       }

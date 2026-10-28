@@ -29,7 +29,15 @@ describe('buildPersonPayload privacy flags', () => {
 
   it('keeps names and the level 2 biography whatever is withheld', () => {
     const payload = build({ noPublicationOfContactDetails: true, noPublicationOfEmail: true, noPublicationOfPhone: true }, 2)
-    expect(payload).toEqual({ firstName: 'Mari', lastName: 'Maasikas', firstNameLastName: 'Mari Maasikas', bio_en: 'Bio' })
+    expect(payload).toEqual({ firstName: 'Mari', lastName: 'Maasikas', firstNameLastName: 'Mari Maasikas', public: true, bio_en: 'Bio' })
+  })
+})
+
+describe('buildPersonPayload public flag', () => {
+  it('marks the person public, at both levels and whatever contact details are withheld', () => {
+    expect(build({}, 1).public).toBe(true)
+    expect(build({}, 2).public).toBe(true)
+    expect(build({ noPublicationOfContactDetails: true }).public).toBe(true)
   })
 })
 

@@ -356,6 +356,38 @@ describe('runSync', () => {
     expect(create.payload.festival_editions).toBeUndefined()
   })
 
+  it('creates the person with public set, so the site shows it', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created')))
+    fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com' })
+
+    await runSync({}, deps)
+
+    const create = strapi.state.writes.find(w => w.op === 'createPerson')
+    expect(create.payload.public).toBe(true)
+    expect([...strapi.state.people.values()][0].public).toBe(true)
+  })
+
+  it('sets public on a person Strapi already holds with it empty or off, without a second email', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc1', 'fp1', BADGE_PRO, 'Paid'),
+      accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')
+    ))
+    fiona.state.persons.set('fp1', { firstName: 'A', lastName: 'A', email: 'a@a.ee' })
+    fiona.state.persons.set('fp2', { firstName: 'B', lastName: 'B', email: 'b@b.ee' })
+    await runSync({}, deps)
+    const [first, second] = [...strapi.state.people.values()]
+    first.public = null // how the persons of the first import sit in Strapi: the box was never set
+    second.public = false
+    const emailsBefore = strapi.state.emails.length
+
+    const stats = await runSync({}, deps)
+
+    expect(first.public).toBe(true)
+    expect(second.public).toBe(true)
+    expect(stats.persons).toMatchObject({ created: 0, updated: 2, unchanged: 0 })
+    expect(strapi.state.emails.length).toBe(emailsBefore)
+  })
+
   it('level 2: attaches editions, assigns roles, writes the biography and records what it attached', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc2', 'fp2', BADGE_PRO, 'Paid')))
     fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com', bio: 'Producer from Tallinn', photo: 'jpegbytes' })
@@ -1670,6 +1702,53 @@ describe('runSync', () => {
       await runSync({}, deps)
 
       expect(touches()).toHaveLength(1)
+    })
+
+    it('does not queue a site build for a person whose only change is the public flag', async () => {
+      strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
+      one()
+      await runSync({}, deps)
+      const [person] = [...strapi.state.people.values()]
+      const builtBefore = touches().length
+      person.public = null
+
+      const stats = await runSync({}, deps)
+
+      expect(person.public).toBe(true)
+      expect(stats.persons.updated).toBe(1)
+      expect(stats.build.candidates).toBe(0)
+      expect(touches()).toHaveLength(builtBefore)
+    })
+
+    it('still builds a person when something else changes along with the public flag', async () => {
+      strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
+      one()
+      await runSync({}, deps)
+      const [person] = [...strapi.state.people.values()]
+      const builtBefore = touches().length
+      person.public = null
+      fiona.state.persons.set('fp2', { firstName: 'Anna', lastName: 'A', email: 'a@a.ee' })
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.build.candidates).toBe(1)
+      expect(touches()).toHaveLength(builtBefore + 1)
+    })
+
+    it('still builds a person whose public flag is set in the same run that adds the photo', async () => {
+      strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
+      one()
+      await runSync({}, deps)
+      const [person] = [...strapi.state.people.values()]
+      const builtBefore = touches().length
+      person.public = null
+      fiona.state.persons.set('fp2', { firstName: 'A', lastName: 'A', email: 'a@a.ee', photo: 'x' })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.uploads.length).toBeGreaterThan(0)
+      expect(stats.build.candidates).toBe(1)
+      expect(touches()).toHaveLength(builtBefore + 1)
     })
 
     it('a basic (level 1) person is never built', async () => {
