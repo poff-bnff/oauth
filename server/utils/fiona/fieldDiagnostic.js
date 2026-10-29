@@ -3,16 +3,19 @@
  *
  * Read-only diagnostic: where does Fiona keep a value? For a few persons the sync manages it reads the raw record of
  * the person and of each of its accreditations from the Publication API and the XAPI and lists every field path with
- * its type. Values are shown only for the fields we look for (country, company, category / programme, occupation, ...)
- * and for lookup keys; everything else (names, contact details, addresses) is reported as "exists, this type" only.
+ * its type. Values are shown only for the fields we look for (country, company, category / programme, occupation,
+ * trip info such as arrival and departure, ...) and for lookup keys; everything else (names, contact details,
+ * addresses) is reported as "exists, this type" only.
+ * With `paths` it also reads further endpoints that are named explicitly (when a value sits in a sub-resource).
  */
 
 const MAX_PERSONS = 5
+const MAX_PATHS = 10
 const MAX_EXAMPLES = 5
 const MAX_VALUE_LENGTH = 80
 
 // field names whose values are what we are looking for; their values are not personal contact data
-const LOOKED_FOR = /countr|compan|organi[sz]|employer|categor|programme|occupation|profession|position|job/i
+const LOOKED_FOR = /countr|compan|organi[sz]|employer|categor|programme|occupation|profession|position|job|arriv|depart|trip|travel|flight|transport/i
 
 const splitIds = value => String(value ?? '').split(',').map(id => id.trim()).filter(Boolean)
 
@@ -79,13 +82,22 @@ export function outlineFields (root) {
 }
 
 /**
- * @param {{ personIds: number[], strapi: object, publication: object, xapi?: object|null, log?: object }} options
- *   personIds = Strapi person ids (at most 5); publication / xapi need `getRaw(path)`
+ * @param {{ personIds: number[], paths?: string[], strapi: object, publication: object, xapi?: object|null, log?: object }} options
+ *   personIds = Strapi person ids (at most 5); publication / xapi need `getRaw(path)`;
+ *   paths = extra endpoints, each "xapi:/path" or "publication:/path" with {personId} (the Fiona person id) and / or
+ *   {accreditationId} (read once per accreditation) in it, at most 10
  */
-export async function describeFionaFields ({ personIds = [], strapi, publication, xapi = null, log = console } = {}) {
+export async function describeFionaFields ({ personIds = [], paths = [], strapi, publication, xapi = null, log = console } = {}) {
   const ids = [...new Set((Array.isArray(personIds) ? personIds : []).map(Number).filter(id => Number.isInteger(id) && id > 0))]
   if (!ids.length) throw new Error('describeFionaFields needs personIds (Strapi person ids)')
   if (ids.length > MAX_PERSONS) throw new Error(`describeFionaFields handles at most ${MAX_PERSONS} persons per call`)
+  const extraPaths = (Array.isArray(paths) ? paths : []).map(String)
+  if (extraPaths.length > MAX_PATHS) throw new Error(`describeFionaFields reads at most ${MAX_PATHS} paths per call`)
+  const extras = extraPaths.map((entry) => {
+    const match = /^(xapi|publication):(\/.*)$/.exec(entry)
+    if (!match) throw new Error(`describeFionaFields: path "${entry}" must start with xapi: or publication:`)
+    return { api: match[1], template: match[2] }
+  })
 
   const result = { persons: [], skipped: [] }
   for (const id of ids) {
@@ -119,6 +131,19 @@ export async function describeFionaFields ({ personIds = [], strapi, publication
       await read('xapi /person/{personId}', xapi, `/person/${personId}`)
       for (const accreditationId of accreditationIds) {
         await read('xapi /accreditation/{id}', xapi, `/accreditation/${encodeURIComponent(accreditationId)}`, { accreditationId })
+      }
+    }
+    for (const { api, template } of extras) {
+      const client = api === 'xapi' ? xapi : publication
+      const label = `${api} ${template}`
+      const fill = accreditationId => template
+        .replaceAll('{personId}', personId)
+        .replaceAll('{accreditationId}', encodeURIComponent(accreditationId ?? ''))
+      if (!client) { sources.push({ source: label, error: `the ${api} is not configured` }); continue }
+      if (template.includes('{accreditationId}')) {
+        for (const accreditationId of accreditationIds) await read(label, client, fill(accreditationId), { accreditationId })
+      } else {
+        await read(label, client, fill())
       }
     }
     result.persons.push({ personId: person.id, name: [person.firstName, person.lastName].filter(Boolean).join(' '), sources })
