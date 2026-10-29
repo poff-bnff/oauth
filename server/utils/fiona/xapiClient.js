@@ -230,6 +230,9 @@ export function createXapiClient ({
   }
 
   return {
+    /** The untouched JSON of any path (field diagnostic). */
+    getRaw: path => get(path),
+
     /** All guestbooks visible to this API key (diagnostics). */
     async listGuestbooks () {
       const list = await get('/guestbooks')
