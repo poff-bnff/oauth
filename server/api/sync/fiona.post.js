@@ -23,7 +23,9 @@
  *                { "mode": "fields", "personIds": [..] } — read-only, at most 5 persons: where does Fiona keep a value? Lists
  *                every field path (with its type) of the person and of each accreditation, from the Publication API and
  *                the XAPI. Shows the values only of country / company / category / programme / occupation fields and of
- *                lookup keys; names, contact details and addresses are reported as "exists" only.
+ *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
+ *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
+ *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
@@ -89,9 +91,10 @@ export default defineEventHandler(async (event) => {
   const testMaxPersons = Number(body?.testMaxPersons) > 0 ? Number(body.testMaxPersons) : 0
   const testScope = ['new', 'existing'].includes(body?.testScope) ? body.testScope : 'all'
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
+  const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths })
 
   return { ok: true, stats }
 })

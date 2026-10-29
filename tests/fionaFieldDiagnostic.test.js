@@ -54,6 +54,19 @@ describe('outlineFields', () => {
     expect(find(fields, 'customFieldValues[accreditation-general-delivered-by]')).toEqual({ path: 'customFieldValues[accreditation-general-delivered-by]', type: 'string' })
   })
 
+  it('shows the values of arrival, departure and other trip fields, so the date and time formats are visible', () => {
+    const fields = outlineFields({
+      tripInfo: { arrivalDate: '2026-11-12', arrivalTime: '14:30', departure: { dateTime: '2026-11-18T09:05:00+02:00' }, flightNumber: 'FR123' },
+      travel: [{ transport: 'plane' }]
+    })
+
+    expect(find(fields, 'tripInfo.arrivalDate').values).toEqual(['2026-11-12'])
+    expect(find(fields, 'tripInfo.arrivalTime').values).toEqual(['14:30'])
+    expect(find(fields, 'tripInfo.departure.dateTime').values).toEqual(['2026-11-18T09:05:00+02:00'])
+    expect(find(fields, 'tripInfo.flightNumber').values).toEqual(['FR123'])
+    expect(find(fields, 'travel[].transport').values).toEqual(['plane'])
+  })
+
   it('shortens long values and keeps at most five distinct examples', () => {
     const many = Array.from({ length: 9 }, (_, i) => ({ category: `Category ${i % 7}` }))
     const fields = outlineFields({ items: many, programme: 'x'.repeat(300) })
@@ -109,6 +122,35 @@ describe('describeFionaFields', () => {
       'xapi /accreditation/{id}'
     ])
     expect(find(result.persons[0].sources[1].fields, 'occupation').values).toEqual(['Producer'])
+  })
+
+  it('also reads the extra paths it is asked for, per API, once per accreditation when the path names it', async () => {
+    calls.length = 0
+    const result = await describeFionaFields({
+      personIds: [10],
+      paths: ['xapi:/accreditation/{accreditationId}/trips', 'publication:/persons/{personId}/trip'],
+      strapi,
+      publication: reader('publication'),
+      xapi: reader('xapi'),
+      log: silent
+    })
+
+    expect(calls.slice(-3)).toEqual([
+      'xapi /accreditation/acc-a/trips',
+      'xapi /accreditation/acc-b/trips',
+      'publication /persons/fp-10/trip'
+    ])
+    const labels = result.persons[0].sources.map(source => source.source)
+    expect(labels.slice(-3)).toEqual(['xapi /accreditation/{accreditationId}/trips', 'xapi /accreditation/{accreditationId}/trips', 'publication /persons/{personId}/trip'])
+    expect(result.persons[0].sources.at(-3).accreditationId).toBe('acc-a')
+  })
+
+  it('says so when an extra path asks for an API that is not available, and refuses unknown prefixes', async () => {
+    const result = await describeFionaFields({ personIds: [10], paths: ['xapi:/person/{personId}/trip'], strapi, publication: reader('publication'), xapi: null, log: silent })
+
+    expect(result.persons[0].sources.at(-1)).toEqual({ source: 'xapi /person/{personId}/trip', error: 'the xapi is not configured' })
+    await expect(describeFionaFields({ personIds: [10], paths: ['ftp:/x'], strapi, publication: reader('publication'), log: silent })).rejects.toThrow(/xapi: or publication:/)
+    await expect(describeFionaFields({ personIds: [10], paths: Array(11).fill('xapi:/x'), strapi, publication: reader('publication'), log: silent })).rejects.toThrow(/at most 10 paths/)
   })
 
   it('works with one API only', async () => {
