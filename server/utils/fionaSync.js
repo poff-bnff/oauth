@@ -113,7 +113,8 @@ function buildDeps () {
       keepBioPersonIds: config.syncKeepBioPersonIds || '',
       maxPersonsPerRun: numberOr(config.syncMaxPersonsPerRun, 50),
       unpublishedPhotos: String(config.syncUnpublishedPhotos).toLowerCase() === 'true',
-      unpublishedBios: String(config.syncUnpublishedBios).toLowerCase() === 'true'
+      unpublishedBios: String(config.syncUnpublishedBios).toLowerCase() === 'true',
+      extraFields: String(config.syncExtraFields).toLowerCase() === 'true'
     }
   }
 }
@@ -141,7 +142,7 @@ async function compareFionaSources () {
   return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
 }
 
-export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], testScope = 'all' } = {}) {
+export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], testExtraFields = false, testScope = 'all' } = {}) {
   if (mode === 'status') return statusReport()
   if (syncRunning) {
     log.warn('Sync already running — skipping this invocation')
@@ -149,17 +150,17 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
   }
   if (background) {
     // answer at once and let the run go on; its progress and result are asked for with mode "status"
-    runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths }).catch(err => log.error(`background run failed: ${err?.message || err}`))
+    runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields }).catch(err => log.error(`background run failed: ${err?.message || err}`))
     return { started: true, mode, dryRun, hint: 'ask {"mode":"status"} for its progress and result' }
   }
-  return await runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths })
+  return await runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields })
 }
 
-async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths }) {
+async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields }) {
   syncRunning = true
   currentRun = { mode, dryRun, startedAt: new Date().toISOString(), stats: null }
   try {
-    const result = await runInner({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths })
+    const result = await runInner({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields })
     lastRun = { mode, dryRun, startedAt: currentRun.startedAt, finishedAt: new Date().toISOString(), stats: result }
     return result
   } catch (err) {
@@ -171,7 +172,7 @@ async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbo
   }
 }
 
-async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths }) {
+async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields }) {
   if (mode === 'compare') return await compareFionaSources()
   // One-off tools for persons the sync made (Strapi person ids): send the Creative Gate "created" email again,
   // and list what Fiona holds as photos (read-only, XAPI).
@@ -199,6 +200,6 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
     const xapi = config.fionaApiKey ? createXapiClient({ fetch: $fetch, apiKey: config.fionaApiKey, log }) : null
     return { mode, ...(await describeFionaFields({ personIds, paths: fieldPaths, strapi: buildStrapiGateway(), publication, xapi, log })) }
   }
-  const only = testRuleIds?.length ? { ruleIds: testRuleIds, maxPersons: testMaxPersons, scope: testScope } : null
+  const only = testRuleIds?.length ? { ruleIds: testRuleIds, maxPersons: testMaxPersons, scope: testScope, extraFields: testExtraFields } : null
   return await runSync({ dryRun, force, mode, only }, buildDeps())
 }

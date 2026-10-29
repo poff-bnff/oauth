@@ -248,3 +248,69 @@ describe('createPublicationClient getRaw', () => {
     expect(calls).toEqual([{ url: 'https://pub.example/v1/accreditations/acc-1', key: 'PUBKEY' }])
   })
 })
+
+describe('the extra values of an accreditation record', () => {
+  const option = (key, optionKey, en) => ({ key, optionKey, sortOrder: 1, translations: [{ language: 'et', label: `${en} et` }, { language: 'en', label: en }] })
+
+  it('reads Current occupation, the Programme/category chips and the company of the accreditation card', () => {
+    const rec = normalizeAccreditationRecord(rawRecord({
+      customFieldValues: [
+        { key: 'accreditation-general-current-occupation', value: ' Producer, Production manager ' },
+        { key: 'accreditation-general-delivered-by', value: '2026-10-28' }
+      ],
+      customFieldOptions: [
+        option('accreditation-general-industry-category', 'discovery_campus', 'Discovery Campus'),
+        option('accreditation-general-gm-tag', 'whoishere', 'WhoIsHere'),
+        option('accreditation-general-industry-category', 'bns', 'Black Nights Stars')
+      ],
+      company: { id: 'c-1', description: 'in.kind' },
+      companyWithRole: { id: 'cwr-1', companyId: 'c-1', name: 'in.kind' },
+      companyOnBadge: 'in.kind'
+    }))
+
+    expect(rec.currentOccupation).toBe('Producer, Production manager')
+    expect(rec.categories).toEqual(['Discovery Campus', 'Black Nights Stars'])
+    expect(rec.companies).toEqual(['in.kind'])
+  })
+
+  it('has nothing for an accreditation without these values, and falls back to the badge company only when no company is linked', () => {
+    const empty = normalizeAccreditationRecord(rawRecord({ customFieldValues: [{ key: 'accreditation-general-current-occupation', value: '' }], company: null, companyWithRole: null, companyOnBadge: null }))
+    expect(empty).toMatchObject({ currentOccupation: null, categories: [], companies: [] })
+
+    const badgeOnly = normalizeAccreditationRecord(rawRecord({ company: null, companyWithRole: null, companyOnBadge: 'Free Text Films' }))
+    expect(badgeOnly.companies).toEqual(['Free Text Films'])
+  })
+
+  it('hands the values to the sync through getAccreditation', async () => {
+    const fetch = () => rawRecord({
+      customFieldValues: [{ key: 'accreditation-general-current-occupation', value: 'Editor' }],
+      customFieldOptions: [option('accreditation-general-industry-category', 'discovery_campus', 'Discovery Campus')],
+      company: { description: 'in.kind' }
+    })
+    const client = createPublicationClient({ fetch, apiKey: 'K', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    expect(await client.getAccreditation('acc-1')).toMatchObject({ occupation: 'Editor', categories: ['Discovery Campus'], companies: ['in.kind'] })
+  })
+})
+
+describe('createPublicationClient getPersonCompanies', () => {
+  it('reads the companies of the person record once and trims the names', async () => {
+    const calls = []
+    const fetch = (url) => {
+      calls.push(url)
+      return { id: 'person-1', accreditations: [{ id: 'acc-1', guestbook: { id: 'gb-30' } }], companies: [{ id: 'x', name: ' IMAGO TC ' }, { id: 'y', name: '' }, { id: 'z', name: 'Beta Pictures' }] }
+    }
+    const client = createPublicationClient({ fetch, apiKey: 'K', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    expect(await client.getPersonCompanies('person-1')).toEqual(['IMAGO TC', 'Beta Pictures'])
+    expect(await client.getPersonCompanies('person-1')).toEqual(['IMAGO TC', 'Beta Pictures'])
+    expect(await client.getPersonAccreditations('person-1')).toEqual([{ id: 'acc-1', guestbookId: 'gb-30' }])
+    expect(calls).toEqual(['https://pub.example/v1/persons/person-1'])
+  })
+
+  it('is empty for a person without companies', async () => {
+    const client = createPublicationClient({ fetch: () => ({ id: 'p', accreditations: [] }), apiKey: 'K', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    expect(await client.getPersonCompanies('p')).toEqual([])
+  })
+})
