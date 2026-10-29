@@ -438,3 +438,15 @@ describe('createXapiClient headshot without download', () => {
     expect(downloads).toEqual([])
   })
 })
+
+describe('createXapiClient getRaw', () => {
+  it('returns the untouched JSON of any path, sending the X-ApiKey header (for the field diagnostic)', async () => {
+    const calls = []
+    const body = { Id: 'p1', Something: { New: true } }
+    const fetch = (url, options) => { calls.push({ url, key: options.headers['X-ApiKey'] }); return body }
+    const client = createXapiClient({ fetch, apiKey: 'KEY', baseUrl: 'https://xapi.example/api', log: { warn () {} } })
+
+    expect(await client.getRaw('/person/p1')).toBe(body)
+    expect(calls).toEqual([{ url: 'https://xapi.example/api/person/p1', key: 'KEY' }])
+  })
+})

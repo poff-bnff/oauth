@@ -236,3 +236,15 @@ describe('createPublicationClient photo without download', () => {
     expect(downloads).toEqual([])
   })
 })
+
+describe('createPublicationClient getRaw', () => {
+  it('returns the untouched JSON of any path, sending the apikey header (for the field diagnostic)', async () => {
+    const calls = []
+    const body = { id: 'acc-1', somethingNew: { nested: ['x'] } }
+    const fetch = (url, options) => { calls.push({ url, key: options.headers.apikey }); return body }
+    const client = createPublicationClient({ fetch, apiKey: 'PUBKEY', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    expect(await client.getRaw('/accreditations/acc-1')).toBe(body)
+    expect(calls).toEqual([{ url: 'https://pub.example/v1/accreditations/acc-1', key: 'PUBKEY' }])
+  })
+})
