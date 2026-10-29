@@ -20,6 +20,7 @@ const LOOKED_FOR = /countr|compan|organi[sz]|employer|categor|programme|occupati
 const splitIds = value => String(value ?? '').split(',').map(id => id.trim()).filter(Boolean)
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+const isOptionList = list => list.length > 0 && list.every(item => isRecord(item) && typeof item.key === 'string' && typeof item.optionKey === 'string')
 const isKeyValueList = list => list.length > 0 && list.every(item => isRecord(item) && typeof item.key === 'string' && 'value' in item)
 
 function shorten (value) {
@@ -50,6 +51,15 @@ export function outlineFields (root) {
     if (Array.isArray(value)) {
       const arrayPath = `${path}[]`
       note(arrayPath, 'array', { count: value.length })
+      if (isOptionList(value)) {
+        // the chosen options of multi-select custom fields: one entry per field key, the examples are "optionKey = English label"
+        for (const item of value) {
+          const translations = Array.isArray(item.translations) ? item.translations : []
+          const label = (translations.find(t => t?.language === 'en') ?? translations[0])?.label
+          note(`${path}[${item.key}]`, 'option', { example: label ? `${item.optionKey} = ${label}` : item.optionKey })
+        }
+        return
+      }
       if (isKeyValueList(value)) {
         for (const item of value) {
           const fieldPath = `${path}[${item.key}]`
