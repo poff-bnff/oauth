@@ -217,6 +217,9 @@ export function createPublicationClient ({
   return {
     resetCache () { records.clear(); persons.clear() },
 
+    /** The untouched JSON of any path (field diagnostic). */
+    getRaw: path => get(path),
+
     async listGuestbooks () {
       const list = await get('/guestbooks')
       return (Array.isArray(list) ? list : [])

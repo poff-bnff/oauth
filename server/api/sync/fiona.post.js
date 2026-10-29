@@ -20,6 +20,10 @@
  *                attachments (headshot, showcase, ...) for those persons, published or not. Never shows a file.
  *                Add "probe": true (at most 10 persons) to also try the real Headshot download and Biography read
  *                and see whether each step worked (size, or the error message).
+ *                { "mode": "fields", "personIds": [..] } — read-only, at most 5 persons: where does Fiona keep a value? Lists
+ *                every field path (with its type) of the person and of each accreditation, from the Publication API and
+ *                the XAPI. Shows the values only of country / company / category / programme / occupation fields and of
+ *                lookup keys; names, contact details and addresses are reported as "exists" only.
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
@@ -75,7 +79,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails is the one thing that must never happen by accident: a dry run unless dryRun is explicitly false
   const dryRun = mode === 'renotify' ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
