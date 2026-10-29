@@ -26,6 +26,7 @@
 import { normalizeRules, indexRules, evaluateBadges } from './rules.js'
 import { mergeDesired, planRemovals, splitIds } from './desiredState.js'
 import { buildPersonPayload, valuesToClear } from './personMapper.js'
+import { normalizeName, uniqueNames, splitOccupations, isPlaceholderCompany, planCategories, planRoles, planCountry } from './extraFields.js'
 import { headshotFileName } from './photoName.js'
 
 export const JOB_KEY = 'accreditations'
@@ -87,10 +88,18 @@ function newStats (dryRun, mode) {
     customFieldKeys: {},
     ruleRoles: [],
     build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
-    switches: { unpublishedPhotos: false, unpublishedBios: false },
+    switches: { unpublishedPhotos: false, unpublishedBios: false, extraFields: false },
     backlog: { cap: 0, more: false },
     photos: { published: 0, headshot: 0, missing: [] },
     bios: { accreditation: 0, missing: [] },
+    // the extra values of a full-profile person (country, companies, Programme/category, Current occupation); only ever added
+    extras: {
+      errors: 0,
+      country: { set: 0, unmatched: {} },
+      organisations: { linked: 0, created: 0, wouldCreate: 0, skipped: 0, createdNames: [] },
+      categories: { added: 0, unmatched: {} },
+      roles: { added: 0, unmatched: {} }
+    },
     removals: { skipped: false, reason: null },
     incremental: null,
     editionsWithGuestbook: [],
@@ -160,7 +169,7 @@ function contentDiff (existing, payload, changed) {
 function changedFields (existing, payload) {
   const changed = []
   for (const [key, value] of Object.entries(payload)) {
-    if (key === 'skipbuild' || key === 'fiona_synced_at') continue
+    if (key === 'skipbuild' || key === 'fiona_synced_at' || key === 'orderedRaF') continue // orderedRaF rows are only sent when something is new
     const current = existing[key]
     if (Array.isArray(value)) {
       if (!sameIds(relationIds(current), value)) changed.push(key)
@@ -244,7 +253,10 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   const startedMs = Date.now()
   const stats = newStats(dryRun, mode)
   deps.onStart?.(stats) // lets a caller watch the stats of a long run while it is still going
-  stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios) }
+  // extra values (country, companies, Programme/category, occupation): written only with the switch on (or in a test run
+  // that asks for it); a dry run always shows what they would do
+  const extraFieldsOn = Boolean(config.extraFields) || Boolean(only?.extraFields)
+  stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios), extraFields: extraFieldsOn }
   stats.backlog = { cap: maxPersonsPerRun, more: false }
   if (only) stats.test = { ruleIds: [...testRuleIds], maxPersons: maxPersonsPerRun, scope: testScope, outsideRules: 0, alreadyInStrapi: 0 }
   const would = dryRun ? 'DRY RUN would ' : ''
@@ -407,6 +419,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   // 4. Desired state ---------------------------------------------------------
   const desired = new Map()
   const privacy = new Map() // fionaPersonId → { contact, email, phone }, true when ANY of the person's accreditations says so
+  const extras = new Map() // fionaPersonId → { categories, occupations, companies } from the person's matching accreditations
   const erroredAccreditationIds = new Set()
   const erroredPersonIds = new Set()
   const histogram = new Map() // guestbookId → Map(label → { badgeName, badgeId, counts })
@@ -457,6 +470,11 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       phone: before.phone || detail.noPublicationOfPhone === true
     })
     countCustomFields(detail.customFields)
+    const wanted = extras.get(detail.personId) || { categories: [], occupations: [], companies: [] }
+    wanted.categories.push(...(detail.categories || []))
+    wanted.occupations.push(...splitOccupations(detail.occupation))
+    wanted.companies.push(...(detail.companies || []))
+    extras.set(detail.personId, wanted)
     return true
   }
 
@@ -634,6 +652,84 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
     fullProfile: [...desired.values()].filter(entry => entry.fullRuleIds.has(rule.id)).length
   }))
 
+  // The extra values of a full-profile person. Only ever ADDS: what the person has in Strapi stays; a value Strapi does
+  // not know is reported, and only organisations are created (not public yet). Returns null when Strapi cannot look the lists up.
+  const organisationIdByName = new Map() // normalised company name → organisation id, found or created in this run
+  const plannedNewOrganisations = new Set() // a dry run: the names it would create
+  const countName = (counts, name) => { counts[name] = (counts[name] || 0) + 1 }
+  async function planExtraFields ({ existing, fionaPerson, wanted }) {
+    if (typeof strapi.listIndustryCategories !== 'function') return null
+    const payload = {}
+    const pending = [] // changes that are not a plain payload field the comparison sees
+    let countryId = null
+
+    if (wanted?.categories.length) {
+      const plan = planCategories({ labels: wanted.categories, strapiCategories: await strapi.listIndustryCategories(), existingIds: relationIds(existing?.industry_categories) })
+      plan.unmatched.forEach(label => countName(stats.extras.categories.unmatched, label))
+      if (plan.ids) {
+        payload.industry_categories = plan.ids
+        stats.extras.categories.added += plan.added.length
+      }
+    }
+
+    if (wanted?.occupations.length) {
+      const plan = planRoles({ occupations: wanted.occupations, strapiRoles: await strapi.listRoleAtFilms(), existingRows: Array.isArray(existing?.orderedRaF) ? existing.orderedRaF : [] })
+      plan.unmatched.forEach(occupation => countName(stats.extras.roles.unmatched, occupation))
+      if (plan.rows) {
+        payload.orderedRaF = plan.rows
+        pending.push('orderedRaF')
+        stats.extras.roles.added += plan.added.length
+      }
+    }
+
+    // the company of the accreditation card first, then the ones of the person's own card
+    const allCompanyNames = uniqueNames([...(wanted?.companies || []), ...(fionaPerson.companies || [])])
+    const companyNames = allCompanyNames.filter(name => !isPlaceholderCompany(name))
+    stats.extras.organisations.skipped += allCompanyNames.length - companyNames.length
+    if (companyNames.length) {
+      const have = relationIds(existing?.organisations)
+      const next = [...have]
+      let wouldCreate = false
+      for (const name of companyNames) {
+        const key = normalizeName(name)
+        if (plannedNewOrganisations.has(key)) { wouldCreate = true; continue }
+        let id = organisationIdByName.get(key)
+        if (id === undefined) {
+          const hit = (await strapi.findOrganisationsByName(name)).find(org => org.names.some(candidate => normalizeName(candidate) === key))
+          id = hit ? Number(hit.id) : null
+          if (id !== null) organisationIdByName.set(key, id)
+        }
+        if (id === null) {
+          if (dryRun) {
+            plannedNewOrganisations.add(key)
+            stats.extras.organisations.wouldCreate++
+            if (stats.extras.organisations.createdNames.length < 100) stats.extras.organisations.createdNames.push(name)
+            wouldCreate = true
+            continue
+          }
+          id = Number(await strapi.createOrganisation({ name }))
+          organisationIdByName.set(key, id)
+          stats.extras.organisations.created++
+          if (stats.extras.organisations.createdNames.length < 100) stats.extras.organisations.createdNames.push(name)
+        }
+        if (!next.includes(id)) {
+          next.push(id)
+          stats.extras.organisations.linked++
+        }
+      }
+      if (next.length > have.length) payload.organisations = next
+      if (wouldCreate) pending.push('organisations')
+    }
+
+    const country = planCountry({ country: fionaPerson.country, strapiCountries: await strapi.listCountries() })
+    if (country.unmatched) countName(stats.extras.country.unmatched, country.unmatched)
+    if (country.id && !(existing && await strapi.getPersonAddressCountryId(existing))) {
+      countryId = country.id
+      pending.push('addr_coll.country')
+    }
+    return { payload, pending, countryId }
+  }
+
   // 6. Upsert desired persons -----------------------------------------------
   if (testRuleIds) stats.test.outsideRules = [...desired.values()].filter(entry => ![...entry.matchedRuleIds].some(id => testRuleIds.has(Number(id)))).length
   let written = 0 // persons this run writes: created, or updated because something differs
@@ -740,6 +836,16 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
         fiona_assigned_role_ids: uniqueNumbers(want.roleIds).join(','),
         festival_editions: editionIds
       })
+      // optional values: when their lookups fail the person is still synced without them
+      let extra = null
+      if (want.level === 2 && (dryRun || extraFieldsOn)) {
+        try {
+          extra = await planExtraFields({ existing, fionaPerson, wanted: extras.get(fionaPersonId) })
+        } catch (err) {
+          if (++stats.extras.errors <= 3) warn(`person ${fionaPersonId}: extra values skipped (${describeError(err)})`)
+        }
+      }
+      if (extra) Object.assign(payload, extra.payload)
       if (existing?.fiona_unpublished_at) {
         payload.fiona_unpublished_at = null
         payload.show_in_cg_search = true
@@ -760,6 +866,8 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       // the picture joins the payload only after the upload (real runs), so a photo that is the only difference would
       // look like "nothing changed" and never be written: count it as a change of the person here
       if (photo && existing && !changed.includes('picture')) changed.push('picture')
+      // changes the field comparison does not see: roles to add, companies still to create, a country for the address
+      if (existing && extra) for (const key of extra.pending) if (!changed.includes(key)) changed.push(key)
       // ticking "public" on a person that never had it set changes nothing on the site, so it is no reason to build the page again;
       // a person that was switched off (false) is left out of the site data, so ticking it brings the person back and needs a build
       const onlyPublicChanged = Boolean(changed?.length) && changed.every(key => key === 'public') && existing.public !== false
@@ -851,6 +959,12 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       stats.editions.attached += newlyAttached.length
       stats.editions.detached += detach.length
       if (action) stats.persons.downgraded++
+
+      if (extra?.countryId) {
+        await strapi.setPersonAddressCountry({ id: person.id, addr_coll: existing?.addr_coll || null }, extra.countryId)
+        stats.extras.country.set++
+        personChanged = true
+      }
 
       if (Number(relationId(user.person)) !== Number(person.id)) {
         await strapi.linkPersonToUser(person.id, user.id)

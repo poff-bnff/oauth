@@ -53,6 +53,7 @@ export default defineNuxtConfig({
     syncMaxRemovals: '', // NUXT_SYNC_MAX_REMOVALS — cap on unpublishes per sync run (default 50)
     syncMaxBuildsPerRun: '', // NUXT_SYNC_MAX_BUILDS_PER_RUN — site builds per rule and run when the rule leaves target_builds_limit_per_run empty (default 20)
     syncUnpublishedPhotos: '', // NUXT_SYNC_UNPUBLISHED_PHOTOS — 'true': a full-profile person without a published photo gets the Fiona attachment whose content type is Headshot (default off)
+    syncExtraFields: '', // NUXT_SYNC_EXTRA_FIELDS — 'true': a full-profile person also gets the country (address), companies (organisations, created when missing), Programme/category (industry categories) and Current occupation (ordered roles) from Fiona; only ever added
     syncUnpublishedBios: '', // NUXT_SYNC_UNPUBLISHED_BIOS — 'true': a full-profile person gets the Biography memo of its accreditation card as biography (the only source; default off = no biography from the sync)
     syncMaxPersonsPerRun: '', // NUXT_SYNC_MAX_PERSONS_PER_RUN — most persons one run writes (default 50, 0 = no cap); the run then stops and the automatic mode carries on two minutes later until a run writes fewer
     syncKeepBioPersonIds: '', // NUXT_SYNC_KEEP_BIO_PERSON_IDS — comma-separated Strapi person ids whose existing biography the Fiona sync never overwrites

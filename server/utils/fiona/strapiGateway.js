@@ -42,6 +42,14 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
   }
 
   const first = list => (Array.isArray(list) && list.length ? list[0] : null)
+  const asList = value => (Array.isArray(value) ? value : [])
+
+  // lists that do not change during a run (countries, categories, roles) are read once per gateway
+  const once = new Map()
+  const readOnce = async (key, load) => {
+    if (!once.has(key)) once.set(key, await load())
+    return once.get(key)
+  }
 
   return {
     async loadRules () {
@@ -132,6 +140,55 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
 
     async setUserRoles (userId, roleIds) {
       await put(`/users/${encodeURIComponent(userId)}`, { user_roles: [...roleIds] })
+    },
+
+    /** Strapi countries (English name for matching). */
+    async listCountries () {
+      return await readOnce('countries', async () => asList(await get('/countries?_limit=-1')).map(country => ({ id: country.id, name_en: country.name_en, code: country.code })))
+    },
+
+    /** Strapi industry categories (the list behind Programme/category). */
+    async listIndustryCategories () {
+      return await readOnce('industry-categories', async () => asList(await get('/industry-categories?_limit=-1')).map(({ id, name }) => ({ id, name })))
+    },
+
+    /** Strapi roles at films with every name they carry (English first), for matching an occupation. */
+    async listRoleAtFilms () {
+      return await readOnce('role-at-films', async () => asList(await get('/role-at-films?_limit=-1')).map(role => ({
+        id: role.id,
+        order: role.order,
+        names: [role.roleName?.en, role.roleName?.et, role.roleName?.ru, role.roleNamePrivate].filter(name => typeof name === 'string' && name.trim())
+      })))
+    },
+
+    /** Organisations whose name contains `name` in any name field, public or not (the sync decides which one is the same). */
+    async findOrganisationsByName (name) {
+      const value = encodeURIComponent(name)
+      const clauses = ['name_en', 'namePrivate', 'name_et', 'name_ru'].map((field, index) => `_where[_or][${index}][${field}_contains]=${value}`)
+      const found = asList(await get(`/organisations?${clauses.join('&')}&_limit=30`))
+      return found.map(org => ({ id: org.id, names: [org.name_en, org.namePrivate, org.name_et, org.name_ru].filter(text => typeof text === 'string' && text.trim()) }))
+    },
+
+    /** A new organisation from a company name in Fiona. Not public: no half-empty organisation page until someone ticks it. */
+    async createOrganisation ({ name }) {
+      const created = await post('/organisations', { name_en: name, namePrivate: name, public: false })
+      return Number(created.id)
+    },
+
+    /** The id of the country in the person's address, null when there is no address or no country in it. */
+    async getPersonAddressCountryId (person) {
+      const address = person?.addr_coll
+      if (!address) return null
+      if (typeof address === 'object' && 'country' in address) return address.country ? Number(relationId(address.country)) : null
+      const record = await getOrNull(`/addresses/${encodeURIComponent(relationId(address))}`)
+      return record?.country ? Number(relationId(record.country)) : null
+    },
+
+    /** Put the country into the person's address: fill an address that has none, or create the address. */
+    async setPersonAddressCountry (person, countryId) {
+      const address = person?.addr_coll
+      if (address) await put(`/addresses/${encodeURIComponent(relationId(address))}`, { country: Number(countryId) })
+      else await post('/addresses', { country: Number(countryId), person: Number(person.id) })
     },
 
     async createPerson (payload) {

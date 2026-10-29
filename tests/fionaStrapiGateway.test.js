@@ -217,3 +217,74 @@ describe('createStrapiGateway', () => {
     expect(calls[0].body.get('files')).toBeTruthy()
   })
 })
+
+describe('createStrapiGateway lookups for the extra Fiona values', () => {
+  const deps = () => ({ config: { strapiUrl: STRAPI }, getAdminToken: () => 'ADMIN', getActiveFionaGuestbooks: () => [], log: { warn () {}, info () {}, error () {} } })
+
+  it('lists countries, industry categories and roles once per gateway, in full', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /countries': [{ id: 7, name_en: 'Poland', name_et: 'Poola', code: 'PL', other: 'x' }],
+      'GET /industry-categories': [{ id: 1, name: 'Discovery Campus', description: 'long text' }],
+      'GET /role-at-films': [{ id: 11, order: 5, roleNamePrivate: 'Producer (private)', roleName: { id: 3, en: 'Producer', et: 'Produtsent', ru: '' } }]
+    })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+
+    expect(await gateway.listCountries()).toEqual([{ id: 7, name_en: 'Poland', code: 'PL' }])
+    expect(await gateway.listIndustryCategories()).toEqual([{ id: 1, name: 'Discovery Campus' }])
+    expect(await gateway.listRoleAtFilms()).toEqual([{ id: 11, order: 5, names: ['Producer', 'Produtsent', 'Producer (private)'] }])
+    await gateway.listCountries()
+    await gateway.listRoleAtFilms()
+
+    expect(calls.map(call => call.url.replace(STRAPI, ''))).toEqual(['/countries?_limit=-1', '/industry-categories?_limit=-1', '/role-at-films?_limit=-1'])
+  })
+
+  it('finds organisations by name in every name field, public or not', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /organisations': [{ id: 5, name_en: 'in.kind', namePrivate: null, name_et: 'in.kind', name_ru: undefined, public: false }] })
+
+    const found = await createStrapiGateway({ fetch, ...deps() }).findOrganisationsByName('in.kind & Co')
+
+    expect(found).toEqual([{ id: 5, names: ['in.kind', 'in.kind'] }])
+    const url = decodeURIComponent(calls[0].url)
+    expect(url).toContain('_where[_or][0][name_en_contains]=in.kind & Co')
+    expect(url).toContain('_where[_or][1][namePrivate_contains]=in.kind & Co')
+    expect(url).toContain('_where[_or][2][name_et_contains]=in.kind & Co')
+    expect(url).toContain('_where[_or][3][name_ru_contains]=in.kind & Co')
+    expect(url).not.toContain('public=')
+  })
+
+  it('creates an organisation that is not public yet, with the name in both name fields', async () => {
+    const { fetch, calls } = fakeFetch({ 'POST /organisations': { id: 321, name_en: 'in.kind' } })
+
+    const id = await createStrapiGateway({ fetch, ...deps() }).createOrganisation({ name: 'in.kind' })
+
+    expect(id).toBe(321)
+    expect(calls[0].url).toBe(`${STRAPI}/organisations`)
+    expect(calls[0].body).toEqual({ name_en: 'in.kind', namePrivate: 'in.kind', public: false })
+  })
+
+  it('reads the country of the address from the person, or from the address record when the person only carries its id', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /addresses/40': { id: 40, country: { id: 7 } }, 'GET /addresses/41': { id: 41, country: null } })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+
+    expect(await gateway.getPersonAddressCountryId({ addr_coll: { id: 9, country: { id: 7 } } })).toBe(7)
+    expect(await gateway.getPersonAddressCountryId({ addr_coll: { id: 9, country: null } })).toBeNull()
+    expect(await gateway.getPersonAddressCountryId({ addr_coll: null })).toBeNull()
+    expect(calls).toEqual([])
+    expect(await gateway.getPersonAddressCountryId({ addr_coll: { id: 40 } })).toBe(7)
+    expect(await gateway.getPersonAddressCountryId({ addr_coll: 41 })).toBeNull()
+    expect(calls.map(call => call.url.replace(STRAPI, ''))).toEqual(['/addresses/40', '/addresses/41'])
+  })
+
+  it('creates the address with the country when the person has none, or fills the country of an address without one', async () => {
+    const { fetch, calls } = fakeFetch({ 'POST /addresses': { id: 50 }, 'PUT /addresses/9': { id: 9 } })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+
+    await gateway.setPersonAddressCountry({ id: 100, addr_coll: null }, 7)
+    await gateway.setPersonAddressCountry({ id: 101, addr_coll: { id: 9 } }, 8)
+
+    expect(calls.map(call => `${call.method} ${call.url.replace(STRAPI, '')} ${JSON.stringify(call.body)}`)).toEqual([
+      'POST /addresses {"country":7,"person":100}',
+      'PUT /addresses/9 {"country":8}'
+    ])
+  })
+})

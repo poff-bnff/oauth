@@ -14,6 +14,7 @@
  * full-profile person and the XAPI; otherwise the person gets no biography from the sync.
  * Photos are editorial content: the published one comes first. Only when the switch allowUnpublishedPhotos is on, a
  * full-profile person without a published photo gets the attachment whose content type is Headshot, published or not.
+ * The companies of a full-profile person's own card come from the Publication API too (getPersonCompanies).
  * XAPI failures never fail the sync: the published data is kept and a
  * warning is logged.
  */
@@ -55,6 +56,10 @@ export function createHybridClient ({ publication, xapi = null, log = console, a
         }
       }
       result = { ...result, bio: null }
+      // the companies of the person card (a full-profile person only; the accreditation card's company comes with getAccreditation)
+      if (level >= 2 && typeof publication.getPersonCompanies === 'function') {
+        result = { ...result, companies: await fallback(log, 'companies', personId, () => publication.getPersonCompanies(personId), []) }
+      }
       if (!allowUnpublishedBios || level < 2 || typeof xapi?.getUnpublishedBiography !== 'function') return result
       const card = await fallback(log, 'biography', personId, () => xapi.getUnpublishedBiography(accreditationIds), null)
       return card?.text ? { ...result, bio: card.text, bioSource: 'accreditation' } : result

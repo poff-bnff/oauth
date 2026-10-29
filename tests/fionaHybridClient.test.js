@@ -195,3 +195,28 @@ describe('createHybridClient', () => {
     })
   })
 })
+
+describe('createHybridClient person companies', () => {
+  it('adds the companies of the person card for a full-profile person only', async () => {
+    const asked = []
+    const publication = publicationStub({ getPersonCompanies: (id) => { asked.push(id); return ['IMAGO TC'] } })
+    const client = createHybridClient({ publication, xapi: null, log: { warn () {} } })
+
+    expect((await client.getPerson('p', { level: 2 })).companies).toEqual(['IMAGO TC'])
+    expect((await client.getPerson('p', { level: 1 })).companies).toBeUndefined()
+    expect(asked).toEqual(['p'])
+  })
+
+  it('carries on without companies when they cannot be read', async () => {
+    const publication = publicationStub({ getPersonCompanies: () => { throw new Error('HTTP 500') } })
+    const client = createHybridClient({ publication, xapi: null, log: { warn () {} } })
+
+    expect((await client.getPerson('p', { level: 2 })).companies).toEqual([])
+  })
+
+  it('works with a Publication client that has no company lookup', async () => {
+    const client = createHybridClient({ publication: publicationStub(), xapi: null, log: { warn () {} } })
+
+    expect((await client.getPerson('p', { level: 2 })).companies).toBeUndefined()
+  })
+})

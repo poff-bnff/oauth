@@ -17,7 +17,12 @@
  * the key so this module has no Nuxt globals.
  */
 
+import { uniqueNames } from './extraFields.js'
+
 const DEFAULT_BASE_URL = 'https://poff-online-api.fiona-online.net/v1'
+// the accreditation card's "Current occupation" (free text) and the multi-select field behind "Programme/category"
+const OCCUPATION_KEY = 'accreditation-general-current-occupation'
+const CATEGORY_KEYS = new Set(['accreditation-general-industry-category'])
 const RETRYABLE_CODES = new Set(['EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT'])
 
 const text = value => (value === null || value === undefined) ? null : String(value)
@@ -91,6 +96,30 @@ export function privacyFlagsFromCustomFields (customFields) {
   return flags
 }
 
+/** The text of one custom field of the accreditation card, or null when it is empty. */
+function customFieldText (customFields, key) {
+  const hit = normalizeCustomFields(customFields).find(field => field.key === key)
+  const value = typeof hit?.value === 'string' ? hit.value.trim() : ''
+  return value || null
+}
+
+/** The chosen options of the Programme/category field(s): the English label (or the option key) of each. */
+function categoryLabels (customFieldOptions) {
+  return uniqueNames((Array.isArray(customFieldOptions) ? customFieldOptions : [])
+    .filter(option => CATEGORY_KEYS.has(option?.key))
+    .map((option) => {
+      const translations = Array.isArray(option.translations) ? option.translations : []
+      const en = translations.find(t => lower(t?.language) === 'en')
+      return en?.label ?? translations[0]?.label ?? option.optionKey
+    }))
+}
+
+/** The company of the accreditation card: the linked company first; the free text of the badge only when none is linked. */
+function accreditationCompanies (raw) {
+  const linked = uniqueNames([raw?.company?.description, raw?.companyWithRole?.name])
+  return linked.length ? linked : uniqueNames([raw?.companyOnBadge])
+}
+
 function normalizePublishedPerson (person, record) {
   const country = person?.address?.country
   return {
@@ -131,6 +160,9 @@ export function normalizeAccreditationRecord (raw) {
     noPublicationOfContactDetails: raw?.noPublicationOfContactDetails === true,
     ...privacyFlagsFromCustomFields(raw?.customFieldValues),
     customFields: normalizeCustomFields(raw?.customFieldValues),
+    currentOccupation: customFieldText(raw?.customFieldValues, OCCUPATION_KEY),
+    categories: categoryLabels(raw?.customFieldOptions),
+    companies: accreditationCompanies(raw),
     films,
     person: normalizePublishedPerson(raw?.person, raw)
   }
@@ -163,6 +195,7 @@ export function createPublicationClient ({
 
   const records = new Map() // accreditationId → normalised record
   const persons = new Map() // personId → normalised person (from the last record seen)
+  const personRecords = new Map() // personId → the raw `/persons/{id}` answer (accreditations, companies)
 
   async function get (path) {
     const url = `${baseUrl}${path}`
@@ -197,8 +230,14 @@ export function createPublicationClient ({
     return records.get(id)
   }
 
+  async function getPersonRecord (personId) {
+    const id = String(personId)
+    if (!personRecords.has(id)) personRecords.set(id, await get(`/persons/${encodeURIComponent(id)}`))
+    return personRecords.get(id)
+  }
+
   async function getPersonAccreditations (personId) {
-    const person = await get(`/persons/${encodeURIComponent(personId)}`)
+    const person = await getPersonRecord(personId)
     return (Array.isArray(person?.accreditations) ? person.accreditations : [])
       .map(item => ({ id: text(item?.id), guestbookId: text(item?.guestbook?.id) }))
       .filter(item => item.id)
@@ -215,7 +254,7 @@ export function createPublicationClient ({
   }
 
   return {
-    resetCache () { records.clear(); persons.clear() },
+    resetCache () { records.clear(); persons.clear(); personRecords.clear() },
 
     /** The untouched JSON of any path (field diagnostic). */
     getRaw: path => get(path),
@@ -256,11 +295,20 @@ export function createPublicationClient ({
         noPublicationOfEmail: record.noPublicationOfEmail,
         noPublicationOfPhone: record.noPublicationOfPhone,
         customFields: record.customFields,
+        occupation: record.currentOccupation,
+        categories: record.categories,
+        companies: record.companies,
         films: record.films
       }
     },
 
     getPerson,
+
+    /** The names of the companies on the person's own card (the accreditation card has its own, see getAccreditation). */
+    async getPersonCompanies (personId) {
+      const record = await getPersonRecord(personId)
+      return uniqueNames((Array.isArray(record?.companies) ? record.companies : []).map(company => company?.name))
+    },
 
     async getMyPoffUserId (personId) {
       return (await getPerson(personId)).externalAccountId || null
