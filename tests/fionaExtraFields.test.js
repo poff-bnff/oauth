@@ -19,7 +19,7 @@ describe('uniqueNames', () => {
 
 describe('isPlaceholderCompany', () => {
   it('recognises the words people type when they have no company', () => {
-    for (const word of ['N/A', 'n.a.', 'None', '-', 'Freelance', 'freelancer', 'Self-employed', 'Independent', 'unemployed', 'TBD', 'no company']) expect(isPlaceholderCompany(word), word).toBe(true)
+    for (const word of ['N/A', 'n.a.', 'None', '-', 'Freelance', 'freelancer', 'Self-employed', 'Independent', 'independant', 'Free lance', 'unemployed', 'TBD', 'no company', 'Not applicable', 'unknown', 'Student', 'retired']) expect(isPlaceholderCompany(word), word).toBe(true)
   })
 
   it('does not mistake a real company for one', () => {
@@ -44,6 +44,16 @@ describe('planCategories', () => {
 
     expect(plan.ids).toEqual([2, 1, 3])
     expect(plan.added).toEqual(['Discovery Campus', 'Breaking into the Industry'])
+    expect(plan.unmatched).toEqual([])
+  })
+
+  it('maps every "Works in Progress ..." variant to the one Strapi category Works in Progress, once', () => {
+    const strapi = [...strapiCategories, { id: 4, name: 'Works in Progress' }]
+
+    const plan = planCategories({ labels: ['Works in Progress International', 'Works in Progress Youth', 'Works in Progress'], strapiCategories: strapi, existingIds: [] })
+
+    expect(plan.ids).toEqual([4])
+    expect(plan.added).toEqual(['Works in Progress'])
     expect(plan.unmatched).toEqual([])
   })
 
@@ -84,6 +94,22 @@ describe('planRoles', () => {
     const plan = planRoles({ occupations: ['Producer'], strapiRoles, existingRows: [{ id: 5, order: 1, role_at_film: null }] })
 
     expect(plan.rows).toEqual([{ id: 5, order: 1, role_at_film: null }, { order: 2, role_at_film: 11 }])
+  })
+
+  it('splits "X and Y" and "X & Y" into separate roles, but only when the whole text is not a role itself', () => {
+    const roles = [...strapiRoles, { id: 14, order: 8, names: ['Hair and make-up'] }, { id: 15, order: 9, names: ['Editing'] }]
+
+    const plan = planRoles({ occupations: ['Producer and Editing', 'Hair and make-up', 'Producer & Cinematographer'], strapiRoles: roles, existingRows: [] })
+
+    expect(plan.rows.map(row => row.role_at_film)).toEqual([11, 15, 14, 13])
+    expect(plan.unmatched).toEqual([])
+  })
+
+  it('reports only the parts of a split text that match no role, or the whole text when no part does', () => {
+    const plan = planRoles({ occupations: ['Producer and scriptwriter', 'Chief dreamer and tea maker'], strapiRoles, existingRows: [] })
+
+    expect(plan.rows).toEqual([{ order: 1, role_at_film: 11 }])
+    expect(plan.unmatched).toEqual(['scriptwriter', 'Chief dreamer and tea maker'])
   })
 
   it('matches on any language name of the role', () => {
