@@ -245,6 +245,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   let maxPersonsPerRun = Number.isFinite(Number(config.maxPersonsPerRun)) && config.maxPersonsPerRun !== undefined ? Number(config.maxPersonsPerRun) : 50
   const testRuleIds = only ? new Set(only.ruleIds.map(Number)) : null
   const testScope = only && ['new', 'existing'].includes(only.scope) ? only.scope : 'all'
+  const testFionaPersonIds = only && Array.isArray(only.fionaPersonIds) && only.fionaPersonIds.length ? new Set(only.fionaPersonIds.map(String)) : null
   if (only && Number(only.maxPersons) > 0) maxPersonsPerRun = Number(only.maxPersons)
   let backlogRun = Boolean(backlog)
   // Strapi person ids whose existing biography the sync never overwrites (an empty one is still filled)
@@ -662,6 +663,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
     const payload = {}
     const pending = [] // changes that are not a plain payload field the comparison sees
     let countryId = null
+    let roles = null
 
     if (wanted?.categories.length) {
       const plan = planCategories({ labels: wanted.categories, strapiCategories: await strapi.listIndustryCategories(), existingIds: relationIds(existing?.industry_categories) })
@@ -676,9 +678,8 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       const plan = planRoles({ occupations: wanted.occupations, strapiRoles: await strapi.listRoleAtFilms(), existingRows: Array.isArray(existing?.orderedRaF) ? existing.orderedRaF : [] })
       plan.unmatched.forEach(occupation => countName(stats.extras.roles.unmatched, occupation))
       if (plan.rows) {
-        payload.orderedRaF = plan.rows
+        roles = { rows: plan.rows, count: plan.added.length } // written in a save of their own after the person (see the loop)
         pending.push('orderedRaF')
-        stats.extras.roles.added += plan.added.length
       }
     }
 
@@ -727,7 +728,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       countryId = country.id
       pending.push('addr_coll.country')
     }
-    return { payload, pending, countryId }
+    return { payload, pending, countryId, roles }
   }
 
   // 6. Upsert desired persons -----------------------------------------------
@@ -737,6 +738,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
     if (erroredPersonIds.has(fionaPersonId)) continue
     // a test run handles only the persons the chosen rules match
     if (testRuleIds && ![...want.matchedRuleIds].some(id => testRuleIds.has(Number(id)))) continue
+    if (testFionaPersonIds && !testFionaPersonIds.has(String(fionaPersonId))) continue
     // the cap of persons written per run is reached: stop here and say so; the next run carries on (see decideAutoMode)
     if (!dryRun && maxPersonsPerRun > 0 && written >= maxPersonsPerRun) {
       stats.backlog.more = true
@@ -894,6 +896,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
           log.info(`${would}${action.type} person #${existing?.id} -editions=[${detach.join(', ')}] -roles=[${removeRoles.join(', ')}]`)
           recordDryRun({ action: action.type, fionaPersonId, personId: existing?.id, detachEditionIds: detach, removeRoleIds: removeRoles })
         }
+        if (extra?.roles) stats.extras.roles.added += extra.roles.count
         stats.editions.attached += newlyAttached.length
         stats.editions.detached += detach.length
         if (want.level === 2 && (!existing || (changed.length && !onlyPublicChanged)) && [...want.fullRuleIds].some(id => buildRules.has(id))) stats.build.candidates++
@@ -959,6 +962,17 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       stats.editions.attached += newlyAttached.length
       stats.editions.detached += detach.length
       if (action) stats.persons.downgraded++
+
+      // the roles go in a save of their own: a refused roles write must not take the other values of the person with it
+      if (extra?.roles) {
+        try {
+          await strapi.updatePerson(person.id, { orderedRaF: extra.roles.rows, skipbuild: true })
+          stats.extras.roles.added += extra.roles.count
+          personChanged = true
+        } catch (err) {
+          if (++stats.extras.errors <= 3) warn(`person ${fionaPersonId}: roles not written (${describeError(err)})`)
+        }
+      }
 
       if (extra?.countryId) {
         await strapi.setPersonAddressCountry({ id: person.id, addr_coll: existing?.addr_coll || null }, extra.countryId)

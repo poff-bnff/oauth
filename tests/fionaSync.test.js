@@ -2202,6 +2202,40 @@ describe('runSync: the extra values from Fiona (country, companies, Programme/ca
     expect(strapi.state.addresses.get(person.id).country).toBe(8)
   })
 
+  it('writes the roles in a save of their own, so a refused roles write never stops the other values of the person', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson())
+    const updatePerson = strapi.updatePerson
+    strapi.updatePerson = (id, payload) => {
+      if (payload.orderedRaF) throw new Error('Strapi answered 400 for orderedRaF')
+      return updatePerson(id, payload)
+    }
+
+    const stats = await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    expect(person.industry_categories).toEqual([1])
+    expect(person.organisations).toHaveLength(2)
+    expect(person.orderedRaF).toBeUndefined()
+    expect(strapi.state.addresses.get(person.id).country).toBe(7)
+    expect(stats.errors).toBe(0)
+    expect(stats.persons.created).toBe(1)
+    expect(stats.extras.errors).toBe(1)
+    expect(stats.extras.roles.added).toBe(0)
+    expect(stats.warnings.join(' ')).toMatch(/roles/)
+  })
+
+  it('a test run can be limited to given Fiona persons, so a person with an occupation can be tried on purpose', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1'), richAccreditation('acc2', 'fp2')))
+    fiona.state.persons.set('fp1', richPerson())
+    fiona.state.persons.set('fp2', richPerson({ firstName: 'Philippe', lastName: 'Ros', email: 'philippe@example.com' }))
+
+    const stats = await runSync({ only: { ruleIds: [2], maxPersons: 5, scope: 'all', extraFields: true, fionaPersonIds: ['fp2'] } }, deps)
+
+    expect([...strapi.state.people.values()].map(p => p.fiona_person_id)).toEqual(['fp2'])
+    expect(stats.persons.created).toBe(1)
+  })
+
   it('adds a missing value to a person Strapi already holds and keeps the rows it has, with their ids', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1', { occupation: 'Producer', categories: ['Black Nights Stars'], companies: [] })))
     fiona.state.persons.set('fp1', richPerson({ companies: [], country: null }))
