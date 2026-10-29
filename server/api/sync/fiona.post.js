@@ -29,6 +29,8 @@
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
+ *                Add "extraFields": true to a test run to let it write the extra values (country, companies, Programme/category,
+ *                Current occupation) while the NUXT_SYNC_EXTRA_FIELDS switch is still off; a dry run always shows them.
  *                Add "testScope": "new" to test only persons Strapi does not hold yet (the creation), or "existing" for
  *                only those it already holds (the adoption); the default is both.
  *                Any run can be started with "background": true: the answer comes at once and the run goes on.
@@ -92,9 +94,10 @@ export default defineEventHandler(async (event) => {
   const testScope = ['new', 'existing'].includes(body?.testScope) ? body.testScope : 'all'
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
   const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
+  const testExtraFields = body?.extraFields === true // a test run only: write the extra values (country, companies, ...) even while the switch is off
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields })
 
   return { ok: true, stats }
 })

@@ -58,6 +58,9 @@ function fakeFiona () {
         noPublicationOfEmail: !!a.noPublicationOfEmail,
         noPublicationOfPhone: !!a.noPublicationOfPhone,
         customFields: a.customFields || [],
+        occupation: a.occupation || null,
+        categories: a.categories || [],
+        companies: a.companies || [],
         films: []
       }
     },
@@ -66,7 +69,7 @@ function fakeFiona () {
       if (state.failPersons.has(personId)) throw new Error(`person ${personId} unavailable`)
       const p = state.persons.get(personId)
       if (!p) throw new Error(`no person ${personId}`)
-      return { firstName: p.firstName, lastName: p.lastName, email: p.email, phone: p.phone || null, bio: p.bio || null, bioSource: p.bioSource }
+      return { firstName: p.firstName, lastName: p.lastName, email: p.email, phone: p.phone || null, bio: p.bio || null, bioSource: p.bioSource, country: p.country || null, companies: p.companies }
     },
     getMyPoffUserId (personId) { return state.persons.get(personId)?.myPoffUserId || null },
     listMutations (since) { state.lastMutationsSince = since; return [...state.mutations] },
@@ -104,11 +107,22 @@ function fakeStrapi () {
     writes: [],
     emails: [], // Creative Gate "created" emails Strapi's hooks would send: { userId, personId }
     publisherRoleIds: new Set([ROLE_CG]), // roles with publish_cg_person
+    countries: [], // { id, name_en }
+    industryCategories: [], // { id, name }
+    roleAtFilms: [], // { id, order, names }
+    organisations: [], // { id, names, public }
+    addresses: new Map(), // personId → { id, country }
     nextId: 1000
   }
   const nextId = () => state.nextId++
   const clone = v => JSON.parse(JSON.stringify(v))
-  const populated = p => ({ ...clone(p), festival_editions: (p.festival_editions || []).map(id => ({ id })) })
+  const populated = p => ({
+    ...clone(p),
+    festival_editions: (p.festival_editions || []).map(id => ({ id })),
+    ...(p.organisations ? { organisations: p.organisations.map(id => ({ id })) } : {}),
+    ...(p.industry_categories ? { industry_categories: p.industry_categories.map(id => ({ id })) } : {}),
+    ...(state.addresses.has(p.id) ? { addr_coll: { id: state.addresses.get(p.id).id, country: state.addresses.get(p.id).country ? { id: state.addresses.get(p.id).country } : null } } : {})
+  })
   // Strapi's Creative Gate hooks (web2021 creative_gate_email_notification.js): a person is "ready" when it holds the
   // CG edition and a linked user (Strapi fills the slugs itself). The "created" email goes out on the save that makes
   // it ready, and only if the user holds a publisher role AT THAT MOMENT.
@@ -219,6 +233,25 @@ function fakeStrapi () {
     findOrphanPhoto (filename) {
       const hit = state.orphanUploads.find(file => file.filename === filename)
       return hit ? hit.id : null
+    },
+    listCountries () { return clone(state.countries) },
+    listIndustryCategories () { return clone(state.industryCategories) },
+    listRoleAtFilms () { return clone(state.roleAtFilms) },
+    findOrganisationsByName (name) {
+      const wanted = name.toLowerCase()
+      return state.organisations.filter(org => org.names.some(n => n.toLowerCase().includes(wanted))).map(org => ({ id: org.id, names: [...org.names] }))
+    },
+    createOrganisation ({ name }) {
+      const org = { id: nextId(), names: [name], public: false }
+      state.organisations.push(org)
+      state.writes.push({ op: 'createOrganisation', id: org.id, payload: { name } })
+      return org.id
+    },
+    getPersonAddressCountryId (person) { return state.addresses.get(Number(person.id))?.country ?? null },
+    setPersonAddressCountry (person, countryId) {
+      const have = state.addresses.get(Number(person.id))
+      state.addresses.set(Number(person.id), { id: have?.id ?? nextId(), country: Number(countryId) })
+      state.writes.push({ op: 'setAddressCountry', id: Number(person.id), payload: { country: Number(countryId) } })
     }
   }
 }
@@ -1041,13 +1074,14 @@ describe('runSync', () => {
     })
   })
 
-  it('shows in its stats whether the unpublished photo and biography switches are on', async () => {
+  it('shows in its stats whether the unpublished photo and biography and the extra values switches are on', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith())
-    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: false, unpublishedBios: false })
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: false, unpublishedBios: false, extraFields: false })
 
     deps.config.unpublishedPhotos = true
     deps.config.unpublishedBios = true
-    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true })
+    deps.config.extraFields = true
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true, extraFields: true })
   })
 
   it('reports per rule how many persons it matches, and how many of them get the full profile', async () => {
@@ -2059,5 +2093,205 @@ describe('decideAutoMode with a backlog', () => {
   it('a disabled job stays disabled whatever the backlog', () => {
     const j = job({ enabled: false, last_stats: { backlog: { more: true } } })
     expect(decideAutoMode(j, new Date('2026-10-27T11:22:30.000Z')).reason).toMatch(/disabled/)
+  })
+})
+
+describe('runSync: the extra values from Fiona (country, companies, Programme/category, Current occupation)', () => {
+  let fiona, strapi, deps
+
+  const richAccreditation = (id, personId, extra = {}) => accreditation(id, personId, BADGE_PRO, 'Paid', {
+    occupation: 'Producer, Production manager, Chief dreamer',
+    categories: ['Discovery Campus', 'Brand New Programme'],
+    companies: ['in.kind'],
+    ...extra
+  })
+  const richPerson = (extra = {}) => ({ firstName: 'Alicja', lastName: 'Osiej', email: 'alicja@example.com', country: { id: 'poland', name: 'Poland' }, companies: ['IMAGO TC', 'In.Kind'], ...extra })
+
+  beforeEach(() => {
+    fiona = fakeFiona()
+    strapi = fakeStrapi()
+    deps = { fiona, strapi, log: silentLog(), config: { maxRemovals: 50, maxBuildsPerRun: 20, extraFields: true }, now: () => new Date('2026-09-13T10:00:00.000Z') }
+    strapi.state.rules = [TEAM_RULE, PRO_RULE]
+    strapi.state.countries = [{ id: 7, name_en: 'Poland' }, { id: 8, name_en: 'France' }]
+    strapi.state.industryCategories = [{ id: 1, name: 'Discovery Campus' }, { id: 2, name: 'Black Nights Stars' }]
+    strapi.state.roleAtFilms = [{ id: 11, order: 5, names: ['Producer'] }, { id: 12, order: 6, names: ['Production manager'] }]
+    strapi.state.organisations = [{ id: 50, names: ['IMAGO TC'], public: true }]
+  })
+
+  it('level 2: writes the country, the companies, the category and the roles of the person, and reports what it could not match', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson())
+
+    const stats = await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    const created = strapi.state.organisations.find(org => org.names[0] === 'in.kind')
+    expect(created).toMatchObject({ public: false })
+    expect(person.organisations).toEqual([created.id, 50]) // the company of the accreditation card first, then the person's own; "In.Kind" twice = once
+    expect(person.industry_categories).toEqual([1])
+    expect(person.orderedRaF).toEqual([{ order: 1, role_at_film: 11 }, { order: 2, role_at_film: 12 }])
+    expect(strapi.state.addresses.get(person.id).country).toBe(7)
+    expect(stats.extras).toMatchObject({
+      organisations: { created: 1, linked: 2, wouldCreate: 0 },
+      categories: { added: 1, unmatched: { 'Brand New Programme': 1 } },
+      roles: { added: 2, unmatched: { 'Chief dreamer': 1 } },
+      country: { set: 1, unmatched: {} }
+    })
+  })
+
+  it('with the switch off a real run writes none of it, while a dry run still shows what the switch would do', async () => {
+    deps.config.extraFields = false
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson())
+
+    const preview = await runSync({ dryRun: true }, deps)
+    const real = await runSync({}, deps)
+
+    expect(preview.switches.extraFields).toBe(false)
+    expect(preview.extras.categories.added).toBe(1)
+    const person = [...strapi.state.people.values()][0]
+    expect(person.organisations).toBeUndefined()
+    expect(person.industry_categories).toBeUndefined()
+    expect(strapi.state.addresses.size).toBe(0)
+    expect(strapi.state.writes.some(w => w.op === 'createOrganisation')).toBe(false)
+    expect(real.extras.categories.added).toBe(0)
+  })
+
+  it('a test run can switch it on for itself, so five persons can be tried before the switch is turned on', async () => {
+    deps.config.extraFields = false
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson())
+
+    const stats = await runSync({ only: { ruleIds: [2], maxPersons: 5, scope: 'all', extraFields: true } }, deps)
+
+    expect(stats.switches.extraFields).toBe(true)
+    expect([...strapi.state.people.values()][0].industry_categories).toEqual([1])
+  })
+
+  it('level 1: none of it is read or written', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created', { categories: ['Discovery Campus'], companies: ['in.kind'] })))
+    fiona.state.persons.set('fp1', richPerson())
+
+    await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    expect(person.organisations).toBeUndefined()
+    expect(person.industry_categories).toBeUndefined()
+    expect(person.orderedRaF).toBeUndefined()
+    expect(strapi.state.addresses.size).toBe(0)
+    expect(strapi.state.writes.some(w => w.op === 'createOrganisation')).toBe(false)
+  })
+
+  it('only adds: what the person has in Strapi stays, and a second run writes nothing', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson())
+    await runSync({}, deps)
+    const person = [...strapi.state.people.values()][0]
+    person.organisations.push(99) // added by the person in MyPoff
+    person.industry_categories.push(2)
+    person.orderedRaF.unshift({ id: 700, order: 0, role_at_film: 13 })
+    strapi.state.addresses.set(person.id, { id: 3, country: 8 }) // the person's own country wins
+    const writesBefore = strapi.state.writes.length
+
+    const stats = await runSync({}, deps)
+
+    expect(stats.persons).toMatchObject({ created: 0, updated: 0, unchanged: 1 })
+    expect(strapi.state.writes.length).toBe(writesBefore)
+    expect(person.organisations).toEqual([expect.any(Number), 50, 99])
+    expect(person.orderedRaF[0]).toEqual({ id: 700, order: 0, role_at_film: 13 })
+    expect(strapi.state.addresses.get(person.id).country).toBe(8)
+  })
+
+  it('adds a missing value to a person Strapi already holds and keeps the rows it has, with their ids', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1', { occupation: 'Producer', categories: ['Black Nights Stars'], companies: [] })))
+    fiona.state.persons.set('fp1', richPerson({ companies: [], country: null }))
+    strapi.state.people.set(500, { id: 500, fiona_person_id: 'fp1', eMail: 'alicja@example.com', firstName: 'Alicja', lastName: 'Osiej', public: true, festival_editions: [CG, IND], orderedRaF: [{ id: 700, order: 4, role_at_film: 13 }], industry_categories: [1] })
+
+    await runSync({}, deps)
+
+    const person = strapi.state.people.get(500)
+    expect(person.orderedRaF).toEqual([{ id: 700, order: 4, role_at_film: 13 }, { order: 5, role_at_film: 11 }])
+    expect(person.industry_categories).toEqual([1, 2])
+  })
+
+  it('links an organisation that exists but is not public yet, and creates a new company only once for two persons', async () => {
+    strapi.state.organisations.push({ id: 60, names: ['Hidden Films'], public: false })
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      richAccreditation('acc1', 'fp1', { companies: ['hidden films', 'New Co'] }),
+      richAccreditation('acc2', 'fp2', { companies: ['New Co'] })
+    ))
+    fiona.state.persons.set('fp1', richPerson({ companies: [] }))
+    fiona.state.persons.set('fp2', richPerson({ email: 'b@example.com', companies: [] }))
+
+    await runSync({}, deps)
+
+    const creates = strapi.state.writes.filter(w => w.op === 'createOrganisation')
+    expect(creates.map(w => w.payload.name)).toEqual(['New Co'])
+    const [first, second] = [...strapi.state.people.values()]
+    expect(first.organisations).toEqual([60, creates[0].id])
+    expect(second.organisations).toEqual([creates[0].id])
+  })
+
+  it('does not turn a placeholder such as "N/A" or "freelancer" into an organisation', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1', { companies: ['N/A'] })))
+    fiona.state.persons.set('fp1', richPerson({ companies: ['Freelancer', 'IMAGO TC'] }))
+
+    const stats = await runSync({}, deps)
+
+    expect(strapi.state.writes.some(w => w.op === 'createOrganisation')).toBe(false)
+    expect([...strapi.state.people.values()][0].organisations).toEqual([50])
+    expect(stats.extras.organisations.skipped).toBe(2)
+  })
+
+  it('a dry run creates and writes nothing, but says what it would do', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson())
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(strapi.state.writes).toEqual([])
+    expect(strapi.state.organisations).toHaveLength(1)
+    expect(stats.extras.organisations).toMatchObject({ created: 0, wouldCreate: 1, createdNames: ['in.kind'] })
+    expect(stats.extras.categories.added).toBe(1)
+    expect(stats.extras.roles.added).toBe(2)
+  })
+
+  it('a dry run of a person Strapi holds lists the new values as changes', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1', { companies: [] })))
+    fiona.state.persons.set('fp1', richPerson({ companies: [] }))
+    strapi.state.people.set(500, { id: 500, fiona_person_id: 'fp1', eMail: 'alicja@example.com', firstName: 'Alicja', lastName: 'Osiej', firstNameLastName: 'Alicja Osiej', public: true, festival_editions: [CG, IND], fiona_accreditation_id: 'acc1', fiona_guestbook_ids: GB, fiona_attached_edition_ids: `${CG},${IND}`, fiona_assigned_role_ids: String(ROLE_CG) })
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    const update = stats.dryRunActions.find(a => a.action === 'UPDATE')
+    expect(update.changed).toEqual(expect.arrayContaining(['industry_categories', 'orderedRaF', 'addr_coll.country']))
+  })
+
+  it('a lookup that fails does not stop the person from being synced; the extra values are skipped and counted', async () => {
+    strapi.findOrganisationsByName = () => { throw new Error('Strapi answered 400') }
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson())
+
+    const stats = await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    expect(person).toMatchObject({ firstName: 'Alicja', fiona_person_id: 'fp1' })
+    expect(person.festival_editions.sort()).toEqual([CG, IND])
+    expect(person.organisations).toBeUndefined()
+    expect(person.industry_categories).toBeUndefined()
+    expect(stats.persons.created).toBe(1)
+    expect(stats.errors).toBe(0)
+    expect(stats.extras.errors).toBe(1)
+    expect(stats.warnings.join(' ')).toMatch(/extra values skipped/)
+  })
+
+  it('reports a country Strapi does not know and writes no address', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(richAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', richPerson({ country: { id: 'czech-republic', name: 'Czech Republic' } }))
+
+    const stats = await runSync({}, deps)
+
+    expect(strapi.state.addresses.size).toBe(0)
+    expect(stats.extras.country).toMatchObject({ set: 0, unmatched: { 'Czech Republic': 1 } })
   })
 })
