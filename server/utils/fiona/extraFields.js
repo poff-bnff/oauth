@@ -31,7 +31,11 @@ export function uniqueNames (names) {
 }
 
 // what people type in the company field when they have none; such a word must never become an organisation
-const PLACEHOLDER_COMPANIES = new Set(['n a', 'na', 'none', 'nothing', 'no', 'no company', 'freelance', 'freelancer', 'freelancing', 'self employed', 'selfemployed', 'independent', 'unemployed', 'tbd', 'private'])
+const PLACEHOLDER_COMPANIES = new Set([
+  'n a', 'na', 'none', 'nothing', 'no', 'no company', 'not applicable', 'not available', 'unknown', 'tbd', 'private',
+  'freelance', 'freelancer', 'freelancing', 'free lance', 'self employed', 'selfemployed', 'self employeed',
+  'independent', 'independant', 'indipendent', 'independet', 'unemployed', 'student', 'retired'
+])
 
 export const isPlaceholderCompany = name => !normalizeName(name) || PLACEHOLDER_COMPANIES.has(normalizeName(name)) // "-" has no letters at all
 
@@ -42,18 +46,24 @@ export function splitOccupations (text) {
 
 const idOf = value => Number((value && typeof value === 'object') ? value.id : value)
 
+// the key a category label is compared by: every "Works in Progress ..." variant is the one Strapi category Works in Progress
+const categoryKey = (label) => {
+  const key = normalizeName(label)
+  return key.startsWith('works in progress') ? 'works in progress' : key
+}
+
 /**
  * Programme / category labels from Fiona → ids of the Strapi industry categories.
  * @returns {{ ids: number[]|null, added: string[], unmatched: string[] }} ids = existing + new (null when nothing is new)
  */
 export function planCategories ({ labels, strapiCategories, existingIds = [] }) {
-  const byName = new Map((strapiCategories || []).map(category => [normalizeName(category.name), category]))
+  const byName = new Map((strapiCategories || []).map(category => [categoryKey(category.name), category]))
   const have = new Set(existingIds.map(Number))
   const ids = [...existingIds.map(Number)]
   const added = []
   const unmatched = []
   for (const label of uniqueNames(labels)) {
-    const category = byName.get(normalizeName(label))
+    const category = byName.get(categoryKey(label))
     if (!category) { unmatched.push(label); continue }
     if (have.has(Number(category.id))) continue
     have.add(Number(category.id))
@@ -78,12 +88,21 @@ export function planRoles ({ occupations, strapiRoles, existingRows = [] }) {
   const added = []
   const unmatched = []
   for (const occupation of uniqueNames(occupations)) {
-    const role = byName.get(normalizeName(occupation))
-    if (!role) { unmatched.push(occupation); continue }
-    if (have.has(Number(role.id))) continue
-    have.add(Number(role.id))
-    rows.push({ order: nextOrder++, role_at_film: Number(role.id) })
-    added.push(role.names[0])
+    // the whole text is a role: done. Otherwise "X and Y" / "X & Y" are separate roles.
+    const whole = byName.get(normalizeName(occupation))
+    const parts = whole ? [] : occupation.split(/\s+(?:and|&)\s+|\s*&\s*/i).map(part => part.trim()).filter(Boolean)
+    const candidates = whole
+      ? [{ text: occupation, role: whole }]
+      : (parts.length > 1 ? parts.map(text => ({ text, role: byName.get(normalizeName(text)) })) : [{ text: occupation, role: undefined }])
+    const anyMatched = candidates.some(candidate => candidate.role)
+    if (!anyMatched) unmatched.push(occupation) // nothing in it is a role: report the text as it is
+    for (const { text, role } of candidates) {
+      if (!role) { if (anyMatched) unmatched.push(text); continue }
+      if (have.has(Number(role.id))) continue
+      have.add(Number(role.id))
+      rows.push({ order: nextOrder++, role_at_film: Number(role.id) })
+      added.push(role.names[0])
+    }
   }
   return { rows: added.length ? rows : null, added, unmatched }
 }
