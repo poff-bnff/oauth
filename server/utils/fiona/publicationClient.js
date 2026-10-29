@@ -20,9 +20,10 @@
 import { uniqueNames } from './extraFields.js'
 
 const DEFAULT_BASE_URL = 'https://poff-online-api.fiona-online.net/v1'
-// the accreditation card's "Current occupation" (free text) and the multi-select field behind "Programme/category"
+// the accreditation card's "Current occupation" (free text) and the multi-select fields behind "Programme/category":
+// the category itself and the Discovery Campus sub-programme (both are names in Strapi's industry category list)
 const OCCUPATION_KEY = 'accreditation-general-current-occupation'
-const CATEGORY_KEYS = new Set(['accreditation-general-industry-category'])
+const CATEGORY_KEYS = new Set(['accreditation-general-industry-category', 'accreditation-festival-attendance-discovery-campus-programme'])
 const RETRYABLE_CODES = new Set(['EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT'])
 
 const text = value => (value === null || value === undefined) ? null : String(value)
