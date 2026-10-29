@@ -54,6 +54,21 @@ describe('outlineFields', () => {
     expect(find(fields, 'customFieldValues[accreditation-general-delivered-by]')).toEqual({ path: 'customFieldValues[accreditation-general-delivered-by]', type: 'string' })
   })
 
+  it('lists the chosen options of multi-select custom fields under the field key, with the English label', () => {
+    const option = (key, optionKey, en, et) => ({ key, optionKey, sortOrder: 1, translations: [{ language: 'et', label: et }, { language: 'en', label: en }] })
+    const fields = outlineFields({
+      customFieldOptions: [
+        option('accreditation-general-festival', 'discovery-campus', 'Discovery Campus', 'Avastuskampus'),
+        option('accreditation-general-festival', 'industry', 'Industry', 'Tööstus'),
+        option('accreditation-general-gm-tag', 'tag-1', 'Tag one', 'Silt üks')
+      ]
+    })
+
+    expect(find(fields, 'customFieldOptions[accreditation-general-festival]')).toMatchObject({ type: 'option', values: ['discovery-campus = Discovery Campus', 'industry = Industry'] })
+    expect(find(fields, 'customFieldOptions[accreditation-general-gm-tag]').values).toEqual(['tag-1 = Tag one'])
+    expect(find(fields, 'customFieldOptions[]')).toMatchObject({ type: 'array', count: 3 })
+  })
+
   it('shows the values of arrival, departure and other trip fields, so the date and time formats are visible', () => {
     const fields = outlineFields({
       tripInfo: { arrivalDate: '2026-11-12', arrivalTime: '14:30', departure: { dateTime: '2026-11-18T09:05:00+02:00' }, flightNumber: 'FR123' },
