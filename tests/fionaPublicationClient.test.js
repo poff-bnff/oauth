@@ -261,7 +261,9 @@ describe('the extra values of an accreditation record', () => {
       customFieldOptions: [
         option('accreditation-general-industry-category', 'discovery_campus', 'Discovery Campus'),
         option('accreditation-general-gm-tag', 'whoishere', 'WhoIsHere'),
-        option('accreditation-general-industry-category', 'bns', 'Black Nights Stars')
+        option('accreditation-general-industry-category', 'bns', 'Black Nights Stars'),
+        option('accreditation-festival-attendance-discovery-campus-programme', 'breaking_into_the_industry', 'Breaking Into the Industry'),
+        option('accreditation-general-fields-of-work', 'film_industry', 'Film Industry')
       ],
       company: { id: 'c-1', description: 'in.kind' },
       companyWithRole: { id: 'cwr-1', companyId: 'c-1', name: 'in.kind' },
@@ -269,7 +271,7 @@ describe('the extra values of an accreditation record', () => {
     }))
 
     expect(rec.currentOccupation).toBe('Producer, Production manager')
-    expect(rec.categories).toEqual(['Discovery Campus', 'Black Nights Stars'])
+    expect(rec.categories).toEqual(['Discovery Campus', 'Black Nights Stars', 'Breaking Into the Industry']) // the category field and the Discovery Campus sub-programme field
     expect(rec.companies).toEqual(['in.kind'])
   })
 
