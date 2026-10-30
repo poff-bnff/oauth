@@ -3019,7 +3019,7 @@ export async function createStrapiPerson (user) {
   const createPerson = {
     firstName: profile.firstName,
     lastName: profile.lastName,
-    firstNameLastName: `${profile.firstName} ${profile.lastName}`,
+    firstNameLastName: [profile.firstName, profile.lastName].filter(Boolean).join(' ') || null,
     eMail: profile.email,
     phoneNr: profile.phoneNr,
     profile_img: profile.picture,

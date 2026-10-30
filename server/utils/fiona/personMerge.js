@@ -11,12 +11,15 @@
  *  - names and the kept record's URLs stay; a missing slug is taken from the other record
  *  - Fiona ids come from the sync-managed record; the login user and the address move to the kept record
  *  - the record that is merged away is renamed "<name> (archived)" when it is hidden
- *  - a record that is used elsewhere (film credits, passes, articles, ...) is never the one removed
+ *  - a record that is used elsewhere (film credits, passes, articles, ...) is never the one removed, unless `repointCredits`
+ *    is asked for: then its credits in films, courses, projects, teams, ... are pointed to the kept record first (see
+ *    personCredits.js); a use that cannot be moved (a festival pass) still stops the pair
  *  - the login user is linked from the person side, never with PUT /users (its hook mails the person)
  *  - every save is silent: `cgFormSave` stops the "Creative Gate profile created" e-mail and `skipbuild` the site build
  */
 
 import { normalizeName } from './extraFields.js'
+import { creditsPatch, creditCount, CREDIT_SOURCES } from './personCredits.js'
 
 const MAX_PAIRS = 100
 const SILENT = { cgFormSave: true, skipbuild: true }
@@ -192,12 +195,39 @@ async function verifyMerge ({ strapi, plan, keepId, removeId, retire, log }) {
   return { ok: problems.length === 0, problems }
 }
 
+/** What to write in each entry that credits the record to remove; ok: false (with the reason) when one cannot be moved. */
+async function planCredits ({ strapi, keepId, removeId, refs }) {
+  const plans = []
+  for (const ref of refs) {
+    const entry = await strapi.getCreditEntry(ref.source, ref.id)
+    if (!entry) return { ok: false, reason: `${ref.source} #${ref.id} (which names #${removeId}) cannot be read` }
+    const result = creditsPatch({ source: ref.source, entry, fromId: removeId, toId: keepId })
+    if (!result.ok) return { ok: false, reason: `${ref.source} #${ref.id}: ${result.reason}` }
+    if (!result.found) return { ok: false, reason: `#${removeId} is used in ${ref.source} #${ref.id}, but not where credits are looked for` }
+    plans.push({ source: ref.source, id: ref.id, entry, patch: result.patch, changes: result.changes, dropped: result.dropped })
+  }
+  return { ok: true, plans }
+}
+
+/** Read every written entry again: no credit names the old record any more and none was lost (or doubled). */
+async function verifyCredits ({ strapi, plans, keepId, removeId }) {
+  const problems = []
+  for (const { source, id, entry, dropped } of plans) {
+    const after = await strapi.getCreditEntry(source, id)
+    if (!after) { problems.push(`${source} #${id} cannot be read after the write`); continue }
+    if (creditCount(source, after, removeId) > 0) problems.push(`${source} #${id} still names #${removeId}`)
+    const expected = creditCount(source, entry, keepId) + creditCount(source, entry, removeId) - dropped
+    if (creditCount(source, after, keepId) !== expected) problems.push(`${source} #${id} names #${keepId} ${creditCount(source, after, keepId)} times, expected ${expected}`)
+  }
+  return problems
+}
+
 /**
  * Merge `removeId` into `keepId`.
- * @param {{ keepId: number, removeId: number, strapi: object, dryRun?: boolean, retire?: 'hide'|'delete', removeRefs?: object[], log?: object }} options
+ * @param {{ keepId: number, removeId: number, strapi: object, dryRun?: boolean, retire?: 'hide'|'delete', removeRefs?: object[], repointCredits?: boolean, log?: object }} options
  * @returns {Promise<object>} status: dry-run | merged | skipped | check-failed | failed
  */
-export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, retire = 'hide', removeRefs = [], log = console }) {
+export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, retire = 'hide', removeRefs = [], repointCredits = false, log = console }) {
   const result = { keep: Number(keepId), remove: Number(removeId), name: null, status: 'skipped' }
   try {
     const keep = await strapi.findPersonById(keepId)
@@ -205,12 +235,23 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
     if (!keep || !remove) return { ...result, reason: `#${keep ? removeId : keepId} does not exist` }
     result.name = keep.firstNameLastName || [keep.firstName, keep.lastName].filter(Boolean).join(' ')
 
-    const plan = planMerge({ keep, remove, removeRefs })
+    const movable = repointCredits ? asList(removeRefs).filter(ref => CREDIT_SOURCES.includes(ref.source)) : []
+    const plan = planMerge({ keep, remove, removeRefs: repointCredits ? asList(removeRefs).filter(ref => !CREDIT_SOURCES.includes(ref.source)) : removeRefs })
     if (!plan.ok) return { ...result, reason: plan.reason }
+    const credits = movable.length ? await planCredits({ strapi, keepId: Number(keepId), removeId: Number(removeId), refs: movable }) : { ok: true, plans: [] }
+    if (!credits.ok) return { ...result, reason: credits.reason }
     Object.assign(result, { changes: plan.changes, link: plan.link, retire })
+    if (credits.plans.length) result.credits = credits.plans.map(({ source, id, changes, dropped }) => ({ source, id, changes, dropped }))
     if (dryRun) return { ...result, status: 'dry-run' }
 
     result.backup = { keep: copyOf(keep), remove: copyOf(remove) }
+    if (credits.plans.length) {
+      result.backup.credits = credits.plans.map(({ source, id, patch, entry }) => ({ source, id, before: copyOf(Object.fromEntries(Object.keys(patch).map(key => [key, entry[key]]))) }))
+      // first: if the persons cannot be merged after this, the credits are on the record that stays
+      for (const credit of credits.plans) await strapi.updateCreditEntry(credit.source, credit.id, { ...credit.patch, skipbuild: true })
+      const problems = await verifyCredits({ strapi, plans: credits.plans, keepId: Number(keepId), removeId: Number(removeId) })
+      if (problems.length) return { ...result, status: 'check-failed', verify: { ok: false, problems } }
+    }
     if (plan.preRemovePatch) await strapi.updatePerson(removeId, { ...plan.preRemovePatch, ...SILENT })
     if (plan.changes.length) await strapi.updatePerson(keepId, { ...plan.patch, ...SILENT })
     if (plan.link.addressMove) await strapi.moveAddressToPerson(plan.link.addressMove, keepId)
@@ -235,7 +276,7 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
  * The places that use the persons to remove are read once for the whole batch (a slow read), and the batch refuses to
  * run when one of those places cannot be read: "not used" would then be a guess.
  */
-export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide', log = console }) {
+export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide', repointCredits = false, log = console }) {
   const list = []
   const seen = new Set()
   for (const pair of Array.isArray(pairs) ? pairs : []) {
@@ -255,12 +296,12 @@ export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide
   const results = []
   let stoppedAt = null
   for (const pair of list) {
-    const result = await mergePersons({ keepId: pair.keep, removeId: pair.remove, strapi, dryRun, retire, removeRefs: references.refs?.[pair.remove] || [], log })
+    const result = await mergePersons({ keepId: pair.keep, removeId: pair.remove, strapi, dryRun, retire, removeRefs: references.refs?.[pair.remove] || [], repointCredits, log })
     results.push(result)
     if (result.status === 'failed' || result.status === 'check-failed') { stoppedAt = pair; break }
   }
   const counts = { merged: 0, skipped: 0, 'dry-run': 0, 'check-failed': 0, failed: 0 }
   for (const result of results) counts[result.status]++
   log.info?.(`[merge] ${dryRun ? 'dry run' : 'run'}: ${JSON.stringify(counts)}${stoppedAt ? ` — stopped at #${stoppedAt.remove} into #${stoppedAt.keep}` : ''}`)
-  return { mode: 'merge', dryRun, retire, pairs: list.length, counts, stoppedAt, results }
+  return { mode: 'merge', dryRun, retire, repointCredits, pairs: list.length, counts, stoppedAt, results }
 }

@@ -224,8 +224,9 @@ describe('planMerge: login user, address, and the retired record', () => {
 })
 
 // An in-memory Strapi that applies what it is told, so a merge can be followed from start to end
-function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null } = {}) {
+function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null, credits = [], ignoreCreditWrites = false } = {}) {
   const store = new Map(people.map(p => [p.id, clone(p)]))
+  const entries = new Map(credits.map(({ source, entry }) => [`${source}:${entry.id}`, clone(entry)]))
   const calls = []
   const idOf = v => (v && typeof v === 'object' ? v.id : v)
   const apply = (target, payload) => {
@@ -266,7 +267,27 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
     },
     setAddressCountry (addressId, countryId) { calls.push(['setAddressCountry', addressId, countryId]) },
     deletePerson (id) { calls.push(['deletePerson', Number(id)]); store.delete(Number(id)) },
-    findPersonReferences (ids) { calls.push(['findPersonReferences', ids]); return { refs: {}, covered: ['film'], failed: [] } }
+    findPersonReferences (ids) { calls.push(['findPersonReferences', ids]); return { refs: {}, covered: ['film'], failed: [] } },
+    // entries that name a person (films, ...), keyed "source:id"
+    entries,
+    getCreditEntry (source, id) { return entries.has(`${source}:${id}`) ? clone(entries.get(`${source}:${id}`)) : null },
+    updateCreditEntry (source, id, payload) {
+      calls.push(['updateCreditEntry', `${source}:${id}`, payload])
+      if (failOn === `updateCreditEntry:${source}:${id}`) throw new Error('HTTP 500')
+      if (!ignoreCreditWrites) applyPatch(entries.get(`${source}:${id}`), payload)
+    }
+  }
+}
+
+// what Strapi does with a patch of component rows: rows with an id are updated in place, rows left out are deleted
+function applyPatch (target, patch) {
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'skipbuild' || key === 'cgFormSave') continue
+    if (Array.isArray(value) && value.length && value.every(row => row && typeof row === 'object')) {
+      target[key] = value.map((row) => { const have = (target[key] || []).find(item => item.id === row.id) || { id: row.id }; applyPatch(have, row); return have })
+    } else if (Array.isArray(value)) target[key] = value.map(item => (typeof item === 'number' ? { id: item } : item))
+    else if (value && typeof value === 'object') { target[key] ||= { id: value.id }; applyPatch(target[key], value) } else if (typeof value === 'number' && ['person', 'person_of_role', 'client_person'].includes(key)) target[key] = { id: value }
+    else target[key] = value
   }
 }
 
@@ -405,6 +426,120 @@ describe('mergePersons', () => {
   })
 })
 
+describe('mergePersons: a person that is credited elsewhere (repointCredits)', () => {
+  const people = () => [clone(OLD), clone(COPY)]
+  const filmEntry = () => ({
+    id: 9213,
+    title_en: 'A film',
+    credentials: { id: 77, rolePerson: [{ id: 11, order: 1, person: { id: 99 } }, { id: 12, order: 2, person: { id: 500 } }], roleCompany: [{ id: 301 }] }
+  })
+  const refs = [{ source: 'film', id: 9213 }]
+  const run = (strapi, over = {}) => mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', removeRefs: refs, repointCredits: true, log: silent, ...over })
+
+  it('is not done unless asked: a record that is credited stays a reason to skip', async () => {
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry: filmEntry() }] })
+
+    const result = await run(strapi, { repointCredits: false })
+
+    expect(result).toMatchObject({ status: 'skipped' })
+    expect(result.reason).toMatch(/used in film #9213/)
+    expect(strapi.calls.filter(([name]) => name !== 'findPersonReferences')).toEqual([])
+  })
+
+  it('a dry run says what would be pointed over and writes nothing', async () => {
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry: filmEntry() }] })
+
+    const result = await run(strapi, { dryRun: true })
+
+    expect(result.status).toBe('dry-run')
+    expect(result.credits).toEqual([{ source: 'film', id: 9213, changes: ['credentials.rolePerson #12: person 500 → 20'], dropped: 0 }])
+    expect(strapi.calls.filter(([name]) => name !== 'findPersonReferences')).toEqual([])
+  })
+
+  it('points the credits over first (silently), checks them, and only then merges the persons', async () => {
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry: filmEntry() }] })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('merged')
+    expect(strapi.calls.map(([name, id]) => `${name}:${id}`)).toEqual(['updateCreditEntry:film:9213', 'updatePerson:20', 'moveAddressToPerson:40', 'updatePerson:500', 'updatePerson:20'])
+    expect(strapi.calls[0][2]).toEqual({ credentials: { id: 77, rolePerson: [{ id: 11 }, { id: 12, person: 20 }] }, skipbuild: true })
+    expect(strapi.entries.get('film:9213').credentials.rolePerson.map(row => row.person.id)).toEqual([99, 20])
+    expect(result.credits).toEqual([{ source: 'film', id: 9213, changes: ['credentials.rolePerson #12: person 500 → 20'], dropped: 0 }])
+  })
+
+  it('returns the credits as they were before the write, to put back by hand', async () => {
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry: filmEntry() }] })
+
+    const result = await run(strapi)
+
+    expect(result.backup.credits).toEqual([{ source: 'film', id: 9213, before: { credentials: filmEntry().credentials } }])
+  })
+
+  it('leaves the persons alone and says so when a credit cannot be written', async () => {
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry: filmEntry() }], failOn: 'updateCreditEntry:film:9213' })
+
+    const result = await run(strapi)
+
+    expect(result).toMatchObject({ status: 'failed', error: 'HTTP 500' })
+    expect(strapi.calls.some(([name]) => name === 'updatePerson')).toBe(false)
+  })
+
+  it('leaves the persons alone when the credit still names the old person after the write', async () => {
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry: filmEntry() }], ignoreCreditWrites: true })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('check-failed')
+    expect(result.verify.problems.join(' ')).toMatch(/film #9213/)
+    expect(strapi.calls.some(([name]) => name === 'updatePerson')).toBe(false)
+  })
+
+  it('skips the pair, writing nothing, when the person is used where credits are not moved (a festival pass)', async () => {
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry: filmEntry() }] })
+
+    const result = await run(strapi, { removeRefs: [...refs, { source: 'festival-pass', id: 5 }] })
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/festival-pass #5/)
+    expect(strapi.calls.filter(([name]) => name !== 'findPersonReferences')).toEqual([])
+  })
+
+  it('skips the pair, writing nothing, when the scan names an entry that does not hold the person where it was expected', async () => {
+    const entry = filmEntry()
+    entry.credentials.rolePerson[1].person = { id: 98 }
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry }] })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/film #9213/)
+    expect(strapi.calls.filter(([name]) => name !== 'findPersonReferences')).toEqual([])
+  })
+
+  it('skips the pair when an entry it was told about is gone', async () => {
+    const strapi = fakeStrapi(people())
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/film #9213/)
+  })
+
+  it('drops the duplicate row when the other person is credited in the same list already', async () => {
+    const entry = filmEntry()
+    entry.credentials.rolePerson[0].person = { id: 20 }
+    entry.credentials.rolePerson[0].role_at_film = entry.credentials.rolePerson[1].role_at_film = { id: 3 }
+    const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry }] })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('merged')
+    expect(strapi.entries.get('film:9213').credentials.rolePerson.map(row => row.id)).toEqual([11])
+    expect(result.credits[0].dropped).toBe(1)
+  })
+})
+
 describe('mergeBatch', () => {
   const people = () => [
     clone(OLD),
@@ -440,6 +575,25 @@ describe('mergeBatch', () => {
     expect(result.results).toHaveLength(1)
     expect(result.results[0]).toMatchObject({ status: 'failed', error: 'HTTP 500' })
     expect(result.stoppedAt).toEqual({ keep: 20, remove: 500 })
+  })
+
+  it('points credits over for the whole batch when asked to, and leaves a credited pair to be skipped otherwise', async () => {
+    const entry = { id: 3, credentials: { id: 5, rolePerson: [{ id: 1, person: { id: 501 } }] } }
+    const references = () => ({ refs: { 501: [{ source: 'film', id: 3 }] }, covered: ['film'], failed: [] })
+    const credited = () => {
+      const strapi = fakeStrapi(people(), { credits: [{ source: 'film', entry }] })
+      strapi.findPersonReferences = references
+      return strapi
+    }
+
+    const without = await mergeBatch({ pairs: [{ keep: 21, remove: 501 }], strapi: credited(), dryRun: false, retire: 'hide', log: silent })
+    expect(without.results[0].status).toBe('skipped')
+
+    const strapi = credited()
+    const withCredits = await mergeBatch({ pairs: [{ keep: 21, remove: 501 }], strapi, dryRun: false, retire: 'hide', repointCredits: true, log: silent })
+    expect(withCredits.results[0]).toMatchObject({ status: 'merged', keep: 21, remove: 501 })
+    expect(withCredits.repointCredits).toBe(true)
+    expect(strapi.entries.get('film:3').credentials.rolePerson[0].person.id).toBe(21)
   })
 
   it('takes at most 100 pairs per call and ignores a pair listed twice', async () => {
