@@ -288,3 +288,109 @@ describe('createStrapiGateway lookups for the extra Fiona values', () => {
     ])
   })
 })
+
+describe('createStrapiGateway lookups for the duplicate persons report', () => {
+  const deps = () => ({
+    config: { strapiUrl: STRAPI },
+    getAdminToken: () => 'ADMIN',
+    getActiveFionaGuestbooks: () => [],
+    authenticateStrapiUser: () => null,
+    log: { warn () {}, info () {}, error () {} }
+  })
+
+  it('finds persons by a word of their name in the full name or the last name, page by page, until the pages run out', async () => {
+    const pages = [Array.from({ length: 200 }, (_, i) => ({ id: i + 1 })), [{ id: 201 }, { id: 202 }]]
+    const urls = []
+    const fetch = (url) => { urls.push(decodeURIComponent(url.replace(STRAPI, ''))); return pages.shift() || [] }
+
+    const found = await createStrapiGateway({ fetch, ...deps() }).findPeopleByNameTerm('Tamm & Co')
+
+    expect(found).toHaveLength(202)
+    expect(urls).toHaveLength(2)
+    expect(urls[0]).toContain('_where[_or][0][firstNameLastName_contains]=Tamm & Co')
+    expect(urls[0]).toContain('_where[_or][1][lastName_contains]=Tamm & Co')
+    expect(urls[0]).toContain('_start=0')
+    expect(urls[0]).toContain('_limit=200')
+    expect(urls[1]).toContain('_start=200')
+  })
+
+  describe('findPersonReferences', () => {
+    const refsFetch = (responses) => {
+      const calls = []
+      const fetch = (url) => {
+        const path = url.replace(STRAPI, '')
+        calls.push(decodeURIComponent(path))
+        for (const [prefix, response] of Object.entries(responses)) {
+          if (path.startsWith(prefix)) {
+            if (response instanceof Error) throw response
+            return typeof response === 'function' ? response(path) : response
+          }
+        }
+        return []
+      }
+      return { fetch, calls }
+    }
+
+    it('finds the wanted persons in plain relations and inside the credits components of films, and ignores everybody else', async () => {
+      const { fetch } = refsFetch({
+        '/awardings': [{ id: 3, person: { id: 500 } }, { id: 4, person: { id: 77 } }],
+        '/films': [{ id: 12, credentials: { rolePerson: [{ id: 1, person: { id: 501, firstName: 'X' } }, { id: 2, person: 600 }] } }],
+        '/teams': [{ id: 9, subTeam: [{ juryMember: [{ person: { id: 502 } }], teamMember: [] }] }],
+        '/industry-articles': [{ id: 31, people: [{ id: 503 }, { id: 8 }] }],
+        '/clients': [{ id: 5, client_person: 504 }]
+      })
+
+      const { refs, covered, failed } = await createStrapiGateway({ fetch, ...deps() }).findPersonReferences([500, 501, 502, 503, 504, 505])
+
+      expect(refs).toEqual({
+        500: [{ source: 'awarding', id: 3 }],
+        501: [{ source: 'film', id: 12 }],
+        502: [{ source: 'team', id: 9 }],
+        503: [{ source: 'industry-article', id: 31 }],
+        504: [{ source: 'client', id: 5 }]
+      })
+      expect(failed).toEqual([])
+      expect(covered).toEqual(expect.arrayContaining(['awarding', 'film', 'team', 'industry-article', 'client', 'filmography', 'course']))
+    })
+
+    it('reads long collections page by page and counts one place only once', async () => {
+      const big = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, person: { id: 9000 + i } }))
+      const { fetch, calls } = refsFetch({
+        '/awardings?_start=0': big.map((item, i) => (i === 0 ? { id: 1, person: [{ id: 500 }, { id: 500 }] } : item)),
+        '/awardings?_start=100': [{ id: 101, person: { id: 500 } }]
+      })
+
+      const { refs } = await createStrapiGateway({ fetch, ...deps() }).findPersonReferences([500])
+
+      expect(refs[500]).toEqual([{ source: 'awarding', id: 1 }, { source: 'awarding', id: 101 }])
+      expect(calls.filter(call => call.startsWith('/awardings'))).toEqual(['/awardings?_start=0&_limit=100&_sort=id:asc', '/awardings?_start=100&_limit=100&_sort=id:asc'])
+    })
+
+    it('reports a source it cannot read instead of pretending it has no references', async () => {
+      const { fetch } = refsFetch({ '/films': new Error('HTTP 403'), '/content-manager': new Error('HTTP 404') })
+
+      const { covered, failed } = await createStrapiGateway({ fetch, ...deps() }).findPersonReferences([500])
+
+      expect(failed).toEqual([{ source: 'film', error: 'HTTP 403' }, { source: 'festival-pass', error: 'HTTP 404' }])
+      expect(covered).not.toContain('film')
+      expect(covered).toContain('awarding')
+    })
+
+    it('reads the festival passes through the content manager, which also gives pages of results', async () => {
+      const { fetch, calls } = refsFetch({
+        '/content-manager/collection-types/application::festival-pass.festival-pass': { results: [{ id: 70, owner: { id: 500 } }], pagination: { page: 1, pageCount: 1 } }
+      })
+
+      const { refs } = await createStrapiGateway({ fetch, ...deps() }).findPersonReferences([500])
+
+      expect(refs[500]).toEqual([{ source: 'festival-pass', id: 70 }])
+      expect(calls.find(call => call.includes('festival-pass'))).toContain('page=1&pageSize=100')
+    })
+
+    it('does nothing for an empty list', async () => {
+      const { fetch, calls } = refsFetch({})
+      expect(await createStrapiGateway({ fetch, ...deps() }).findPersonReferences([])).toEqual({ refs: {}, covered: [], failed: [] })
+      expect(calls).toEqual([])
+    })
+  })
+})

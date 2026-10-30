@@ -14,6 +14,44 @@ import crypto from 'crypto'
 
 const relationId = value => (value && typeof value === 'object') ? value.id : value
 
+// Everything that can point at a person, for the duplicate persons report and the merge: where to read it, and the
+// field names that hold a person there (credits sit inside components, so the whole entry is searched for them).
+const REFERENCE_PAGE = 100
+const PERSON_KEYS = ['person', 'person_of_role']
+const REFERENCE_SOURCES = [
+  { source: 'awarding', route: '/awardings', keys: ['person'] },
+  { source: 'filmography', route: '/filmographies', keys: ['person'] },
+  { source: 'client', route: '/clients', keys: ['client_person'] },
+  { source: 'dis-camp-person', route: '/dis-camp-people', keys: PERSON_KEYS },
+  { source: 'industry-person', route: '/industry-people', keys: PERSON_KEYS },
+  { source: 'dis-camp-article', route: '/dis-camp-articles', keys: ['people'] },
+  { source: 'industry-article', route: '/industry-articles', keys: ['people'] },
+  { source: 'film', route: '/films', keys: PERSON_KEYS },
+  { source: 'course', route: '/courses', keys: PERSON_KEYS },
+  { source: 'course-event', route: '/course-events', keys: PERSON_KEYS },
+  { source: 'dis-camp-project', route: '/dis-camp-projects', keys: PERSON_KEYS },
+  { source: 'industry-project', route: '/industry-projects', keys: PERSON_KEYS },
+  { source: 'team', route: '/teams', keys: PERSON_KEYS },
+  // the festival pass has no REST route of its own: the content manager of the admin reads it
+  { source: 'festival-pass', route: '/content-manager/collection-types/application::festival-pass.festival-pass', keys: ['owner'], contentManager: true }
+]
+
+/** The ids of persons in a relation value: a number, an object with an id, or a list of them. */
+function personIdsIn (value) {
+  if (Array.isArray(value)) return value.flatMap(personIdsIn)
+  const id = Number(relationId(value))
+  return Number.isFinite(id) && id > 0 ? [id] : []
+}
+
+/** Walk an entry and collect the wanted person ids found under the given keys (not looking inside a person itself). */
+function collectPersonIds (value, keys, wanted, found) {
+  if (Array.isArray(value)) { for (const item of value) collectPersonIds(item, keys, wanted, found); return }
+  if (!value || typeof value !== 'object') return
+  for (const [key, inner] of Object.entries(value)) {
+    if (keys.includes(key)) { for (const id of personIdsIn(inner)) if (wanted.has(id)) found.add(id) } else collectPersonIds(inner, keys, wanted, found)
+  }
+}
+
 export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFionaGuestbooks, log = console }) {
   if (typeof fetch !== 'function') throw new Error('createStrapiGateway: fetch is required')
   const base = config.strapiUrl
@@ -98,6 +136,56 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
 
     async findPersonByEmail (email) {
       return first(await get(`/people?eMail=${encodeURIComponent(email)}&_limit=1`))
+    },
+
+    /** Persons whose full name or last name contains `term`, all pages (at most 2,000), for finding same-name persons. */
+    async findPeopleByNameTerm (term) {
+      const value = encodeURIComponent(term)
+      const clauses = ['firstNameLastName', 'lastName'].map((field, index) => `_where[_or][${index}][${field}_contains]=${value}`)
+      const pageSize = 200
+      const found = []
+      for (let start = 0; start < 2000; start += pageSize) {
+        const page = asList(await get(`/people?${clauses.join('&')}&_start=${start}&_limit=${pageSize}&_sort=id:asc`))
+        found.push(...page)
+        if (page.length < pageSize) break
+      }
+      return found
+    },
+
+    /**
+     * Where the given persons are used: { refs: { personId: [{ source, id }] }, covered: [source], failed: [{ source, error }] }.
+     * A source that cannot be read is listed in `failed` and not in `covered`: no references there is not the same as unknown.
+     */
+    async findPersonReferences (personIds) {
+      const wanted = new Set(asList(personIds).map(Number).filter(id => Number.isFinite(id) && id > 0))
+      const refs = {}
+      const covered = []
+      const failed = []
+      if (!wanted.size) return { refs, covered, failed }
+      for (const { source, route, keys, contentManager } of REFERENCE_SOURCES) {
+        try {
+          for (let page = 0; page < 500; page++) {
+            const response = contentManager
+              ? await get(`${route}?page=${page + 1}&pageSize=${REFERENCE_PAGE}`)
+              : await get(`${route}?_start=${page * REFERENCE_PAGE}&_limit=${REFERENCE_PAGE}&_sort=id:asc`)
+            const entries = asList(contentManager && !Array.isArray(response) ? response?.results : response)
+            for (const entry of entries) {
+              const found = new Set()
+              collectPersonIds(entry, keys, wanted, found)
+              for (const personId of found) {
+                const list = (refs[personId] ||= [])
+                if (!list.some(ref => ref.source === source && ref.id === entry.id)) list.push({ source, id: entry.id })
+              }
+            }
+            const pageCount = contentManager && !Array.isArray(response) ? Number(response?.pagination?.pageCount) || 1 : null
+            if (pageCount !== null ? page + 1 >= pageCount : entries.length < REFERENCE_PAGE) break
+          }
+          covered.push(source)
+        } catch (err) {
+          failed.push({ source, error: err?.message || String(err) })
+        }
+      }
+      return { refs, covered, failed }
     },
 
     async findPersonById (id) {
