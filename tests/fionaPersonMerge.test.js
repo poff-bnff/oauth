@@ -244,7 +244,14 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
     updatePerson (id, payload) {
       calls.push(['updatePerson', Number(id), payload])
       if (failOn === `updatePerson:${id}`) throw new Error('HTTP 500')
-      apply(store.get(Number(id)), payload)
+      const target = store.get(Number(id))
+      const previousUser = idOf(target.user)
+      apply(target, payload)
+      if ('user' in payload) {
+        // Strapi keeps the link on both sides: clearing it from the person side also clears user.person
+        if (previousUser && users[previousUser] && Number(users[previousUser].person) === Number(id)) users[previousUser].person = null
+        if (payload.user) { users[payload.user] = { ...(users[payload.user] || { id: payload.user }), person: Number(id) }; target.user = { id: payload.user } } else target.user = null
+      }
     },
     linkPersonToUser (personId, userId) {
       calls.push(['linkPersonToUser', Number(personId), Number(userId)])
@@ -282,9 +289,13 @@ describe('mergePersons', () => {
     const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
 
     expect(result.status).toBe('merged')
-    expect(strapi.calls.map(([name, id]) => `${name}:${id}`)).toEqual(['updatePerson:20', 'linkPersonToUser:20', 'moveAddressToPerson:40', 'updatePerson:500'])
+    expect(strapi.calls.map(([name, id]) => `${name}:${id}`)).toEqual(['updatePerson:20', 'moveAddressToPerson:40', 'updatePerson:500', 'updatePerson:20'])
+    expect(strapi.calls.some(([name]) => name === 'linkPersonToUser')).toBe(false) // PUT /users/:id would send the Creative Gate mail (users-permissions User.js afterUpdate)
+    const [, , linkBody] = strapi.calls[3]
+    expect(linkBody).toEqual({ user: 70, cgFormSave: true, skipbuild: true })
     const [, , keepBody] = strapi.calls[0]
     expect(keepBody).toMatchObject({ fiona_person_id: 'f-1', eMail: 'mari@acme.ee', organisations: [1, 2], cgFormSave: true, skipbuild: true })
+    expect('user' in keepBody).toBe(false)
     const retireBody = strapi.calls.find(([name, id]) => name === 'updatePerson' && id === 500)[2]
     expect(retireBody).toMatchObject({ fiona_person_id: null, eMail: null, public: false, firstNameLastName: 'Mari Maasikas (archived)', cgFormSave: true, skipbuild: true })
     expect(strapi.store.get(20).fiona_person_id).toBe('f-1')
@@ -355,18 +366,31 @@ describe('mergePersons', () => {
     expect(result.reason).toMatch(/#500 does not exist/)
   })
 
-  it('puts the login user back on the kept record when retiring the other one took it away', async () => {
+  it('ends with the login user on the kept record although hiding the other record took it off the user', async () => {
+    const strapi = fakeStrapi(people())
+
+    const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
+
+    expect(result.verify).toEqual({ ok: true, problems: [] })
+    expect(strapi.users[70].person).toBe(20)
+    expect(strapi.store.get(500).user).toBeNull()
+  })
+
+  it('links the login user again from the person side when the link was lost, and never through the user record', async () => {
     const strapi = fakeStrapi(people())
     const original = strapi.updatePerson
-    strapi.updatePerson = async (id, payload) => {
-      await original(id, payload)
-      if (Number(id) === 500 && 'user' in payload) strapi.users[70].person = null
+    let lost = false
+    strapi.updatePerson = (id, payload) => {
+      original(id, payload)
+      if (Number(id) === 20 && payload.user && !lost) { lost = true; strapi.users[70].person = null }
     }
 
     const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
 
     expect(result.verify.ok).toBe(true)
     expect(strapi.users[70].person).toBe(20)
+    expect(strapi.calls.filter(([name, id, body]) => name === 'updatePerson' && id === 20 && body.user === 70)).toHaveLength(2)
+    expect(strapi.calls.some(([name]) => name === 'linkPersonToUser')).toBe(false)
   })
 
   it('reports a failed check instead of calling the merge a success', async () => {

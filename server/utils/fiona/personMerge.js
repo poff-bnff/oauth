@@ -12,6 +12,7 @@
  *  - Fiona ids come from the sync-managed record; the login user and the address move to the kept record
  *  - the record that is merged away is renamed "<name> (archived)" when it is hidden
  *  - a record that is used elsewhere (film credits, passes, articles, ...) is never the one removed
+ *  - the login user is linked from the person side, never with PUT /users (its hook mails the person)
  *  - every save is silent: `cgFormSave` stops the "Creative Gate profile created" e-mail and `skipbuild` the site build
  */
 
@@ -172,8 +173,8 @@ async function verifyMerge ({ strapi, plan, keepId, removeId, retire, log }) {
   if (plan.link.userId) {
     let user = await strapi.getUser(plan.link.userId)
     if (Number(idOf(user?.person)) !== Number(keepId)) {
-      log.warn?.(`[merge] login user #${plan.link.userId} was taken off #${keepId}: linking it again`)
-      await strapi.linkPersonToUser(keepId, plan.link.userId)
+      log.warn?.(`[merge] login user #${plan.link.userId} is not on #${keepId}: linking it again from the person side`)
+      await strapi.updatePerson(keepId, { user: plan.link.userId, ...SILENT })
       user = await strapi.getUser(plan.link.userId)
     }
     if (Number(idOf(user?.person)) !== Number(keepId)) problems.push(`login user #${plan.link.userId} is not linked to #${keepId}`)
@@ -212,11 +213,13 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
     result.backup = { keep: copyOf(keep), remove: copyOf(remove) }
     if (plan.preRemovePatch) await strapi.updatePerson(removeId, { ...plan.preRemovePatch, ...SILENT })
     if (plan.changes.length) await strapi.updatePerson(keepId, { ...plan.patch, ...SILENT })
-    if (plan.link.userId) await strapi.linkPersonToUser(keepId, plan.link.userId)
     if (plan.link.addressMove) await strapi.moveAddressToPerson(plan.link.addressMove, keepId)
     if (plan.link.addressCountry) await strapi.setAddressCountry(plan.link.addressCountry.addressId, plan.link.addressCountry.countryId)
     if (retire === 'delete') await strapi.deletePerson(removeId)
     else await strapi.updatePerson(removeId, { ...plan.retirePatch, ...SILENT })
+    // The login user is linked LAST and from the person side: taking it off the other record clears it on the user, and
+    // PUT /users/:id would run the user model's hook, which sends the Creative Gate "profile created" mail (twice here).
+    if (plan.link.userId) await strapi.updatePerson(keepId, { user: plan.link.userId, ...SILENT })
 
     result.verify = await verifyMerge({ strapi, plan, keepId, removeId, retire, log })
     result.status = result.verify.ok ? 'merged' : 'check-failed'
