@@ -30,6 +30,7 @@ import { compareSources } from './fiona/compare.js'
 import { renotifyPersons } from './fiona/renotify.js'
 import { describePhotos } from './fiona/photoDiagnostic.js'
 import { describeFionaFields } from './fiona/fieldDiagnostic.js'
+import { buildTwinReport } from './fiona/twinReport.js'
 import { listBadgeTypes } from './fiona/badgeTypes.js'
 
 const config = useRuntimeConfig()
@@ -188,6 +189,8 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
     const xapi = createXapiClient({ fetch: $fetch, apiKey: config.fionaApiKey, log })
     return { mode, ...(await describePhotos({ personIds, all, probe, strapi: buildStrapiGateway(), xapi, log })) }
   }
+  // read-only: persons the sync created that have a same-name person it does not manage (duplicates), in tiers
+  if (mode === 'twins') return await buildTwinReport({ strapi: buildStrapiGateway(), log })
   // read-only: the raw field structure of a few persons from both Fiona APIs (where is a value kept?)
   if (mode === 'fields') {
     if (!config.fionaPublicationApiKey) throw new Error('fields needs NUXT_FIONA_PUBLICATION_API_KEY')
