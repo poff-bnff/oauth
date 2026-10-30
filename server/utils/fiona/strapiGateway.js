@@ -279,6 +279,20 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       else await post('/addresses', { country: Number(countryId), person: Number(person.id) })
     },
 
+    /** Point an address at another person (the address of a person that is merged into another one). */
+    async moveAddressToPerson (addressId, personId) {
+      await put(`/addresses/${encodeURIComponent(addressId)}`, { person: Number(personId) })
+    },
+
+    async setAddressCountry (addressId, countryId) {
+      await put(`/addresses/${encodeURIComponent(addressId)}`, { country: Number(countryId) })
+    },
+
+    /** Delete a person for good (a merged person that is no longer needed). */
+    async deletePerson (id) {
+      return await request('DELETE', `/people/${encodeURIComponent(id)}`)
+    },
+
     async createPerson (payload) {
       return await post('/people', payload)
     },
