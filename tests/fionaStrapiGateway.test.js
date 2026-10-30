@@ -112,6 +112,59 @@ describe('createStrapiGateway', () => {
     })
   })
 
+  describe('credit entries (films, course events, projects, teams, ... that name a person)', () => {
+    it('reads an entry through the route of its source and writes the changed fields back to the same route', async () => {
+      const { fetch, calls } = fakeFetch({ 'GET /films/9213': { id: 9213, credentials: { id: 77 } }, 'PUT /films/9213': { id: 9213 } })
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      expect(await gateway.getCreditEntry('film', 9213)).toEqual({ id: 9213, credentials: { id: 77 } })
+      await gateway.updateCreditEntry('film', 9213, { credentials: { id: 77, rolePerson: [{ id: 1, person: 20 }] }, skipbuild: true })
+
+      expect(calls.map(c => `${c.method} ${c.url.replace(STRAPI, '')}`)).toEqual(['GET /films/9213', 'PUT /films/9213'])
+      expect(calls[1].body).toEqual({ credentials: { id: 77, rolePerson: [{ id: 1, person: 20 }] }, skipbuild: true })
+      expect(calls[1].headers.Authorization).toBe('Bearer ADMIN')
+    })
+
+    it('knows the route of every source it can re-point, and refuses a source that is read another way (the festival pass)', async () => {
+      const { fetch, calls } = fakeFetch({ 'GET /course-events/5': { id: 5 }, 'GET /filmographies/6': { id: 6 }, 'GET /industry-people/7': { id: 7 } })
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      await gateway.getCreditEntry('course-event', 5)
+      await gateway.getCreditEntry('filmography', 6)
+      await gateway.getCreditEntry('industry-person', 7)
+      expect(calls.map(c => c.url.replace(STRAPI, ''))).toEqual(['/course-events/5', '/filmographies/6', '/industry-people/7'])
+
+      await expect(gateway.getCreditEntry('festival-pass', 1)).rejects.toThrow(/festival-pass/)
+      await expect(gateway.updateCreditEntry('nonsense', 1, {})).rejects.toThrow(/nonsense/)
+    })
+
+    it('returns null for an entry that does not exist (any more)', async () => {
+      const { fetch } = fakeFetch({ 'GET /films/404': () => { const e = new Error('not found'); e.statusCode = 404; throw e } })
+      expect(await createStrapiGateway({ fetch, ...deps() }).getCreditEntry('film', 404)).toBeNull()
+    })
+  })
+
+  it('sets the alias logins of a main login with a plain user update that does not touch the person (the update hook mails a person that is linked)', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /users/70': { id: 70 } })
+
+    await createStrapiGateway({ fetch, ...deps() }).setAliasUsers(70, [90, '71'])
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].method).toBe('PUT')
+    expect(calls[0].url).toBe(`${STRAPI}/users/70`)
+    expect(calls[0].body).toEqual({ aliasUsers: [90, 71] })
+  })
+
+  it('takes a person off a login with a plain user update (person: null sets no person, so the update hook sends no mail)', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /users/71': { id: 71 } })
+
+    await createStrapiGateway({ fetch, ...deps() }).clearUserPerson(71)
+
+    expect(calls[0].method).toBe('PUT')
+    expect(calls[0].url).toBe(`${STRAPI}/users/71`)
+    expect(calls[0].body).toEqual({ person: null })
+  })
+
   it('returns null for a missing user instead of throwing', async () => {
     const { fetch } = fakeFetch({ 'GET /users/404': () => { const e = new Error('not found'); e.statusCode = 404; throw e } })
     expect(await createStrapiGateway({ fetch, ...deps() }).getUser('404')).toBeNull()

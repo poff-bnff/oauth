@@ -144,7 +144,7 @@ async function compareFionaSources () {
   return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
 }
 
-export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], testExtraFields = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', decisions = [] } = {}) {
+export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], testExtraFields = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, decisions = [] } = {}) {
   if (mode === 'status') return statusReport()
   if (syncRunning) {
     log.warn('Sync already running — skipping this invocation')
@@ -152,17 +152,17 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
   }
   if (background) {
     // answer at once and let the run go on; its progress and result are asked for with mode "status"
-    runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, decisions }).catch(err => log.error(`background run failed: ${err?.message || err}`))
+    runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, decisions }).catch(err => log.error(`background run failed: ${err?.message || err}`))
     return { started: true, mode, dryRun, hint: 'ask {"mode":"status"} for its progress and result' }
   }
-  return await runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, decisions })
+  return await runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, decisions })
 }
 
-async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, decisions }) {
+async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, decisions }) {
   syncRunning = true
   currentRun = { mode, dryRun, startedAt: new Date().toISOString(), stats: null }
   try {
-    const result = await runInner({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, decisions })
+    const result = await runInner({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, decisions })
     lastRun = { mode, dryRun, startedAt: currentRun.startedAt, finishedAt: new Date().toISOString(), stats: result }
     return result
   } catch (err) {
@@ -174,7 +174,7 @@ async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbo
   }
 }
 
-async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, decisions }) {
+async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, decisions }) {
   if (mode === 'compare') return await compareFionaSources()
   // One-off tools for persons the sync made (Strapi person ids): send the Creative Gate "created" email again,
   // and list what Fiona holds as photos (read-only, XAPI).
@@ -191,7 +191,11 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
     return { mode, ...(await describePhotos({ personIds, all, probe, strapi: buildStrapiGateway(), xapi, log })) }
   }
   // merges pairs of persons that are one human (a dry run unless dryRun is explicitly false; see fiona/personMerge.js)
-  if (mode === 'merge') return await mergeBatch({ pairs: mergePairs, strapi: buildStrapiGateway(), dryRun, retire: mergeRetire, log })
+  if (mode === 'merge') {
+    // two different logins: the one Fiona knows (MyPoff link of the Fiona person) is the main one
+    const fiona = aliasLogins ? buildFionaClient() : null
+    return await mergeBatch({ pairs: mergePairs, strapi: buildStrapiGateway(), dryRun, retire: mergeRetire, repointCredits, aliasLogins, fionaLogin: fiona ? fionaPersonId => fiona.getMyPoffUserId(fionaPersonId) : null, log })
+  }
   // read-only: persons the sync created that have a same-name person it does not manage (duplicates), in tiers
   if (mode === 'twins') return await buildTwinReport({ strapi: buildStrapiGateway(), log })
   // read-only: the raw field structure of a few persons from both Fiona APIs (where is a value kept?)

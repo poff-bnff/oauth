@@ -36,6 +36,13 @@ const REFERENCE_SOURCES = [
   { source: 'festival-pass', route: '/content-manager/collection-types/application::festival-pass.festival-pass', keys: ['owner'], contentManager: true }
 ]
 
+/** The REST route of a source that names persons; the festival pass (content manager only) is read, never written, here. */
+function creditRoute (source) {
+  const found = REFERENCE_SOURCES.find(item => item.source === source)
+  if (!found || found.contentManager) throw new Error(`${source} cannot be read or written through a REST route here`)
+  return found.route
+}
+
 /** The ids of persons in a relation value: a number, an object with an id, or a list of them. */
 function personIdsIn (value) {
   if (Array.isArray(value)) return value.flatMap(personIdsIn)
@@ -197,6 +204,16 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return { refs, covered, failed }
     },
 
+    /** An entry that names a person (a film, a team, ...), as its own REST route returns it; null when it does not exist. */
+    async getCreditEntry (source, id) {
+      return await getOrNull(`${creditRoute(source)}/${encodeURIComponent(id)}`)
+    },
+
+    /** Write fields of such an entry (the patch of fiona/personCredits.js). */
+    async updateCreditEntry (source, id, payload) {
+      return await put(`${creditRoute(source)}/${encodeURIComponent(id)}`, payload)
+    },
+
     async findPersonById (id) {
       return await getOrNull(`/people/${encodeURIComponent(id)}`)
     },
@@ -308,6 +325,19 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
 
     async updatePerson (id, payload) {
       return await put(`/people/${encodeURIComponent(id)}`, payload)
+    },
+
+    /**
+     * Make logins aliases of a main login (hunt's alias feature does the same update). A plain user update without
+     * `person`: the user model's hook mails a Creative Gate person only when a person is linked in the same update.
+     */
+    async setAliasUsers (mainUserId, aliasUserIds) {
+      await put(`/users/${encodeURIComponent(mainUserId)}`, { aliasUsers: asList(aliasUserIds).map(Number) })
+    },
+
+    /** Take the person off a login (an alias is a login identity only). `person: null` is no person in the update: no mail. */
+    async clearUserPerson (userId) {
+      await put(`/users/${encodeURIComponent(userId)}`, { person: null })
     },
 
     async linkPersonToUser (personId, userId) {
