@@ -49,6 +49,11 @@
  *                Ask { "mode": "status" } for the progress of the run that is going and the result of the last one
  *                (kept in memory only). Use it for anything that may last more than ten minutes: the platform cuts a
  *                request after about ten minutes while the run itself goes on.
+ *                { "decisions": [{ "fionaPersonId": "<id>", "action": "adopt", "personId": 20 } | { "fionaPersonId": "<id>", "action": "create" }] }
+ *                — what to do with Fiona persons the sync held back ("needsDecision" in the stats: a person with this name or
+ *                e-mail may already be in Strapi). "adopt" gives the Fiona person to that Strapi person (the Fiona ids are
+ *                written there), "create" makes a new person. Only those Fiona persons are handled, nothing is removed, no
+ *                job state is saved. ALWAYS a dry run unless dryRun is explicitly false.
  *                { "mode": "badges" } or { "mode": "badges", "guestbookIds": [..] } — read-only: the badge types of the
  *                active (or the given) guestbooks with their ids, straight from the XAPI (the id is what a rule's
  *                badge_type_id matches on).
@@ -97,7 +102,9 @@ export default defineEventHandler(async (event) => {
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
   const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
-  const dryRun = ['renotify', 'merge'].includes(mode) ? body?.dryRun !== false : body?.dryRun === true
+  // (so are decisions about Fiona persons the sync held back: they create or link persons)
+  const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
+  const dryRun = ['renotify', 'merge'].includes(mode) || sentDecisions ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []
@@ -110,9 +117,16 @@ export default defineEventHandler(async (event) => {
   const testFionaPersonIds = Array.isArray(body?.testFionaPersonIds) ? body.testFionaPersonIds.map(String) : [] // a test run only: handle just these Fiona person ids
   const mergePairs = Array.isArray(body?.pairs) ? body.pairs.map(pair => ({ keep: Number(pair?.keep), remove: Number(pair?.remove) })) : [] // merge mode: [{ keep, remove }] Strapi person ids
   const mergeRetire = body?.retire === 'delete' ? 'delete' : 'hide' // merge mode: what happens to the record that is merged into the other
+  // decisions about Fiona persons the sync held back (they need a decision): [{ fionaPersonId, action: 'adopt', personId } | { fionaPersonId, action: 'create' }]
+  const decisions = sentDecisions
+    ? body.decisions.map(item => ({ fionaPersonId: String(item?.fionaPersonId ?? '').trim(), action: item?.action, personId: item?.personId == null ? null : Number(item.personId) }))
+      .filter(item => item.fionaPersonId && (item.action === 'create' || (item.action === 'adopt' && Number.isInteger(item.personId) && item.personId > 0)))
+    : []
+  // a malformed list must never turn into an ordinary full run
+  if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, decisions })
 
   return { ok: true, stats }
 })

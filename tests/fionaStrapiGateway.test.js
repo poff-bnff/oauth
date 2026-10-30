@@ -83,9 +83,33 @@ describe('createStrapiGateway', () => {
     const gateway = createStrapiGateway({ fetch, ...deps() })
     expect(await gateway.findPersonByFionaId('abc def')).toEqual({ id: 5 })
     expect(calls[0].url).toBe(`${STRAPI}/people?fiona_person_id=abc%20def&_limit=1`)
-    expect(await gateway.findPersonByEmail('a+b@x.ee')).toBeNull()
-    expect(calls[1].url).toBe(`${STRAPI}/people?eMail=a%2Bb%40x.ee&_limit=1`)
     expect(await gateway.findPersonById(9)).toEqual({ id: 9 })
+    expect(calls[1].url).toBe(`${STRAPI}/people/9`)
+  })
+
+  describe('findPeopleByEmail', () => {
+    it('asks Strapi for a case-insensitive match and keeps only the persons whose e-mail is exactly this one, lowest id first', async () => {
+      const urls = []
+      const fetch = (url) => {
+        urls.push(decodeURIComponent(url.replace(STRAPI, '')))
+        return [
+          { id: 30, eMail: 'Mari@Example.com ' },
+          { id: 12, eMail: 'mari@example.com' },
+          { id: 40, eMail: 'mari@example.com.au' }, // contains the e-mail but is another address
+          { id: 41, eMail: 'old-mari@example.com' }
+        ]
+      }
+
+      const found = await createStrapiGateway({ fetch, ...deps() }).findPeopleByEmail('MARI@example.com')
+
+      expect(urls).toEqual(['/people?eMail_contains=MARI@example.com&_sort=id:asc&_limit=100'])
+      expect(found.map(person => person.id)).toEqual([12, 30])
+    })
+
+    it('finds nobody for an empty e-mail without asking Strapi', async () => {
+      const fetch = () => { throw new Error('must not be called') }
+      expect(await createStrapiGateway({ fetch, ...deps() }).findPeopleByEmail('  ')).toEqual([])
+    })
   })
 
   it('returns null for a missing user instead of throwing', async () => {
