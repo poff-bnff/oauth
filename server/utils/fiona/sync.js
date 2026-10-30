@@ -28,6 +28,7 @@ import { mergeDesired, planRemovals, splitIds } from './desiredState.js'
 import { buildPersonPayload, valuesToClear } from './personMapper.js'
 import { normalizeName, uniqueNames, splitOccupations, isPlaceholderCompany, planCategories, planRoles, planCountry } from './extraFields.js'
 import { headshotFileName } from './photoName.js'
+import { findSameNamePersons, describeCandidate } from './sameName.js'
 
 export const JOB_KEY = 'accreditations'
 const RELEVANT_ENTITIES = new Set(['Accreditation', 'AccreditationBadge', 'Person'])
@@ -80,7 +81,10 @@ function newStats (dryRun, mode) {
     guestbooks: { active: 0, scanned: 0, failed: 0 },
     rules: { active: 0, mapped: 0, unmapped: 0 },
     accreditations: { seen: 0, matched: 0, errors: 0 },
-    persons: { desired: 0, created: 0, updated: 0, unchanged: 0, downgraded: 0, unpublished: 0, conflicts: 0, skippedNoEmail: 0 },
+    persons: { desired: 0, created: 0, updated: 0, unchanged: 0, downgraded: 0, unpublished: 0, conflicts: 0, skippedNoEmail: 0, needsDecision: 0 },
+    // Fiona persons the sync did not create because Strapi may already hold them: { fionaPersonId, name, email, reason, candidates }
+    needsDecision: [],
+    decisions: { adopted: 0, created: 0, unmatched: [] },
     editions: { attached: 0, detached: 0 },
     users: { created: 0, linked: 0, confirmed: 0, unconfirmedSeen: 0, confirmedFieldMissing: 0 },
     profiles: { created: 0, updated: 0 },
@@ -230,12 +234,17 @@ export function decideAutoMode (job, nowDate) {
 }
 
 /**
- * @param {object} [options.only]  a TEST run: { ruleIds, maxPersons, scope }. Only persons that one of these rules matches are
+ * @param {object} [options.only]  a TEST run: { ruleIds, maxPersons, scope, decisions }. With `decisions` ([{ fionaPersonId, action: 'adopt', personId } | { fionaPersonId, action: 'create' }]) it is a DECISION run: only those Fiona persons are handled (rules are not needed), nothing is removed and no waiting build is touched. Only persons that one of these rules matches are
  *   handled (scope 'new' = only persons Strapi does not hold yet, 'existing' = only those it already holds), at most maxPersons are written, and no state is saved in the job entry (a test can neither start, delay
  *   nor shorten the real import). Everything else (users, roles, editions, photos, emails, builds) is the real thing.
  */
 export async function runSync ({ dryRun = false, force = false, mode = 'full', backlog = false, only = null } = {}, deps) {
-  if (only && !(Array.isArray(only.ruleIds) && only.ruleIds.length)) throw new Error('a test run needs at least one rule id')
+  // what a person decided about a Fiona person the sync held back: 'adopt' = it is this Strapi person, 'create' = it is a new person
+  const decisions = new Map()
+  for (const decision of only && Array.isArray(only.decisions) ? only.decisions : []) {
+    if (decision?.fionaPersonId && ['adopt', 'create'].includes(decision.action)) decisions.set(String(decision.fionaPersonId), { action: decision.action, personId: decision.personId == null ? null : Number(decision.personId) })
+  }
+  if (only && !(Array.isArray(only.ruleIds) && only.ruleIds.length) && !decisions.size) throw new Error('a test run needs at least one rule id')
   const { fiona, strapi, config = {} } = deps
   const log = deps.log || console
   const now = deps.now || (() => new Date())
@@ -243,9 +252,11 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   const maxBuildsPerRun = Number.isFinite(Number(config.maxBuildsPerRun)) && config.maxBuildsPerRun !== undefined ? Number(config.maxBuildsPerRun) : 20
   // at most this many persons are written per run (0 = no cap); the run then stops and says more work remains
   let maxPersonsPerRun = Number.isFinite(Number(config.maxPersonsPerRun)) && config.maxPersonsPerRun !== undefined ? Number(config.maxPersonsPerRun) : 50
-  const testRuleIds = only ? new Set(only.ruleIds.map(Number)) : null
+  const testRuleIds = only && Array.isArray(only.ruleIds) && only.ruleIds.length ? new Set(only.ruleIds.map(Number)) : null
   const testScope = only && ['new', 'existing'].includes(only.scope) ? only.scope : 'all'
-  const testFionaPersonIds = only && Array.isArray(only.fionaPersonIds) && only.fionaPersonIds.length ? new Set(only.fionaPersonIds.map(String)) : null
+  const testFionaPersonIds = only && Array.isArray(only.fionaPersonIds) && only.fionaPersonIds.length
+    ? new Set(only.fionaPersonIds.map(String))
+    : (decisions.size ? new Set(decisions.keys()) : null)
   if (only && Number(only.maxPersons) > 0) maxPersonsPerRun = Number(only.maxPersons)
   let backlogRun = Boolean(backlog)
   // Strapi person ids whose existing biography the sync never overwrites (an empty one is still filled)
@@ -259,7 +270,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   const extraFieldsOn = Boolean(config.extraFields) || Boolean(only?.extraFields)
   stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios), extraFields: extraFieldsOn }
   stats.backlog = { cap: maxPersonsPerRun, more: false }
-  if (only) stats.test = { ruleIds: [...testRuleIds], maxPersons: maxPersonsPerRun, scope: testScope, outsideRules: 0, alreadyInStrapi: 0 }
+  if (only) stats.test = { ruleIds: [...(testRuleIds || [])], maxPersons: maxPersonsPerRun, scope: testScope, outsideRules: 0, alreadyInStrapi: 0 }
   const would = dryRun ? 'DRY RUN would ' : ''
 
   const warn = (message) => { stats.warnings.push(message); log.warn(message) }
@@ -733,6 +744,14 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
 
   // 6. Upsert desired persons -----------------------------------------------
   if (testRuleIds) stats.test.outsideRules = [...desired.values()].filter(entry => ![...entry.matchedRuleIds].some(id => testRuleIds.has(Number(id)))).length
+  for (const id of decisions.keys()) if (!desired.has(id)) stats.decisions.unmatched.push(id)
+  // A Fiona person the sync does not create because Strapi may hold it already: the list below is what a person has to decide
+  const holdBack = (fionaPersonId, fionaPerson, email, reason, candidates) => {
+    const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
+    stats.persons.needsDecision++
+    if (stats.needsDecision.length < 200) stats.needsDecision.push({ fionaPersonId, name, email, reason, candidates: candidates.map(describeCandidate) })
+    warn(`person ${fionaPersonId} (${name}, ${email}) needs a decision: ${reason}, ${candidates.map(candidate => `#${candidate.id}`).join(', ')} — not created`)
+  }
   let written = 0 // persons this run writes: created, or updated because something differs
   for (const [fionaPersonId, want] of desired) {
     if (erroredPersonIds.has(fionaPersonId)) continue
@@ -762,6 +781,14 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       if (myPoffUserId) user = await strapi.getUser(myPoffUserId)
 
       let existing = managedByFionaId.get(fionaPersonId) || await strapi.findPersonByFionaId(fionaPersonId)
+      const decision = decisions.get(String(fionaPersonId)) || null
+      if (!existing && decision?.action === 'adopt') {
+        const target = await strapi.findPersonById(decision.personId)
+        if (!target) throw new Error(`adopt: there is no Strapi person #${decision.personId}`)
+        if (target.fiona_person_id && target.fiona_person_id !== fionaPersonId) throw new Error(`adopt: person #${target.id} already belongs to Fiona person ${target.fiona_person_id}`)
+        existing = target
+        stats.decisions.adopted++
+      }
       const userPersonId = user?.person ? Number(relationId(user.person)) : null
       if (existing && userPersonId && userPersonId !== Number(existing.id)) {
         stats.persons.conflicts++
@@ -781,12 +808,35 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
         warn(`person ${fionaPersonId} (${fionaPerson.firstName} ${fionaPerson.lastName}) has no email — skipped`)
         continue
       }
-      if (!existing) existing = await strapi.findPersonByEmail(contactEmail)
+      if (!existing) {
+        // every person with this e-mail, whatever the letter case: one that no Fiona person owns yet is the one to adopt;
+        // two of them are not for the sync to choose between
+        const withEmail = await strapi.findPeopleByEmail(contactEmail)
+        const free = withEmail.filter(candidate => !candidate.fiona_person_id)
+        if (free.length > 1 && decision?.action !== 'create') {
+          holdBack(fionaPersonId, fionaPerson, contactEmail, 'shared e-mail', free)
+          continue
+        }
+        if (free.length === 1) existing = free[0]
+        else if (free.length === 0) existing = withEmail[0] || null // owned by another Fiona person: the conflict below reports it
+        if (withEmail.length > 1 && existing) log.info(`person ${fionaPersonId}: ${withEmail.length} persons share the e-mail ${contactEmail} (${withEmail.map(candidate => `#${candidate.id}`).join(', ')}), took #${existing.id}`)
+      }
       if (existing?.fiona_person_id && existing.fiona_person_id !== fionaPersonId) {
         stats.persons.conflicts++
         log.error(`person ${fionaPersonId}: email ${contactEmail} belongs to person #${existing.id} synced from Fiona person ${existing.fiona_person_id} — skipped`)
         continue
       }
+
+      // About to create a person: Strapi may hold this human already under the same name, registered before without (or with
+      // another) e-mail. The sync does not guess; it lists the Fiona person and waits for a decision.
+      if (!existing && decision?.action !== 'create') {
+        const sameName = await findSameNamePersons({ strapi, firstName: fionaPerson.firstName, lastName: fionaPerson.lastName })
+        if (sameName.length) {
+          holdBack(fionaPersonId, fionaPerson, contactEmail, 'same name', sameName)
+          continue
+        }
+      }
+      if (!existing && decision?.action === 'create') stats.decisions.created++
 
       // a test run can be limited to persons Strapi does not hold yet (the creation) or to those it already holds (the adoption)
       if (testScope === 'new' && existing) { stats.test.alreadyInStrapi++; continue }
@@ -1002,7 +1052,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   }
 
   // 7. Remaining removals (persons no longer desired) ------------------------
-  for (const action of plan.actions) {
+  for (const action of decisions.size ? [] : plan.actions) { // a decision run does nothing but its decisions
     if (desired.has(action.fionaPersonId)) continue
     const person = managedByFionaId.get(action.fionaPersonId)
     if (!person) continue
@@ -1051,7 +1101,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   if (stats.build.removedWithoutBuild.length) {
     warn(`${stats.build.removedWithoutBuild.length} persons were taken off Creative Gate — their pages stay on the site until your next full build + publish`)
   }
-  const waitingBefore = normalizeBuildQueue(job?.build_queue)
+  const waitingBefore = decisions.size ? [] : normalizeBuildQueue(job?.build_queue)
   if (dryRun) {
     stats.build.queued = mergeBuildQueue(waitingBefore, [], buildRules).length
   } else {
