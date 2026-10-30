@@ -17,7 +17,8 @@
  *  - the login user is linked from the person side, never with PUT /users (its hook mails the person)
  *  - two different login users (`aliasLogins`): Fiona's login (the one MyPoff knows for the Fiona person) is the main one and
  *    stays on the person; the other becomes its alias (a login identity only: hunt then signs in as the main one). A login
- *    that owns purchases, payments, an organisation or roles the main one lacks is never made an alias.
+ *    that owns purchases, payments, an organisation or roles the main one lacks is never made an alias, unless `moveToMain`
+ *    says that its roles (added to the main login's), organisation and business profiles (moved to it) may move across.
  *  - every save is silent: `cgFormSave` stops the "Creative Gate profile created" e-mail and `skipbuild` the site build
  */
 
@@ -190,6 +191,12 @@ async function verifyMerge ({ strapi, plan, keepId, removeId, retire, alias = nu
     const aliasUser = await strapi.getUser(alias.alias)
     if (Number(idOf(aliasUser?.mainUser)) !== alias.main) problems.push(`login #${alias.alias} is not an alias of #${alias.main}`)
     if (Number(idOf(aliasUser?.person)) === Number(keepId)) problems.push(`login #${alias.alias} is still on person #${keepId}`)
+    if (Object.keys(alias.moves).length) {
+      const main = await strapi.getUser(alias.main)
+      if (alias.moves.user_roles && !alias.moves.user_roles.every(id => idsOf(main?.user_roles).includes(id))) problems.push(`the roles are not all on login #${alias.main}`)
+      if (alias.moves.organisation && Number(idOf(main?.organisation)) !== alias.moves.organisation) problems.push(`organisation #${alias.moves.organisation} is not on login #${alias.main}`)
+      if (alias.moves.business_profiles && !alias.moves.business_profiles.every(id => idsOf(main?.business_profiles).includes(id))) problems.push(`the business profiles are not all on login #${alias.main}`)
+    }
   }
   const removed = await strapi.findPersonById(removeId)
   if (retire === 'delete') {
@@ -204,26 +211,54 @@ async function verifyMerge ({ strapi, plan, keepId, removeId, retire, alias = nu
   return { ok: problems.length === 0, problems }
 }
 
-/** What stops a login from becoming an alias: an alias is only a login identity, the main login owns everything else. */
-function aliasBlockers (aliasUser, mainUser) {
+/**
+ * What stops a login from becoming an alias (an alias is only a login identity, the main login owns everything else), and
+ * what may move to the main login instead when `moveToMain` allows it: its roles (added to the main login's), its
+ * organisation and its business profiles.
+ */
+function aliasBlockers (aliasUser, mainUser, moveToMain = []) {
   const blockers = []
+  const moves = {}
+  const movesLabel = {}
+  const may = what => asList(moveToMain).includes(what)
   if (idOf(aliasUser.mainUser)) blockers.push(`it is an alias of #${idOf(aliasUser.mainUser)} already`)
   if (idOf(mainUser.mainUser)) blockers.push(`the main login #${mainUser.id} is an alias of #${idOf(mainUser.mainUser)} itself`)
   if (asList(aliasUser.aliasUsers).length) blockers.push('it has aliases of its own')
   if (asList(aliasUser.my_products).length) blockers.push(`it owns ${asList(aliasUser.my_products).length} product(s) (passes, tickets)`)
   if (asList(aliasUser.transactions).length) blockers.push(`it has ${asList(aliasUser.transactions).length} payment(s)`)
-  if (asList(aliasUser.business_profiles).length) blockers.push('it has a business profile')
-  if (idOf(aliasUser.organisation)) blockers.push('it belongs to an organisation')
   if (!isEmpty(aliasUser.moodle_id)) blockers.push('it has a Moodle account')
   if (idOf(aliasUser.order)) blockers.push('it has an order')
+
+  const aliasProfiles = idsOf(aliasUser.business_profiles)
+  if (aliasProfiles.length) {
+    if (may('businessProfiles')) {
+      moves.business_profiles = [...new Set([...idsOf(mainUser.business_profiles), ...aliasProfiles])]
+      movesLabel.businessProfiles = aliasProfiles
+    } else blockers.push('it has a business profile')
+  }
+  const aliasOrganisation = Number(idOf(aliasUser.organisation)) || null
+  if (aliasOrganisation) {
+    const mainOrganisation = Number(idOf(mainUser.organisation)) || null
+    if (!may('organisation')) blockers.push('it belongs to an organisation')
+    else if (mainOrganisation && mainOrganisation !== aliasOrganisation) blockers.push(`both logins belong to an organisation (#${aliasOrganisation} and #${mainOrganisation}), and one cannot take the other`)
+    else if (!mainOrganisation) {
+      moves.organisation = aliasOrganisation
+      movesLabel.organisation = aliasOrganisation
+    }
+  }
   const mainRoles = idsOf(mainUser.user_roles)
   const lacking = asList(aliasUser.user_roles).filter(role => !mainRoles.includes(Number(idOf(role))))
-  if (lacking.length) blockers.push(`it has role(s) the main login lacks (${lacking.map(role => role.name || `#${idOf(role)}`).join(', ')})`)
-  return blockers
+  if (lacking.length) {
+    if (may('roles')) {
+      moves.user_roles = [...mainRoles, ...lacking.map(role => Number(idOf(role)))]
+      movesLabel.roles = lacking.map(role => role.name || `#${idOf(role)}`)
+    } else blockers.push(`it has role(s) the main login lacks (${lacking.map(role => role.name || `#${idOf(role)}`).join(', ')})`)
+  }
+  return { blockers, moves, movesLabel }
 }
 
 /** Which of two different logins is the main one (the one Fiona knows), and whether the other may become its alias. */
-async function planAlias ({ strapi, keepUser, removeUser, fionaPersonId, fionaLogin }) {
+async function planAlias ({ strapi, keepUser, removeUser, fionaPersonId, fionaLogin, moveToMain = [] }) {
   const logins = `#${keepUser} and #${removeUser}`
   if (!fionaPersonId) return { ok: false, reason: `two logins (${logins}), and neither record is synced from Fiona, so nothing says which is the main one` }
   if (typeof fionaLogin !== 'function') return { ok: false, reason: `two logins (${logins}), and Fiona cannot be asked which is the main one` }
@@ -239,11 +274,11 @@ async function planAlias ({ strapi, keepUser, removeUser, fionaPersonId, fionaLo
   const aliasId = fiona === keepUser ? removeUser : keepUser
   const [mainUser, aliasUser] = [await strapi.getUser(fiona), await strapi.getUser(aliasId)]
   if (!mainUser || !aliasUser) return { ok: false, reason: `login #${mainUser ? aliasId : fiona} cannot be read` }
-  const blockers = aliasBlockers(aliasUser, mainUser)
+  const { blockers, moves, movesLabel } = aliasBlockers(aliasUser, mainUser, moveToMain)
   if (blockers.length) return { ok: false, reason: `login #${aliasId} cannot become an alias of #${fiona}: ${blockers.join('; ')}` }
   const notes = []
   if (idOf(aliasUser.cart)) notes.push('the alias login has a cart')
-  return { ok: true, plan: { main: fiona, alias: aliasId, mainUser, aliasUser, mainAliases: idsOf(mainUser.aliasUsers), notes } }
+  return { ok: true, plan: { main: fiona, alias: aliasId, mainUser, aliasUser, mainAliases: idsOf(mainUser.aliasUsers), moves, movesLabel, notes } }
 }
 
 /** What to write in each entry that credits the record to remove; ok: false (with the reason) when one cannot be moved. */
@@ -275,10 +310,10 @@ async function verifyCredits ({ strapi, plans, keepId, removeId }) {
 
 /**
  * Merge `removeId` into `keepId`.
- * @param {{ keepId: number, removeId: number, strapi: object, dryRun?: boolean, retire?: 'hide'|'delete', removeRefs?: object[], repointCredits?: boolean, aliasLogins?: boolean, fionaLogin?: (fionaPersonId: string) => Promise<number|string|null>, log?: object }} options
+ * @param {{ keepId: number, removeId: number, strapi: object, dryRun?: boolean, retire?: 'hide'|'delete', removeRefs?: object[], repointCredits?: boolean, aliasLogins?: boolean, moveToMain?: string[], fionaLogin?: (fionaPersonId: string) => Promise<number|string|null>, log?: object }} options
  * @returns {Promise<object>} status: dry-run | merged | skipped | check-failed | failed
  */
-export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, retire = 'hide', removeRefs = [], repointCredits = false, aliasLogins = false, fionaLogin = null, log = console }) {
+export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, retire = 'hide', removeRefs = [], repointCredits = false, aliasLogins = false, moveToMain = [], fionaLogin = null, log = console }) {
   const result = { keep: Number(keepId), remove: Number(removeId), name: null, status: 'skipped' }
   try {
     const keep = await strapi.findPersonById(keepId)
@@ -290,7 +325,7 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
     const removeUser = Number(idOf(remove.user)) || null
     let alias = { ok: true, plan: null }
     if (aliasLogins && keepUser && removeUser && keepUser !== removeUser) {
-      alias = await planAlias({ strapi, keepUser, removeUser, fionaPersonId: remove.fiona_person_id || keep.fiona_person_id, fionaLogin })
+      alias = await planAlias({ strapi, keepUser, removeUser, fionaPersonId: remove.fiona_person_id || keep.fiona_person_id, fionaLogin, moveToMain })
       if (!alias.ok) return { ...result, reason: alias.reason }
     }
     const movable = repointCredits ? asList(removeRefs).filter(ref => CREDIT_SOURCES.includes(ref.source)) : []
@@ -300,7 +335,7 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
     if (!credits.ok) return { ...result, reason: credits.reason }
     Object.assign(result, { changes: plan.changes, link: plan.link, retire })
     if (credits.plans.length) result.credits = credits.plans.map(({ source, id, changes, dropped }) => ({ source, id, changes, dropped }))
-    if (alias.plan) result.alias = { main: alias.plan.main, alias: alias.plan.alias, notes: alias.plan.notes }
+    if (alias.plan) result.alias = { main: alias.plan.main, alias: alias.plan.alias, notes: alias.plan.notes, ...(Object.keys(alias.plan.movesLabel).length ? { moves: alias.plan.movesLabel } : {}) }
     if (dryRun) return { ...result, status: 'dry-run' }
 
     result.backup = { keep: copyOf(keep), remove: copyOf(remove) }
@@ -324,6 +359,8 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
 
     // the other login becomes an alias of the main one (a plain user update, after the person has the main login)
     if (alias.plan) {
+      // what the alias login owned goes to the main login first (one plain user update from the user side)
+      if (Object.keys(alias.plan.moves).length) await strapi.setUserFields(alias.plan.main, alias.plan.moves)
       await strapi.setAliasUsers(alias.plan.main, [...new Set([...alias.plan.mainAliases, alias.plan.alias])])
       // linking the main login to the person may leave the alias login on it too: an alias is a login identity only
       if (Number(idOf((await strapi.getUser(alias.plan.alias))?.person)) === Number(keepId)) await strapi.clearUserPerson(alias.plan.alias)
@@ -343,7 +380,7 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
  * The places that use the persons to remove are read once for the whole batch (a slow read), and the batch refuses to
  * run when one of those places cannot be read: "not used" would then be a guess.
  */
-export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide', repointCredits = false, aliasLogins = false, fionaLogin = null, log = console }) {
+export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], fionaLogin = null, log = console }) {
   const list = []
   const seen = new Set()
   for (const pair of Array.isArray(pairs) ? pairs : []) {
@@ -363,12 +400,12 @@ export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide
   const results = []
   let stoppedAt = null
   for (const pair of list) {
-    const result = await mergePersons({ keepId: pair.keep, removeId: pair.remove, strapi, dryRun, retire, removeRefs: references.refs?.[pair.remove] || [], repointCredits, aliasLogins, fionaLogin, log })
+    const result = await mergePersons({ keepId: pair.keep, removeId: pair.remove, strapi, dryRun, retire, removeRefs: references.refs?.[pair.remove] || [], repointCredits, aliasLogins, moveToMain, fionaLogin, log })
     results.push(result)
     if (result.status === 'failed' || result.status === 'check-failed') { stoppedAt = pair; break }
   }
   const counts = { merged: 0, skipped: 0, 'dry-run': 0, 'check-failed': 0, failed: 0 }
   for (const result of results) counts[result.status]++
   log.info?.(`[merge] ${dryRun ? 'dry run' : 'run'}: ${JSON.stringify(counts)}${stoppedAt ? ` — stopped at #${stoppedAt.remove} into #${stoppedAt.keep}` : ''}`)
-  return { mode: 'merge', dryRun, retire, repointCredits, aliasLogins, pairs: list.length, counts, stoppedAt, results }
+  return { mode: 'merge', dryRun, retire, repointCredits, aliasLogins, moveToMain: asList(moveToMain), pairs: list.length, counts, stoppedAt, results }
 }

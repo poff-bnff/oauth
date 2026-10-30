@@ -155,6 +155,28 @@ describe('createStrapiGateway', () => {
     expect(calls[0].body).toEqual({ aliasUsers: [90, 71] })
   })
 
+  describe('setUserFields', () => {
+    it('writes roles, organisation and business profiles to a login with one plain user update', async () => {
+      const { fetch, calls } = fakeFetch({ 'PUT /users/70': { id: 70 } })
+
+      await createStrapiGateway({ fetch, ...deps() }).setUserFields(70, { user_roles: [1, '8'], organisation: 4, business_profiles: [2, 3] })
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0].method).toBe('PUT')
+      expect(calls[0].url).toBe(`${STRAPI}/users/70`)
+      expect(calls[0].body).toEqual({ user_roles: [1, 8], organisation: 4, business_profiles: [2, 3] })
+    })
+
+    it('refuses any other field, the person above all: a user update that links a person mails it', async () => {
+      const { fetch, calls } = fakeFetch()
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      await expect(gateway.setUserFields(70, { person: 20 })).rejects.toThrow(/person/)
+      await expect(gateway.setUserFields(70, { user_roles: [1], email: 'x@y.ee' })).rejects.toThrow(/email/)
+      expect(calls).toEqual([])
+    })
+  })
+
   it('takes a person off a login with a plain user update (person: null sets no person, so the update hook sends no mail)', async () => {
     const { fetch, calls } = fakeFetch({ 'PUT /users/71': { id: 71 } })
 

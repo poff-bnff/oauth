@@ -260,6 +260,19 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
       store.get(Number(personId)).user = { id: userId }
     },
     getUser (id) { return users[id] ? clone(users[id]) : null },
+    setUserFields (userId, fields) {
+      calls.push(['setUserFields', Number(userId), fields])
+      const user = users[userId]
+      if ('user_roles' in fields) user.user_roles = fields.user_roles.map(id => ({ id }))
+      if ('organisation' in fields) {
+        for (const other of Object.values(users)) if (other !== user && idOf(other.organisation) === fields.organisation) other.organisation = null // one-to-one: it leaves the other login
+        user.organisation = { id: fields.organisation }
+      }
+      if ('business_profiles' in fields) {
+        for (const other of Object.values(users)) if (other !== user) other.business_profiles = (other.business_profiles || []).filter(profile => !fields.business_profiles.includes(profile.id))
+        user.business_profiles = fields.business_profiles.map(id => ({ id }))
+      }
+    },
     clearUserPerson (userId) {
       calls.push(['clearUserPerson', Number(userId)])
       users[userId].person = null
@@ -682,6 +695,113 @@ describe('mergePersons: two logins, Fiona names the main one (aliasLogins)', () 
     expect(writes(strapi)).toEqual([])
   })
 
+  describe('moveToMain: roles, organisation and business profiles of the alias login go to the main login', () => {
+    const asked = ['roles', 'organisation', 'businessProfiles']
+    const withAlias = (extra) => { const users = logins(); Object.assign(users[71], extra); return users }
+
+    it('adds the roles the main login lacks to the main login (the alias keeps its own) and says so in the dry run', async () => {
+      const users = withAlias({ user_roles: [{ id: 1 }, { id: 8, name: 'Publisher' }] })
+      const strapi = fakeStrapi(people(), { users })
+
+      const dry = await run(strapi, { dryRun: true, moveToMain: asked })
+      expect(dry.status).toBe('dry-run')
+      expect(dry.alias.moves).toEqual({ roles: ['Publisher'] })
+      expect(writes(strapi)).toEqual([])
+
+      const result = await run(strapi, { moveToMain: asked })
+      expect(result.status).toBe('merged')
+      expect(strapi.calls.find(([name]) => name === 'setUserFields')).toEqual(['setUserFields', 70, { user_roles: [1, 8] }])
+      expect(strapi.users[70].user_roles.map(role => role.id)).toEqual([1, 8])
+      expect(strapi.users[71].user_roles.map(role => role.id)).toEqual([1, 8])
+    })
+
+    it("moves the alias login's organisation to the main login, which then holds it alone", async () => {
+      const strapi = fakeStrapi(people(), { users: withAlias({ organisation: { id: 4 } }) })
+
+      const result = await run(strapi, { moveToMain: asked })
+
+      expect(result.status).toBe('merged')
+      expect(strapi.calls.find(([name]) => name === 'setUserFields')).toEqual(['setUserFields', 70, { organisation: 4 }])
+      expect(strapi.users[70].organisation).toEqual({ id: 4 })
+      expect(strapi.users[71].organisation).toBeNull()
+      expect(result.alias.moves).toEqual({ organisation: 4 })
+    })
+
+    it('adds the business profiles of the alias login to those of the main login', async () => {
+      const users = withAlias({ business_profiles: [{ id: 3 }] })
+      users[70].business_profiles = [{ id: 2 }]
+      const strapi = fakeStrapi(people(), { users })
+
+      const result = await run(strapi, { moveToMain: asked })
+
+      expect(result.status).toBe('merged')
+      expect(strapi.calls.find(([name]) => name === 'setUserFields')).toEqual(['setUserFields', 70, { business_profiles: [2, 3] }])
+      expect(strapi.users[71].business_profiles).toEqual([])
+    })
+
+    it('moves everything in one user update, before the alias link, and never through the person (no mail)', async () => {
+      const strapi = fakeStrapi(people(), { users: withAlias({ user_roles: [{ id: 1 }, { id: 8 }], organisation: { id: 4 }, business_profiles: [{ id: 3 }] }) })
+
+      await run(strapi, { moveToMain: asked })
+
+      const names = strapi.calls.map(([name]) => name)
+      expect(names.filter(name => name === 'setUserFields')).toHaveLength(1)
+      expect(strapi.calls.find(([name]) => name === 'setUserFields')[2]).toEqual({ user_roles: [1, 8], organisation: 4, business_profiles: [3] })
+      expect(names.indexOf('setUserFields')).toBeLessThan(names.indexOf('setAliasUsers'))
+      expect(names.indexOf('setUserFields')).toBeGreaterThan(names.lastIndexOf('updatePerson') - 1)
+    })
+
+    it('still refuses what was not asked to move', async () => {
+      const strapi = fakeStrapi(people(), { users: withAlias({ organisation: { id: 4 }, user_roles: [{ id: 1 }, { id: 8 }] }) })
+
+      const result = await run(strapi, { moveToMain: ['roles'] })
+
+      expect(result.status).toBe('skipped')
+      expect(result.reason).toMatch(/organisation/)
+      expect(writes(strapi)).toEqual([])
+    })
+
+    it('refuses when both logins have an organisation: one cannot take the other', async () => {
+      const users = withAlias({ organisation: { id: 4 } })
+      users[70].organisation = { id: 5 }
+      const strapi = fakeStrapi(people(), { users })
+
+      const result = await run(strapi, { moveToMain: asked })
+
+      expect(result.status).toBe('skipped')
+      expect(result.reason).toMatch(/both.*organisation/)
+      expect(writes(strapi)).toEqual([])
+    })
+
+    it('does not move what blocks for other reasons (products, payments, an order, Moodle)', async () => {
+      const strapi = fakeStrapi(people(), { users: withAlias({ my_products: [{ id: 1 }], user_roles: [{ id: 1 }, { id: 8 }] }) })
+
+      const result = await run(strapi, { moveToMain: asked })
+
+      expect(result.status).toBe('skipped')
+      expect(result.reason).toMatch(/product/)
+      expect(writes(strapi)).toEqual([])
+    })
+
+    it('reports a failed check when a move did not stick', async () => {
+      const strapi = fakeStrapi(people(), { users: withAlias({ user_roles: [{ id: 1 }, { id: 8 }] }) })
+      strapi.setUserFields = () => {}
+
+      const result = await run(strapi, { moveToMain: asked })
+
+      expect(result.status).toBe('check-failed')
+      expect(result.verify.problems.join(' ')).toMatch(/role/)
+    })
+
+    it('writes nothing to the logins when nothing needs to move', async () => {
+      const strapi = fakeStrapi(people(), { users: logins() })
+
+      await run(strapi, { moveToMain: asked })
+
+      expect(strapi.calls.some(([name]) => name === 'setUserFields')).toBe(false)
+    })
+  })
+
   it('also skips when the main login would itself be an alias', async () => {
     const users = logins()
     users[70].mainUser = { id: 92 }
@@ -785,6 +905,16 @@ describe('mergeBatch', () => {
     expect(withCredits.results[0]).toMatchObject({ status: 'merged', keep: 21, remove: 501 })
     expect(withCredits.repointCredits).toBe(true)
     expect(strapi.entries.get('film:3').credentials.rolePerson[0].person.id).toBe(21)
+  })
+
+  it('passes what may move to the main login to every pair', async () => {
+    const users = { 70: { id: 70, person: 500, aliasUsers: [], mainUser: null, user_roles: [{ id: 1 }] }, 71: { id: 71, person: 20, aliasUsers: [], mainUser: null, user_roles: [{ id: 1 }, { id: 8, name: 'Publisher' }] } }
+    const strapi = fakeStrapi([clone({ ...OLD, user: { id: 71 } }), clone(COPY)], { users })
+
+    const result = await mergeBatch({ pairs: [{ keep: 20, remove: 500 }], strapi, dryRun: true, retire: 'hide', aliasLogins: true, moveToMain: ['roles'], fionaLogin: () => 70, log: silent })
+
+    expect(result.moveToMain).toEqual(['roles'])
+    expect(result.results[0]).toMatchObject({ status: 'dry-run', alias: { moves: { roles: ['Publisher'] } } })
   })
 
   it('passes the choice of main login to every pair, and says so in the result', async () => {
