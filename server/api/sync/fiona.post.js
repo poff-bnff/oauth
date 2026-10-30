@@ -30,6 +30,13 @@
  *                with the same name that the sync does not manage (duplicates). Every pair is put in tier A (obvious), B (look
  *                at it) or C (never automatic) with the reasons, and the places that use each person are listed. Takes a few
  *                minutes: ask {"mode":"status"} for the result (stats of the last run).
+ *                { "mode": "merge", "pairs": [{ "keep": 20, "remove": 500 }, ..], "retire": "hide"|"delete", "dryRun": false } — merges
+ *                persons that are one human (at most 100 pairs; ALWAYS a dry run unless dryRun is explicitly false). Everything of
+ *                "remove" is moved onto "keep" (latest value wins for single values, lists are added together, Fiona ids, login
+ *                user and address move), then "remove" is hidden ("hide": Fiona ids, e-mail and user taken off, not public) or
+ *                deleted. A pair is skipped with a reason when it is not safe (names differ, "remove" is used in credits, passes
+ *                or articles, two different login users, ...). Saves send no e-mail and start no build. Stops at the first error.
+ *                The result carries a backup of both records of every merged pair. Use "background": true and read it with "status".
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
@@ -88,9 +95,9 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
-  // re-sending emails is the one thing that must never happen by accident: a dry run unless dryRun is explicitly false
-  const dryRun = mode === 'renotify' ? body?.dryRun !== false : body?.dryRun === true
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
+  // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
+  const dryRun = ['renotify', 'merge'].includes(mode) ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []
@@ -101,9 +108,11 @@ export default defineEventHandler(async (event) => {
   const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
   const testExtraFields = body?.extraFields === true // a test run only: write the extra values (country, companies, ...) even while the switch is off
   const testFionaPersonIds = Array.isArray(body?.testFionaPersonIds) ? body.testFionaPersonIds.map(String) : [] // a test run only: handle just these Fiona person ids
+  const mergePairs = Array.isArray(body?.pairs) ? body.pairs.map(pair => ({ keep: Number(pair?.keep), remove: Number(pair?.remove) })) : [] // merge mode: [{ keep, remove }] Strapi person ids
+  const mergeRetire = body?.retire === 'delete' ? 'delete' : 'hide' // merge mode: what happens to the record that is merged into the other
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire })
 
   return { ok: true, stats }
 })
