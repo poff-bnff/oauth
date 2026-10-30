@@ -40,6 +40,10 @@
  *                Add "repointCredits": true to merge a "remove" that is credited in films, courses, industry or DISCamp projects,
  *                teams, filmographies, ...: those credits are pointed to "keep" first (a duplicate credit is dropped; the dry run lists
  *                every change, the backup holds the credit fields as they were). A festival pass or other use stays a reason to skip.
+ *                Add "aliasLogins": true to merge persons that each have a different login: Fiona's login (read from Fiona for the Fiona
+ *                person) stays on the person as the MAIN login and the other becomes its alias (mainUser/aliasUsers, as hunt's alias
+ *                feature does). A login that owns products, payments, an order, an organisation, a Moodle account or roles the main one
+ *                lacks is never made an alias; the pair is skipped with the reason. The dry run names main and alias for every pair.
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
@@ -120,6 +124,7 @@ export default defineEventHandler(async (event) => {
   const testFionaPersonIds = Array.isArray(body?.testFionaPersonIds) ? body.testFionaPersonIds.map(String) : [] // a test run only: handle just these Fiona person ids
   const mergePairs = Array.isArray(body?.pairs) ? body.pairs.map(pair => ({ keep: Number(pair?.keep), remove: Number(pair?.remove) })) : [] // merge mode: [{ keep, remove }] Strapi person ids
   const mergeRetire = body?.retire === 'delete' ? 'delete' : 'hide' // merge mode: what happens to the record that is merged into the other
+  const aliasLogins = body?.aliasLogins === true // merge mode: two different logins -> the one Fiona knows is the main one, the other becomes its alias
   const repointCredits = body?.repointCredits === true // merge mode: point the credits of the record to remove (films, courses, projects, teams, ...) to the record to keep first
   // decisions about Fiona persons the sync held back (they need a decision): [{ fionaPersonId, action: 'adopt', personId } | { fionaPersonId, action: 'create' }]
   const decisions = sentDecisions
@@ -130,7 +135,7 @@ export default defineEventHandler(async (event) => {
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, decisions })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, decisions })
 
   return { ok: true, stats }
 })

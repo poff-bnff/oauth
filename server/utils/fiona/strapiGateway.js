@@ -327,6 +327,19 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return await put(`/people/${encodeURIComponent(id)}`, payload)
     },
 
+    /**
+     * Make logins aliases of a main login (hunt's alias feature does the same update). A plain user update without
+     * `person`: the user model's hook mails a Creative Gate person only when a person is linked in the same update.
+     */
+    async setAliasUsers (mainUserId, aliasUserIds) {
+      await put(`/users/${encodeURIComponent(mainUserId)}`, { aliasUsers: asList(aliasUserIds).map(Number) })
+    },
+
+    /** Take the person off a login (an alias is a login identity only). `person: null` is no person in the update: no mail. */
+    async clearUserPerson (userId) {
+      await put(`/users/${encodeURIComponent(userId)}`, { person: null })
+    },
+
     async linkPersonToUser (personId, userId) {
       await put(`/users/${encodeURIComponent(userId)}`, { person: Number(personId) })
     },
