@@ -394,3 +394,28 @@ describe('createStrapiGateway lookups for the duplicate persons report', () => {
     })
   })
 })
+
+describe('createStrapiGateway calls for merging persons', () => {
+  const deps = () => ({
+    config: { strapiUrl: STRAPI },
+    getAdminToken: () => 'ADMIN',
+    getActiveFionaGuestbooks: () => [],
+    authenticateStrapiUser: () => null,
+    log: { warn () {}, info () {}, error () {} }
+  })
+
+  it('moves an address to another person, sets the country of an address, and deletes a person', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /addresses/40': { id: 40 }, 'DELETE /people/500': { id: 500 } })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+
+    await gateway.moveAddressToPerson(40, 20)
+    await gateway.setAddressCountry(41, 7)
+    await gateway.deletePerson(500)
+
+    expect(calls.map(call => `${call.method} ${call.url.replace(STRAPI, '')} ${JSON.stringify(call.body)}`)).toEqual([
+      'PUT /addresses/40 {"person":20}',
+      'PUT /addresses/41 {"country":7}',
+      'DELETE /people/500 undefined'
+    ])
+  })
+})
