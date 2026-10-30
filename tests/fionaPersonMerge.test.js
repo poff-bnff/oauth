@@ -91,6 +91,20 @@ describe('planMerge: when a pair is not merged', () => {
   })
 })
 
+describe('planMerge: Eventival ids that differ', () => {
+  const a = person(20, { remoteId: '377071' })
+  const b = person(500, { remoteId: '497824', fiona_person_id: 'f-1', updated_at: '2026-10-28T10:00:00.000Z' })
+
+  it('refuses two different Eventival ids, unless told they cannot be trusted', () => {
+    expect(planMerge({ keep: a, remove: b }).reason).toMatch(/different remoteId/)
+
+    const plan = planMerge({ keep: a, remove: b, ignoreEventivalIds: true })
+
+    expect(plan.ok).toBe(true)
+    expect('remoteId' in plan.patch).toBe(false) // the kept record's own id stays
+  })
+})
+
 describe('planMerge: what the kept record gets', () => {
   const plan = planMerge({ keep: OLD, remove: COPY })
 
@@ -695,6 +709,94 @@ describe('mergePersons: two logins, Fiona names the main one (aliasLogins)', () 
     expect(writes(strapi)).toEqual([])
   })
 
+  describe('mainUser: the pair names the main login itself', () => {
+    it('takes the named login as the main one without asking Fiona (when Fiona cannot say)', async () => {
+      const strapi = fakeStrapi(people(), { users: logins() })
+      let asked = 0
+
+      const result = await run(strapi, { mainUserId: 71, fionaLogin: () => { asked++; return null } })
+
+      expect(result.status).toBe('merged')
+      expect(asked).toBe(0)
+      expect(result.alias).toMatchObject({ main: 71, alias: 70 })
+      expect(strapi.calls.at(-2)).toEqual(['updatePerson', 20, { user: 71, cgFormSave: true, skipbuild: true }])
+      expect(strapi.users[70].mainUser).toEqual({ id: 71 })
+    })
+
+    it("can name a third login (Fiona's) as the main one: both person logins become its aliases", async () => {
+      const users = logins()
+      users[72] = { id: 72, email: 'fiona@x.ee', person: null, aliasUsers: [], mainUser: null, my_products: [], transactions: [], business_profiles: [], organisation: null, moodle_id: null, order: null, user_roles: [{ id: 1 }] }
+      const strapi = fakeStrapi(people(), { users })
+
+      const dry = await run(strapi, { dryRun: true, mainUserId: 72 })
+      expect(dry.status).toBe('dry-run')
+      expect(dry.alias).toMatchObject({ main: 72, alias: 70, aliases: [70, 71] })
+      expect(writes(strapi)).toEqual([])
+
+      const result = await run(strapi, { mainUserId: 72 })
+      expect(result.status).toBe('merged')
+      expect(strapi.calls.at(-2)).toEqual(['updatePerson', 20, { user: 72, cgFormSave: true, skipbuild: true }])
+      expect(strapi.calls.at(-1)).toEqual(['setAliasUsers', 72, [70, 71]])
+      expect(strapi.users[72].person).toBe(20)
+      expect(strapi.users[70].mainUser).toEqual({ id: 72 })
+      expect(strapi.users[71].mainUser).toEqual({ id: 72 })
+      expect(strapi.users[70].person).toBeNull()
+      expect(strapi.users[71].person).toBeNull()
+      expect(result.backup.users.aliases.map(user => user.id)).toEqual([70, 71])
+    })
+
+    it('refuses a third login that belongs to another person', async () => {
+      const users = logins()
+      users[72] = { id: 72, person: 999, aliasUsers: [], mainUser: null, user_roles: [] }
+      const strapi = fakeStrapi(people(), { users })
+
+      const result = await run(strapi, { mainUserId: 72 })
+
+      expect(result.status).toBe('skipped')
+      expect(result.reason).toMatch(/#72.*person #999/)
+      expect(writes(strapi)).toEqual([])
+    })
+
+    it('refuses a main login that cannot be read', async () => {
+      const strapi = fakeStrapi(people(), { users: logins() })
+
+      const result = await run(strapi, { mainUserId: 999 })
+
+      expect(result.status).toBe('skipped')
+      expect(result.reason).toMatch(/#999/)
+      expect(writes(strapi)).toEqual([])
+    })
+
+    it('still refuses a third login that only Fiona names: it has to be named in the pair', async () => {
+      const strapi = fakeStrapi(people(), { users: logins() })
+
+      const result = await run(strapi, { fionaLogin: () => 72 })
+
+      expect(result.status).toBe('skipped')
+      expect(result.reason).toMatch(/neither of them/)
+    })
+
+    it('adds up what both aliases own: roles of both go to the main login, but two organisations still block', async () => {
+      const users = logins()
+      users[72] = { id: 72, person: null, aliasUsers: [], mainUser: null, user_roles: [{ id: 1 }], organisation: null }
+      users[70].user_roles = [{ id: 1 }, { id: 5, name: 'A' }]
+      users[71].user_roles = [{ id: 1 }, { id: 6, name: 'B' }]
+      const strapi = fakeStrapi(people(), { users })
+
+      const result = await run(strapi, { mainUserId: 72, moveToMain: ['roles', 'organisation'] })
+      expect(result.status).toBe('merged')
+      expect(strapi.calls.find(([name]) => name === 'setUserFields')).toEqual(['setUserFields', 72, { user_roles: [1, 5, 6] }])
+
+      const twoOrganisations = logins()
+      twoOrganisations[72] = { id: 72, person: null, aliasUsers: [], mainUser: null, user_roles: [{ id: 1 }], organisation: null }
+      twoOrganisations[70].organisation = { id: 8 }
+      twoOrganisations[71].organisation = { id: 9 }
+      const blocked = await run(fakeStrapi(people(), { users: twoOrganisations }), { mainUserId: 72, moveToMain: ['organisation'] })
+      expect(blocked.status).toBe('skipped')
+      expect(blocked.reason).toMatch(/organisation/)
+    })
+  })
+
   describe('moveToMain: roles, organisation and business profiles of the alias login go to the main login', () => {
     const asked = ['roles', 'organisation', 'businessProfiles']
     const withAlias = (extra) => { const users = logins(); Object.assign(users[71], extra); return users }
@@ -934,6 +1036,16 @@ describe('mergeBatch', () => {
     expect(withCredits.results[0]).toMatchObject({ status: 'merged', keep: 21, remove: 501 })
     expect(withCredits.repointCredits).toBe(true)
     expect(strapi.entries.get('film:3').credentials.rolePerson[0].person.id).toBe(21)
+  })
+
+  it('carries the main login named in a pair and the Eventival switch to every pair', async () => {
+    const users = { 70: { id: 70, person: 500, aliasUsers: [], mainUser: null }, 71: { id: 71, person: 20, aliasUsers: [], mainUser: null } }
+    const strapi = fakeStrapi([clone({ ...OLD, user: { id: 71 }, remoteId: '1' }), clone({ ...COPY, remoteId: '2' })], { users })
+
+    const result = await mergeBatch({ pairs: [{ keep: 20, remove: 500, mainUser: 71 }], strapi, dryRun: true, retire: 'hide', aliasLogins: true, ignoreEventivalIds: true, fionaLogin: () => null, log: silent })
+
+    expect(result.ignoreEventivalIds).toBe(true)
+    expect(result.results[0]).toMatchObject({ status: 'dry-run', alias: { main: 71, alias: 70 } })
   })
 
   it('passes what may move to the main login to every pair', async () => {
