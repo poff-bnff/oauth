@@ -36,6 +36,13 @@ const REFERENCE_SOURCES = [
   { source: 'festival-pass', route: '/content-manager/collection-types/application::festival-pass.festival-pass', keys: ['owner'], contentManager: true }
 ]
 
+/** The REST route of a source that names persons; the festival pass (content manager only) is read, never written, here. */
+function creditRoute (source) {
+  const found = REFERENCE_SOURCES.find(item => item.source === source)
+  if (!found || found.contentManager) throw new Error(`${source} cannot be read or written through a REST route here`)
+  return found.route
+}
+
 /** The ids of persons in a relation value: a number, an object with an id, or a list of them. */
 function personIdsIn (value) {
   if (Array.isArray(value)) return value.flatMap(personIdsIn)
@@ -195,6 +202,16 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
         }
       }
       return { refs, covered, failed }
+    },
+
+    /** An entry that names a person (a film, a team, ...), as its own REST route returns it; null when it does not exist. */
+    async getCreditEntry (source, id) {
+      return await getOrNull(`${creditRoute(source)}/${encodeURIComponent(id)}`)
+    },
+
+    /** Write fields of such an entry (the patch of fiona/personCredits.js). */
+    async updateCreditEntry (source, id, payload) {
+      return await put(`${creditRoute(source)}/${encodeURIComponent(id)}`, payload)
     },
 
     async findPersonById (id) {
