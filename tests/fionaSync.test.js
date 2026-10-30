@@ -156,9 +156,14 @@ function fakeStrapi () {
       const p = [...state.people.values()].find(p => p.fiona_person_id === fid)
       return p ? populated(p) : null
     },
-    findPersonByEmail (email) {
-      const p = [...state.people.values()].find(p => (p.eMail || '').toLowerCase() === email.toLowerCase())
-      return p ? populated(p) : null
+    findPeopleByEmail (email) {
+      const wanted = String(email).trim().toLowerCase()
+      return [...state.people.values()].filter(p => String(p.eMail || '').trim().toLowerCase() === wanted).sort((a, b) => a.id - b.id).map(populated)
+    },
+    findPeopleByNameTerm (term) {
+      const wanted = String(term).toLowerCase()
+      const fullName = p => p.firstNameLastName || [p.firstName, p.lastName].filter(Boolean).join(' ')
+      return [...state.people.values()].filter(p => fullName(p).toLowerCase().includes(wanted) || String(p.lastName || '').toLowerCase().includes(wanted)).sort((a, b) => a.id - b.id).map(populated)
     },
     findPersonById (id) {
       const p = state.people.get(Number(id))
@@ -763,6 +768,197 @@ describe('runSync', () => {
       const action = stats.dryRunActions.find(a => a.personId === 42)
       expect(action.changed).not.toContain('bio_en')
       expect(action.diff).not.toHaveProperty('bio_en')
+    })
+  })
+
+  describe('same-name safeguard and shared e-mails', () => {
+    const mari = { id: 20, firstName: 'Mari', lastName: 'Maasikas', firstNameLastName: 'Mari Maasikas', eMail: null, festival_editions: [] }
+
+    beforeEach(() => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created')))
+      fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com' })
+    })
+
+    it('holds a new Fiona person back when Strapi holds a same-name person without a Fiona id: nothing is created, no user, no profile', async () => {
+      strapi.state.people.set(20, { ...mari })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.size).toBe(1)
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.persons).toMatchObject({ created: 0, needsDecision: 1 })
+      expect(stats.needsDecision).toEqual([expect.objectContaining({
+        fionaPersonId: 'fp1',
+        name: 'Mari Maasikas',
+        email: 'mari@example.com',
+        reason: 'same name',
+        candidates: [expect.objectContaining({ id: 20, name: 'Mari Maasikas' })]
+      })])
+      expect(log.lines.warn.some(line => line.includes('needs a decision') && line.includes('fp1') && line.includes('#20'))).toBe(true)
+    })
+
+    it('notices a same-name person whatever the letter case and the spacing', async () => {
+      strapi.state.people.set(20, { ...mari, firstName: 'MARI', lastName: 'MAASIKAS', firstNameLastName: 'MARI   MAASIKAS' })
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons.needsDecision).toBe(1)
+      expect(strapi.state.people.size).toBe(1)
+    })
+
+    it('creates the person when the same-name person already belongs to another Fiona person', async () => {
+      strapi.state.people.set(20, { ...mari, fiona_person_id: 'someone-else' })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.size).toBe(2)
+      expect(stats.persons).toMatchObject({ created: 1, needsDecision: 0 })
+      expect(stats.needsDecision).toEqual([])
+    })
+
+    it('does not look for same-name persons when the person is found by its Fiona id, its login or its e-mail', async () => {
+      strapi.state.people.set(20, { ...mari, fiona_person_id: 'fp1' })
+      strapi.state.people.set(21, { ...mari, id: 21, eMail: null })
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons).toMatchObject({ created: 0, needsDecision: 0, updated: 1 })
+      expect(strapi.state.people.get(20).eMail).toBe('mari@example.com')
+    })
+
+    it('adopts the person whose e-mail differs only in letter case instead of creating a second one', async () => {
+      strapi.state.people.set(20, { ...mari, firstName: 'M.', lastName: 'Maasikas', firstNameLastName: 'M. Maasikas', eMail: 'Mari@Example.COM' })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.size).toBe(1)
+      expect(strapi.state.people.get(20).fiona_person_id).toBe('fp1')
+      expect(stats.persons).toMatchObject({ created: 0, updated: 1, needsDecision: 0 })
+    })
+
+    it('holds the person back when two persons share the e-mail and neither belongs to a Fiona person: the sync must not guess', async () => {
+      strapi.state.people.set(20, { id: 20, firstName: 'A', lastName: 'One', firstNameLastName: 'A One', eMail: 'mari@example.com', festival_editions: [] })
+      strapi.state.people.set(21, { id: 21, firstName: 'B', lastName: 'Two', firstNameLastName: 'B Two', eMail: 'MARI@example.com', festival_editions: [] })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.size).toBe(2)
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.needsDecision).toEqual([expect.objectContaining({ fionaPersonId: 'fp1', reason: 'shared e-mail', candidates: [expect.objectContaining({ id: 20 }), expect.objectContaining({ id: 21 })] })])
+    })
+
+    it('takes the one person that is free when another person with the e-mail already belongs to a Fiona person', async () => {
+      strapi.state.people.set(20, { id: 20, firstName: 'A', lastName: 'One', firstNameLastName: 'A One', eMail: 'mari@example.com', fiona_person_id: 'someone-else', festival_editions: [] })
+      strapi.state.people.set(21, { id: 21, firstName: 'M.', lastName: 'Maasikas', firstNameLastName: 'M. Maasikas', eMail: 'mari@example.com', festival_editions: [] })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.get(21).fiona_person_id).toBe('fp1')
+      expect(strapi.state.people.get(20).fiona_person_id).toBe('someone-else')
+      expect(stats.persons.needsDecision).toBe(0)
+    })
+
+    it('still reports a conflict when the only person with this e-mail belongs to another Fiona person', async () => {
+      strapi.state.people.set(20, { id: 20, firstName: 'A', lastName: 'One', firstNameLastName: 'A One', eMail: 'mari@example.com', fiona_person_id: 'someone-else', festival_editions: [] })
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons.conflicts).toBe(1)
+      expect(strapi.state.people.size).toBe(1)
+    })
+
+    it('a dry run lists the held persons, plans no creation and writes nothing', async () => {
+      strapi.state.people.set(20, { ...mari })
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.needsDecision).toHaveLength(1)
+      expect(stats.persons.created).toBe(0)
+      expect(stats.dryRunActions.some(action => action.action === 'CREATE')).toBe(false)
+      expect(strapi.state.writes).toEqual([])
+    })
+
+    it('a held person is looked at again on the next run, and created once the same-name person has a Fiona id of its own', async () => {
+      strapi.state.people.set(20, { ...mari })
+      await runSync({}, deps)
+      strapi.state.people.get(20).fiona_person_id = 'someone-else'
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.size).toBe(2)
+      expect(stats.persons.created).toBe(1)
+    })
+
+    describe('a decision run', () => {
+      it('"adopt" gives the Fiona person to the chosen Strapi person: the Fiona ids are written there and nothing is created', async () => {
+        strapi.state.people.set(20, { ...mari })
+
+        const stats = await runSync({ only: { decisions: [{ fionaPersonId: 'fp1', action: 'adopt', personId: 20 }] } }, deps)
+
+        expect(strapi.state.people.size).toBe(1)
+        expect(strapi.state.people.get(20)).toMatchObject({ fiona_person_id: 'fp1', eMail: 'mari@example.com' })
+        expect(stats.decisions).toMatchObject({ adopted: 1, created: 0 })
+        expect(stats.persons.needsDecision).toBe(0)
+      })
+
+      it('"create" makes a new person although a same-name person exists: they are different people', async () => {
+        strapi.state.people.set(20, { ...mari })
+
+        const stats = await runSync({ only: { decisions: [{ fionaPersonId: 'fp1', action: 'create' }] } }, deps)
+
+        expect(strapi.state.people.size).toBe(2)
+        expect(stats.decisions).toMatchObject({ adopted: 0, created: 1 })
+        expect([...strapi.state.people.values()].filter(p => p.fiona_person_id === 'fp1')).toHaveLength(1)
+      })
+
+      it('after a decision the Fiona person is found by its Fiona id, so the ordinary sync never holds it again', async () => {
+        strapi.state.people.set(20, { ...mari })
+        await runSync({ only: { decisions: [{ fionaPersonId: 'fp1', action: 'create' }] } }, deps)
+
+        const stats = await runSync({}, deps)
+
+        expect(strapi.state.people.size).toBe(2)
+        expect(stats.persons).toMatchObject({ created: 0, needsDecision: 0 })
+      })
+
+      it('handles only the Fiona persons the decisions name and saves nothing in the job entry', async () => {
+        fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created'), accreditation('acc2', 'fp2', BADGE_TEAM, 'Created')))
+        fiona.state.persons.set('fp2', { firstName: 'Jaan', lastName: 'Tamm', email: 'jaan@example.com' })
+        strapi.state.people.set(20, { ...mari })
+
+        await runSync({ only: { decisions: [{ fionaPersonId: 'fp1', action: 'adopt', personId: 20 }] } }, deps)
+
+        expect([...strapi.state.people.values()].some(p => p.fiona_person_id === 'fp2')).toBe(false)
+        expect(strapi.state.writes.some(write => write.op === 'saveSyncJob')).toBe(false)
+      })
+
+      it('"adopt" refuses a person that belongs to another Fiona person, or that does not exist, and writes nothing', async () => {
+        strapi.state.people.set(20, { ...mari, fiona_person_id: 'someone-else' })
+
+        const taken = await runSync({ only: { decisions: [{ fionaPersonId: 'fp1', action: 'adopt', personId: 20 }] } }, deps)
+        const missing = await runSync({ only: { decisions: [{ fionaPersonId: 'fp1', action: 'adopt', personId: 999 }] } }, deps)
+
+        expect(taken.errors).toBe(1)
+        expect(missing.errors).toBe(1)
+        expect(strapi.state.people.get(20).fiona_person_id).toBe('someone-else')
+        expect(strapi.state.writes).toEqual([])
+      })
+
+      it('names a decision that matched no Fiona person of the run', async () => {
+        const stats = await runSync({ only: { decisions: [{ fionaPersonId: 'unknown', action: 'create' }] } }, deps)
+
+        expect(stats.decisions.unmatched).toEqual(['unknown'])
+        expect(strapi.state.people.size).toBe(0)
+      })
+
+      it('a dry run of a decision shows what it would do and writes nothing', async () => {
+        strapi.state.people.set(20, { ...mari })
+
+        const stats = await runSync({ dryRun: true, only: { decisions: [{ fionaPersonId: 'fp1', action: 'adopt', personId: 20 }] } }, deps)
+
+        expect(stats.dryRunActions.some(action => action.action === 'UPDATE' && action.personId === 20)).toBe(true)
+        expect(strapi.state.writes).toEqual([])
+      })
     })
   })
 

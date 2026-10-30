@@ -134,8 +134,17 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return first(await get(`/people?fiona_person_id=${encodeURIComponent(fionaPersonId)}&_limit=1`))
     },
 
-    async findPersonByEmail (email) {
-      return first(await get(`/people?eMail=${encodeURIComponent(email)}&_limit=1`))
+    /**
+     * Every person whose e-mail is this address, whatever the case of the letters, lowest id first. Strapi's own filter
+     * is a case-insensitive "contains", so the hits are narrowed to the exact address here.
+     */
+    async findPeopleByEmail (email) {
+      const wanted = String(email ?? '').trim()
+      if (!wanted) return []
+      const found = asList(await get(`/people?eMail_contains=${encodeURIComponent(wanted)}&_sort=id:asc&_limit=100`))
+      return found
+        .filter(person => String(person?.eMail ?? '').trim().toLowerCase() === wanted.toLowerCase())
+        .sort((a, b) => Number(a.id) - Number(b.id))
     },
 
     /** Persons whose full name or last name contains `term`, all pages (at most 2,000), for finding same-name persons. */
