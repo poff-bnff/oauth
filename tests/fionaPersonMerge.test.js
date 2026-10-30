@@ -638,6 +638,17 @@ describe('mergePersons: two logins, Fiona names the main one (aliasLogins)', () 
     expect(writes(strapi)).toEqual([])
   })
 
+  it('skips the pair, and the batch carries on, when Fiona cannot say which login it knows (for example: no published accreditation)', async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    const result = await run(strapi, { fionaLogin: () => { throw new Error('person f-1 has no published accreditation') } })
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/Fiona/)
+    expect(result.reason).toMatch(/no published accreditation/)
+    expect(writes(strapi)).toEqual([])
+  })
+
   it('skips the pair when neither record is synced from Fiona, because nothing then says which login is the main one', async () => {
     const strapi = fakeStrapi([clone({ ...OLD, user: { id: 71 } }), clone({ ...COPY, fiona_person_id: null })], { users: logins() })
 
