@@ -144,6 +144,27 @@ describe('createStrapiGateway', () => {
     })
   })
 
+  it('sets the alias logins of a main login with a plain user update that does not touch the person (the update hook mails a person that is linked)', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /users/70': { id: 70 } })
+
+    await createStrapiGateway({ fetch, ...deps() }).setAliasUsers(70, [90, '71'])
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].method).toBe('PUT')
+    expect(calls[0].url).toBe(`${STRAPI}/users/70`)
+    expect(calls[0].body).toEqual({ aliasUsers: [90, 71] })
+  })
+
+  it('takes a person off a login with a plain user update (person: null sets no person, so the update hook sends no mail)', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /users/71': { id: 71 } })
+
+    await createStrapiGateway({ fetch, ...deps() }).clearUserPerson(71)
+
+    expect(calls[0].method).toBe('PUT')
+    expect(calls[0].url).toBe(`${STRAPI}/users/71`)
+    expect(calls[0].body).toEqual({ person: null })
+  })
+
   it('returns null for a missing user instead of throwing', async () => {
     const { fetch } = fakeFetch({ 'GET /users/404': () => { const e = new Error('not found'); e.statusCode = 404; throw e } })
     expect(await createStrapiGateway({ fetch, ...deps() }).getUser('404')).toBeNull()

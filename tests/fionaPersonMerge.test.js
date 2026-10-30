@@ -224,7 +224,7 @@ describe('planMerge: login user, address, and the retired record', () => {
 })
 
 // An in-memory Strapi that applies what it is told, so a merge can be followed from start to end
-function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null, credits = [], ignoreCreditWrites = false } = {}) {
+function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null, credits = [], ignoreCreditWrites = false, keepStaleLinks = false } = {}) {
   const store = new Map(people.map(p => [p.id, clone(p)]))
   const entries = new Map(credits.map(({ source, entry }) => [`${source}:${entry.id}`, clone(entry)]))
   const calls = []
@@ -250,7 +250,7 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
       apply(target, payload)
       if ('user' in payload) {
         // Strapi keeps the link on both sides: clearing it from the person side also clears user.person
-        if (previousUser && users[previousUser] && Number(users[previousUser].person) === Number(id)) users[previousUser].person = null
+        if (!keepStaleLinks && previousUser && users[previousUser] && Number(users[previousUser].person) === Number(id)) users[previousUser].person = null
         if (payload.user) { users[payload.user] = { ...(users[payload.user] || { id: payload.user }), person: Number(id) }; target.user = { id: payload.user } } else target.user = null
       }
     },
@@ -259,7 +259,16 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
       users[userId] = { ...(users[userId] || { id: userId }), person: Number(personId) }
       store.get(Number(personId)).user = { id: userId }
     },
-    getUser (id) { return users[id] ? { ...users[id] } : null },
+    getUser (id) { return users[id] ? clone(users[id]) : null },
+    clearUserPerson (userId) {
+      calls.push(['clearUserPerson', Number(userId)])
+      users[userId].person = null
+    },
+    setAliasUsers (mainId, aliasIds) {
+      calls.push(['setAliasUsers', Number(mainId), aliasIds])
+      users[mainId].aliasUsers = aliasIds.map(id => ({ id }))
+      for (const id of aliasIds) users[id].mainUser = { id: Number(mainId) }
+    },
     moveAddressToPerson (addressId, personId) {
       calls.push(['moveAddressToPerson', addressId, personId])
       for (const p of store.values()) if (idOf(p.addr_coll) === addressId) p.addr_coll = null
@@ -540,6 +549,177 @@ describe('mergePersons: a person that is credited elsewhere (repointCredits)', (
   })
 })
 
+describe('mergePersons: two logins, Fiona names the main one (aliasLogins)', () => {
+  // the old record is logged in as #71, the sync-made copy as #70; Fiona knows #70
+  const people = () => [clone({ ...OLD, user: { id: 71 } }), clone(COPY)]
+  const logins = () => ({
+    70: { id: 70, email: 'mari@acme.ee', person: 500, aliasUsers: [], mainUser: null, my_products: [], transactions: [], business_profiles: [], organisation: null, moodle_id: null, order: null, user_roles: [{ id: 1 }] },
+    71: { id: 71, email: 'mari@old.ee', person: 20, aliasUsers: [], mainUser: null, my_products: [], transactions: [], business_profiles: [], organisation: null, moodle_id: null, order: null, user_roles: [{ id: 1 }] }
+  })
+  const run = (strapi, over = {}) => mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', aliasLogins: true, fionaLogin: () => 70, log: silent, ...over })
+  const writes = strapi => strapi.calls.filter(([name]) => name !== 'findPersonReferences')
+
+  it('is not done unless asked: two different logins stay a reason to skip', async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    const result = await run(strapi, { aliasLogins: false })
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/different login users/)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('a dry run names the main and the alias login and writes nothing', async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    const result = await run(strapi, { dryRun: true })
+
+    expect(result.status).toBe('dry-run')
+    expect(result.alias).toMatchObject({ main: 70, alias: 71, notes: [] })
+    expect(result.link.userId).toBe(70)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it("merges the persons on Fiona's login, and makes the other login an alias of it", async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('merged')
+    expect(strapi.calls.at(-2)).toEqual(['updatePerson', 20, { user: 70, cgFormSave: true, skipbuild: true }]) // linked last, from the person side
+    expect(strapi.calls.at(-1)).toEqual(['setAliasUsers', 70, [71]])
+    expect(strapi.users[71].mainUser).toEqual({ id: 70 })
+    expect(strapi.users[70].person).toBe(20)
+    expect(strapi.users[71].person).toBeNull() // an alias is a login identity only
+    expect(strapi.calls.some(([name]) => name === 'linkPersonToUser')).toBe(false)
+  })
+
+  it("takes the other login as main when that is Fiona's", async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    const result = await run(strapi, { fionaLogin: () => 71 })
+
+    expect(result.status).toBe('merged')
+    expect(result.alias).toMatchObject({ main: 71, alias: 70 })
+    expect(strapi.calls.at(-1)).toEqual(['setAliasUsers', 71, [70]])
+    expect(strapi.users[70].mainUser).toEqual({ id: 71 })
+  })
+
+  it('keeps the aliases the main login has already', async () => {
+    const users = logins()
+    users[70].aliasUsers = [{ id: 90 }]
+    users[90] = { id: 90, mainUser: { id: 70 } }
+    const strapi = fakeStrapi(people(), { users })
+
+    await run(strapi)
+
+    expect(strapi.calls.at(-1)).toEqual(['setAliasUsers', 70, [90, 71]])
+  })
+
+  it("asks Fiona for the login of the Fiona person (the sync-managed record's id)", async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+    const asked = []
+
+    await run(strapi, { dryRun: true, fionaLogin: (id) => { asked.push(id); return 70 } })
+
+    expect(asked).toEqual(['f-1'])
+  })
+
+  it.each([
+    ['Fiona knows no login', () => null, /Fiona knows no login/],
+    ["Fiona's login is neither of the two", () => 99, /neither #71 nor #70|#99/]
+  ])('skips the pair, writing nothing, when %s', async (_name, fionaLogin, reason) => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    const result = await run(strapi, { fionaLogin })
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(reason)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('skips the pair when neither record is synced from Fiona, because nothing then says which login is the main one', async () => {
+    const strapi = fakeStrapi([clone({ ...OLD, user: { id: 71 } }), clone({ ...COPY, fiona_person_id: null })], { users: logins() })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/Fiona/)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it.each([
+    ['products (passes, tickets)', { my_products: [{ id: 1 }] }, /product/],
+    ['payments', { transactions: [{ id: 1 }, { id: 2 }] }, /payment/],
+    ['a business profile', { business_profiles: [{ id: 3 }] }, /business profile/],
+    ['an organisation', { organisation: { id: 4 } }, /organisation/],
+    ['a Moodle account', { moodle_id: '123' }, /Moodle/],
+    ['an order', { order: { id: 5 } }, /order/],
+    ['roles the main login lacks', { user_roles: [{ id: 1 }, { id: 8, name: 'Publisher' }] }, /role/],
+    ['aliases of its own', { aliasUsers: [{ id: 91 }] }, /alias/],
+    ['a main login of its own (it is an alias already)', { mainUser: { id: 92 } }, /alias|main/]
+  ])('skips the pair, writing nothing, when the login that would become the alias has %s', async (_name, extra, reason) => {
+    const users = logins()
+    Object.assign(users[71], extra)
+    const strapi = fakeStrapi(people(), { users })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/#71/)
+    expect(result.reason).toMatch(reason)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('also skips when the main login would itself be an alias', async () => {
+    const users = logins()
+    users[70].mainUser = { id: 92 }
+    const strapi = fakeStrapi(people(), { users })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('skipped')
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('returns both logins as they were, before any write', async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    const result = await run(strapi)
+
+    expect(result.backup.users).toEqual({ main: logins()[70], alias: logins()[71] })
+  })
+
+  it('takes the alias login off the person when Strapi left it there, because an alias is a login identity only', async () => {
+    const strapi = fakeStrapi(people(), { users: logins(), keepStaleLinks: true })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('merged')
+    expect(strapi.calls.at(-1)).toEqual(['clearUserPerson', 71])
+    expect(strapi.users[71].person).toBeNull()
+    expect(strapi.users[70].person).toBe(20)
+  })
+
+  it('does not touch the alias login again when it is off the person already', async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+
+    await run(strapi)
+
+    expect(strapi.calls.some(([name]) => name === 'clearUserPerson')).toBe(false)
+  })
+
+  it('reports a failed check when the alias link did not stick', async () => {
+    const strapi = fakeStrapi(people(), { users: logins() })
+    strapi.setAliasUsers = () => {}
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('check-failed')
+    expect(result.verify.problems.join(' ')).toMatch(/#71/)
+  })
+})
+
 describe('mergeBatch', () => {
   const people = () => [
     clone(OLD),
@@ -594,6 +774,16 @@ describe('mergeBatch', () => {
     expect(withCredits.results[0]).toMatchObject({ status: 'merged', keep: 21, remove: 501 })
     expect(withCredits.repointCredits).toBe(true)
     expect(strapi.entries.get('film:3').credentials.rolePerson[0].person.id).toBe(21)
+  })
+
+  it('passes the choice of main login to every pair, and says so in the result', async () => {
+    const users = { 70: { id: 70, person: 500, aliasUsers: [], mainUser: null }, 71: { id: 71, person: 20, aliasUsers: [], mainUser: null } }
+    const strapi = fakeStrapi([clone({ ...OLD, user: { id: 71 } }), clone(COPY)], { users })
+
+    const result = await mergeBatch({ pairs: [{ keep: 20, remove: 500 }], strapi, dryRun: true, retire: 'hide', aliasLogins: true, fionaLogin: () => 70, log: silent })
+
+    expect(result.aliasLogins).toBe(true)
+    expect(result.results[0]).toMatchObject({ status: 'dry-run', alias: { main: 70, alias: 71 } })
   })
 
   it('takes at most 100 pairs per call and ignores a pair listed twice', async () => {
