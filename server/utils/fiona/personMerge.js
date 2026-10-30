@@ -227,7 +227,13 @@ async function planAlias ({ strapi, keepUser, removeUser, fionaPersonId, fionaLo
   const logins = `#${keepUser} and #${removeUser}`
   if (!fionaPersonId) return { ok: false, reason: `two logins (${logins}), and neither record is synced from Fiona, so nothing says which is the main one` }
   if (typeof fionaLogin !== 'function') return { ok: false, reason: `two logins (${logins}), and Fiona cannot be asked which is the main one` }
-  const fiona = Number(await fionaLogin(fionaPersonId)) || null
+  let fiona = null
+  try {
+    fiona = Number(await fionaLogin(fionaPersonId)) || null
+  } catch (err) {
+    // Fiona not answering for one person (no published accreditation, ...) is a reason to leave this pair, not to stop the batch
+    return { ok: false, reason: `two logins (${logins}), and Fiona's login cannot be read: ${err?.message || err}` }
+  }
   if (!fiona) return { ok: false, reason: `two logins (${logins}), and Fiona knows no login for this person` }
   if (fiona !== keepUser && fiona !== removeUser) return { ok: false, reason: `two logins (${logins}), and Fiona's login is #${fiona}, neither of them` }
   const aliasId = fiona === keepUser ? removeUser : keepUser
