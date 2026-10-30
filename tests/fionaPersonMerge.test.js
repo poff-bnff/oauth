@@ -802,6 +802,35 @@ describe('mergePersons: two logins, Fiona names the main one (aliasLogins)', () 
     })
   })
 
+  it('merges the pair when the other login is an alias of the main login already, and does not write the alias link again', async () => {
+    const users = logins()
+    users[70].aliasUsers = [{ id: 71 }]
+    users[71].mainUser = { id: 70 }
+    const strapi = fakeStrapi(people(), { users })
+
+    const dry = await run(strapi, { dryRun: true })
+    expect(dry.status).toBe('dry-run')
+    expect(dry.alias).toMatchObject({ main: 70, alias: 71, alreadyAlias: true })
+
+    const result = await run(strapi)
+    expect(result.status).toBe('merged')
+    expect(strapi.calls.some(([name]) => name === 'setAliasUsers')).toBe(false)
+    expect(strapi.users[70].person).toBe(20)
+    expect(strapi.users[71].person).toBeNull()
+  })
+
+  it('still skips when the other login is an alias of a different login', async () => {
+    const users = logins()
+    users[71].mainUser = { id: 99 }
+    const strapi = fakeStrapi(people(), { users })
+
+    const result = await run(strapi)
+
+    expect(result.status).toBe('skipped')
+    expect(result.reason).toMatch(/alias of #99 already/)
+    expect(writes(strapi)).toEqual([])
+  })
+
   it('also skips when the main login would itself be an alias', async () => {
     const users = logins()
     users[70].mainUser = { id: 92 }
