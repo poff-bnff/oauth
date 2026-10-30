@@ -335,6 +335,18 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       await put(`/users/${encodeURIComponent(mainUserId)}`, { aliasUsers: asList(aliasUserIds).map(Number) })
     },
 
+    /**
+     * Give a login roles, an organisation or business profiles (what an alias login owned, moved to the main login). A plain
+     * user update from the user side: no organisation or profile hook runs, and nothing that names a person is allowed,
+     * because the user model's hook mails a Creative Gate person that is linked in the same update.
+     */
+    async setUserFields (userId, fields) {
+      const allowed = { user_roles: list => asList(list).map(Number), organisation: Number, business_profiles: list => asList(list).map(Number) }
+      const unknown = Object.keys(fields || {}).filter(key => !(key in allowed))
+      if (unknown.length) throw new Error(`setUserFields writes roles, organisation and business profiles only, not ${unknown.join(', ')}`)
+      await put(`/users/${encodeURIComponent(userId)}`, Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, allowed[key](value)])))
+    },
+
     /** Take the person off a login (an alias is a login identity only). `person: null` is no person in the update: no mail. */
     async clearUserPerson (userId) {
       await put(`/users/${encodeURIComponent(userId)}`, { person: null })
