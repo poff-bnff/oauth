@@ -10,6 +10,7 @@
  *  - lists and relations (organisations, editions, roles, categories, images, ...): both added together, nothing taken away
  *  - names and the kept record's URLs stay; a missing slug is taken from the other record
  *  - Fiona ids come from the sync-managed record; the login user and the address move to the kept record
+ *  - the record that is merged away is renamed "<name> (archived)" when it is hidden
  *  - a record that is used elsewhere (film credits, passes, articles, ...) is never the one removed
  *  - every save is silent: `cgFormSave` stops the "Creative Gate profile created" e-mail and `skipbuild` the site build
  */
@@ -34,6 +35,7 @@ const OR_FLAGS = ['public', 'show_in_cg_search']
 const UNIQUE_VALUES = ['slug_et', 'slug_en', 'slug_ru', 'remoteId', 'eventival_id'] // unique in Strapi: freed on the other record before the kept one takes it
 const FIONA_FIELDS = ['fiona_person_id', 'fiona_accreditation_id', 'fiona_guestbook_ids', 'fiona_attached_edition_ids', 'fiona_assigned_role_ids', 'fiona_synced_at', 'fiona_unpublished_at']
 const SINGLE_COMPONENTS = ['biography', 'filmography']
+const ARCHIVED = ' (archived)' // added to the name of the record that is merged away
 
 const asList = value => (Array.isArray(value) ? value : [])
 const idOf = value => (value && typeof value === 'object' ? value.id : value)
@@ -43,6 +45,7 @@ const isEmpty = value => value === null || value === undefined || value === '' |
   (Array.isArray(value) && !value.length) || (typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length)
 const nameOf = person => normalizeName(person?.firstNameLastName || [person?.firstName, person?.lastName].filter(Boolean).join(' '))
 const timeOf = person => Date.parse(person?.updated_at) || 0
+const isArchived = person => String(person?.firstNameLastName ?? '').trimEnd().endsWith(ARCHIVED.trim()) || String(person?.lastName ?? '').trimEnd().endsWith(ARCHIVED.trim())
 const label = refs => asList(refs).slice(0, 3).map(ref => `${ref.source} #${ref.id}`).join(', ')
 
 const componentContent = component => Object.fromEntries(Object.entries(component || {}).filter(([key, value]) => !['id', '_id', '__component'].includes(key) && !isEmpty(value)))
@@ -55,6 +58,7 @@ const roleOf = row => (row?.role_at_film === null || row?.role_at_film === undef
  */
 export function planMerge ({ keep, remove, removeRefs = [] }) {
   if (Number(keep.id) === Number(remove.id)) return { ok: false, reason: 'same record' }
+  for (const person of [keep, remove]) if (isArchived(person)) return { ok: false, reason: `#${person.id} is already archived` }
   if (nameOf(keep) !== nameOf(remove)) return { ok: false, reason: `names differ ("${keep.firstNameLastName}" and "${remove.firstNameLastName}")` }
   if (asList(removeRefs).length) return { ok: false, reason: `the record to remove (#${remove.id}) is used in ${label(removeRefs)}` }
   if (keep.fiona_person_id && remove.fiona_person_id && keep.fiona_person_id !== remove.fiona_person_id) return { ok: false, reason: 'both are sync-managed, with different Fiona ids' }
@@ -140,6 +144,10 @@ export function planMerge ({ keep, remove, removeRefs = [] }) {
     show_in_cg_search: false,
     user: null
   }
+  // the name tells the record apart in the admin and keeps it out of every later search for the name
+  const fullName = String(remove.firstNameLastName || [remove.firstName, remove.lastName].filter(Boolean).join(' ')).trim()
+  if (fullName) retirePatch.firstNameLastName = fullName + ARCHIVED
+  if (String(remove.lastName ?? '').trim()) retirePatch.lastName = String(remove.lastName).trim() + ARCHIVED
 
   return { ok: true, patch, preRemovePatch: Object.keys(preRemovePatch).length ? preRemovePatch : null, retirePatch, link, changes: Object.keys(patch) }
 }
@@ -176,6 +184,8 @@ async function verifyMerge ({ strapi, plan, keepId, removeId, retire, log }) {
     problems.push(`#${removeId} cannot be read after hiding it`)
   } else if (removed.fiona_person_id || removed.eMail || removed.public !== false) {
     problems.push(`#${removeId} still carries its Fiona id, e-mail or is public`)
+  } else if (!isArchived(removed)) {
+    problems.push(`#${removeId} was not marked as archived`)
   }
   return { ok: problems.length === 0, problems }
 }

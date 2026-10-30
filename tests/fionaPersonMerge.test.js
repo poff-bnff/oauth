@@ -202,6 +202,24 @@ describe('planMerge: login user, address, and the retired record', () => {
       user: null
     })
   })
+
+  it('marks the retired record as archived in its last name and full name, so it is recognised in the admin and no longer matches a name search', () => {
+    const result = planMerge({ keep: OLD, remove: COPY })
+    expect(result.retirePatch).toMatchObject({ lastName: 'Maasikas (archived)', firstNameLastName: 'Mari Maasikas (archived)' })
+    expect(result.retirePatch.firstName).toBeUndefined()
+    expect(result.patch.lastName).toBeUndefined() // the kept record keeps its name
+    const single = planMerge({ keep: person(20, { firstName: 'Madonna', lastName: '', firstNameLastName: 'Madonna' }), remove: person(500, { firstName: 'Madonna', lastName: '', firstNameLastName: 'Madonna' }) })
+    expect(single.retirePatch.firstNameLastName).toBe('Madonna (archived)')
+    expect(single.retirePatch.lastName).toBeUndefined()
+  })
+
+  it('does not merge a record that is archived already', () => {
+    const archived = person(500, { lastName: 'Maasikas (archived)', firstNameLastName: 'Mari Maasikas (archived)' })
+    const result = planMerge({ keep: OLD, remove: archived })
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/already archived/)
+    expect(planMerge({ keep: archived, remove: OLD }).reason).toMatch(/already archived/)
+  })
 })
 
 // An in-memory Strapi that applies what it is told, so a merge can be followed from start to end
@@ -267,7 +285,7 @@ describe('mergePersons', () => {
     const [, , keepBody] = strapi.calls[0]
     expect(keepBody).toMatchObject({ fiona_person_id: 'f-1', eMail: 'mari@acme.ee', organisations: [1, 2], cgFormSave: true, skipbuild: true })
     const retireBody = strapi.calls.find(([name, id]) => name === 'updatePerson' && id === 500)[2]
-    expect(retireBody).toMatchObject({ fiona_person_id: null, eMail: null, public: false, cgFormSave: true, skipbuild: true })
+    expect(retireBody).toMatchObject({ fiona_person_id: null, eMail: null, public: false, firstNameLastName: 'Mari Maasikas (archived)', cgFormSave: true, skipbuild: true })
     expect(strapi.store.get(20).fiona_person_id).toBe('f-1')
     expect(strapi.store.get(500).fiona_person_id).toBeNull()
     expect(strapi.users[70].person).toBe(20)
