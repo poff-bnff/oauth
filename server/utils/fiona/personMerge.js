@@ -221,7 +221,7 @@ function aliasBlockers (aliasUser, mainUser, moveToMain = []) {
   const moves = {}
   const movesLabel = {}
   const may = what => asList(moveToMain).includes(what)
-  if (idOf(aliasUser.mainUser)) blockers.push(`it is an alias of #${idOf(aliasUser.mainUser)} already`)
+  if (idOf(aliasUser.mainUser) && Number(idOf(aliasUser.mainUser)) !== Number(mainUser.id)) blockers.push(`it is an alias of #${idOf(aliasUser.mainUser)} already`)
   if (idOf(mainUser.mainUser)) blockers.push(`the main login #${mainUser.id} is an alias of #${idOf(mainUser.mainUser)} itself`)
   if (asList(aliasUser.aliasUsers).length) blockers.push('it has aliases of its own')
   if (asList(aliasUser.my_products).length) blockers.push(`it owns ${asList(aliasUser.my_products).length} product(s) (passes, tickets)`)
@@ -278,7 +278,8 @@ async function planAlias ({ strapi, keepUser, removeUser, fionaPersonId, fionaLo
   if (blockers.length) return { ok: false, reason: `login #${aliasId} cannot become an alias of #${fiona}: ${blockers.join('; ')}` }
   const notes = []
   if (idOf(aliasUser.cart)) notes.push('the alias login has a cart')
-  return { ok: true, plan: { main: fiona, alias: aliasId, mainUser, aliasUser, mainAliases: idsOf(mainUser.aliasUsers), moves, movesLabel, notes } }
+  const alreadyAlias = Number(idOf(aliasUser.mainUser)) === fiona // someone linked the two logins before: only the persons are left to merge
+  return { ok: true, plan: { main: fiona, alias: aliasId, mainUser, aliasUser, mainAliases: idsOf(mainUser.aliasUsers), moves, movesLabel, notes, alreadyAlias } }
 }
 
 /** What to write in each entry that credits the record to remove; ok: false (with the reason) when one cannot be moved. */
@@ -335,7 +336,7 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
     if (!credits.ok) return { ...result, reason: credits.reason }
     Object.assign(result, { changes: plan.changes, link: plan.link, retire })
     if (credits.plans.length) result.credits = credits.plans.map(({ source, id, changes, dropped }) => ({ source, id, changes, dropped }))
-    if (alias.plan) result.alias = { main: alias.plan.main, alias: alias.plan.alias, notes: alias.plan.notes, ...(Object.keys(alias.plan.movesLabel).length ? { moves: alias.plan.movesLabel } : {}) }
+    if (alias.plan) result.alias = { main: alias.plan.main, alias: alias.plan.alias, notes: alias.plan.notes, ...(alias.plan.alreadyAlias ? { alreadyAlias: true } : {}), ...(Object.keys(alias.plan.movesLabel).length ? { moves: alias.plan.movesLabel } : {}) }
     if (dryRun) return { ...result, status: 'dry-run' }
 
     result.backup = { keep: copyOf(keep), remove: copyOf(remove) }
@@ -361,7 +362,7 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
     if (alias.plan) {
       // what the alias login owned goes to the main login first (one plain user update from the user side)
       if (Object.keys(alias.plan.moves).length) await strapi.setUserFields(alias.plan.main, alias.plan.moves)
-      await strapi.setAliasUsers(alias.plan.main, [...new Set([...alias.plan.mainAliases, alias.plan.alias])])
+      if (!alias.plan.alreadyAlias) await strapi.setAliasUsers(alias.plan.main, [...new Set([...alias.plan.mainAliases, alias.plan.alias])])
       // linking the main login to the person may leave the alias login on it too: an alias is a login identity only
       if (Number(idOf((await strapi.getUser(alias.plan.alias))?.person)) === Number(keepId)) await strapi.clearUserPerson(alias.plan.alias)
     }
