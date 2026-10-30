@@ -26,6 +26,10 @@
  *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
  *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
  *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
+ *                { "mode": "twins", "background": true } — read-only: the persons the sync created that have a "twin", a person
+ *                with the same name that the sync does not manage (duplicates). Every pair is put in tier A (obvious), B (look
+ *                at it) or C (never automatic) with the reasons, and the places that use each person are listed. Takes a few
+ *                minutes: ask {"mode":"status"} for the result (stats of the last run).
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
@@ -84,7 +88,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails is the one thing that must never happen by accident: a dry run unless dryRun is explicitly false
   const dryRun = mode === 'renotify' ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
