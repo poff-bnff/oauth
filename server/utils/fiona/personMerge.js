@@ -46,6 +46,7 @@ const isEmpty = value => value === null || value === undefined || value === '' |
 const nameOf = person => normalizeName(person?.firstNameLastName || [person?.firstName, person?.lastName].filter(Boolean).join(' '))
 const timeOf = person => Date.parse(person?.updated_at) || 0
 const isArchived = person => String(person?.firstNameLastName ?? '').trimEnd().endsWith(ARCHIVED.trim()) || String(person?.lastName ?? '').trimEnd().endsWith(ARCHIVED.trim())
+const copyOf = value => JSON.parse(JSON.stringify(value)) // not structuredClone: the app's Node has none
 const label = refs => asList(refs).slice(0, 3).map(ref => `${ref.source} #${ref.id}`).join(', ')
 
 const componentContent = component => Object.fromEntries(Object.entries(component || {}).filter(([key, value]) => !['id', '_id', '__component'].includes(key) && !isEmpty(value)))
@@ -208,7 +209,7 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
     Object.assign(result, { changes: plan.changes, link: plan.link, retire })
     if (dryRun) return { ...result, status: 'dry-run' }
 
-    result.backup = { keep: structuredClone(keep), remove: structuredClone(remove) }
+    result.backup = { keep: copyOf(keep), remove: copyOf(remove) }
     if (plan.preRemovePatch) await strapi.updatePerson(removeId, { ...plan.preRemovePatch, ...SILENT })
     if (plan.changes.length) await strapi.updatePerson(keepId, { ...plan.patch, ...SILENT })
     if (plan.link.userId) await strapi.linkPersonToUser(keepId, plan.link.userId)

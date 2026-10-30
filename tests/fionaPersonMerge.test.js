@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { planMerge, mergePersons, mergeBatch } from '../server/utils/fiona/personMerge.js'
 
 const silent = { info () {}, warn () {}, error () {} }
+const clone = value => JSON.parse(JSON.stringify(value))
 
 const person = (id, extra = {}) => ({
   id,
@@ -224,7 +225,7 @@ describe('planMerge: login user, address, and the retired record', () => {
 
 // An in-memory Strapi that applies what it is told, so a merge can be followed from start to end
 function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null } = {}) {
-  const store = new Map(people.map(p => [p.id, structuredClone(p)]))
+  const store = new Map(people.map(p => [p.id, clone(p)]))
   const calls = []
   const idOf = v => (v && typeof v === 'object' ? v.id : v)
   const apply = (target, payload) => {
@@ -239,7 +240,7 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
     calls,
     store,
     users,
-    findPersonById (id) { return store.has(Number(id)) ? structuredClone(store.get(Number(id))) : null },
+    findPersonById (id) { return store.has(Number(id)) ? clone(store.get(Number(id))) : null },
     updatePerson (id, payload) {
       calls.push(['updatePerson', Number(id), payload])
       if (failOn === `updatePerson:${id}`) throw new Error('HTTP 500')
@@ -263,7 +264,7 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
 }
 
 describe('mergePersons', () => {
-  const people = () => [structuredClone(OLD), structuredClone(COPY)]
+  const people = () => [clone(OLD), clone(COPY)]
 
   it('a dry run plans the merge and writes nothing', async () => {
     const strapi = fakeStrapi(people())
@@ -292,6 +293,19 @@ describe('mergePersons', () => {
     expect(result.verify).toEqual({ ok: true, problems: [] })
   })
 
+  it('works on a runtime without structuredClone (the hunt app has none): the backup is taken another way', async () => {
+    const strapi = fakeStrapi(people())
+    vi.stubGlobal('structuredClone', undefined)
+    try {
+      const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
+
+      expect(result.status).toBe('merged')
+      expect(result.backup.remove).toMatchObject({ id: 500, eMail: 'mari@acme.ee' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('returns both records as they were, before any write', async () => {
     const strapi = fakeStrapi(people())
 
@@ -302,7 +316,7 @@ describe('mergePersons', () => {
   })
 
   it('frees a unique slug on the other record before the kept record takes it', async () => {
-    const strapi = fakeStrapi([person(20, { slug_et: null, slug_en: null, slug_ru: null }), structuredClone(COPY)])
+    const strapi = fakeStrapi([person(20, { slug_et: null, slug_en: null, slug_ru: null }), clone(COPY)])
 
     await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
 
@@ -333,7 +347,7 @@ describe('mergePersons', () => {
   })
 
   it('says so when a record does not exist (any more)', async () => {
-    const strapi = fakeStrapi([structuredClone(OLD)])
+    const strapi = fakeStrapi([clone(OLD)])
 
     const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
 
@@ -369,8 +383,8 @@ describe('mergePersons', () => {
 
 describe('mergeBatch', () => {
   const people = () => [
-    structuredClone(OLD),
-    structuredClone(COPY),
+    clone(OLD),
+    clone(COPY),
     person(21, { firstNameLastName: 'Jaan Tamm', firstName: 'Jaan', lastName: 'Tamm', phoneNr: '1' }),
     person(501, { firstNameLastName: 'Jaan Tamm', firstName: 'Jaan', lastName: 'Tamm', eMail: 'jaan@x.ee', fiona_person_id: 'f-2', updated_at: '2026-10-28T00:00:00.000Z' })
   ]
