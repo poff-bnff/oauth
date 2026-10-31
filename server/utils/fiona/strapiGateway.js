@@ -154,6 +154,16 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
         .sort((a, b) => Number(a.id) - Number(b.id))
     },
 
+    /** The persons that hold this slug (a uid is unique, so normally one), lowest id first; `field` is slug_et, slug_en or slug_ru. */
+    async findPeopleBySlug (field, slug) {
+      if (!['slug_et', 'slug_en', 'slug_ru'].includes(field)) throw new Error(`${field} is not a slug field`)
+      const wanted = String(slug ?? '').trim()
+      if (!wanted) return []
+      return asList(await get(`/people?${field}=${encodeURIComponent(wanted)}&_limit=20`))
+        .filter(person => person?.[field] === wanted)
+        .sort((a, b) => Number(a.id) - Number(b.id))
+    },
+
     /** Persons whose full name or last name contains `term`, all pages (at most 2,000), for finding same-name persons. */
     async findPeopleByNameTerm (term) {
       const value = encodeURIComponent(term)

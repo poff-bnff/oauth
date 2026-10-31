@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { planMerge, mergePersons, mergeBatch } from '../server/utils/fiona/personMerge.js'
+import { planMerge, planSlugs, mergePersons, mergeBatch, repairSlugsBatch } from '../server/utils/fiona/personMerge.js'
 
 const silent = { info () {}, warn () {}, error () {} }
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -178,7 +178,7 @@ describe('planMerge: what the kept record gets', () => {
   })
 
   it('writes nothing when there is nothing to add', () => {
-    const result = planMerge({ keep: COPY, remove: person(21, { phoneNr: null }) })
+    const result = planMerge({ keep: COPY, remove: person(21, { phoneNr: null, slug_et: null, slug_en: null, slug_ru: null }) })
     expect(result.ok).toBe(true)
     expect(result.patch).toEqual({})
     expect(result.changes).toEqual([])
@@ -256,10 +256,17 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
     store,
     users,
     findPersonById (id) { return store.has(Number(id)) ? clone(store.get(Number(id))) : null },
+    findPeopleBySlug (field, slug) {
+      calls.push(['findPeopleBySlug', field, slug])
+      return [...store.values()].filter(person => person[field] === slug).map(clone)
+    },
     updatePerson (id, payload) {
       calls.push(['updatePerson', Number(id), payload])
       if (failOn === `updatePerson:${id}`) throw new Error('HTTP 500')
       const target = store.get(Number(id))
+      for (const field of ['slug_et', 'slug_en', 'slug_ru']) { // a uid is unique
+        if (payload[field] && [...store.values()].some(other => other.id !== Number(id) && other[field] === payload[field])) throw new Error(`Duplicate entry: ${field} ${payload[field]}`)
+      }
       const previousUser = idOf(target.user)
       apply(target, payload)
       if ('user' in payload) {
@@ -327,6 +334,53 @@ function applyPatch (target, patch) {
   }
 }
 
+const slugs = slug => ({ slug_et: slug, slug_en: slug, slug_ru: slug })
+const nulls = { slug_et: null, slug_en: null, slug_ru: null }
+
+describe('planSlugs: the survivor gets the good slug, not the indexed one', () => {
+  it('swaps when the kept record has "name-1" and the other record the plain "name"', () => {
+    const plan = planSlugs({ keep: person(20, slugs('mari-maasikas-1')), remove: person(500, slugs('mari-maasikas')) })
+
+    expect(plan).toEqual({ keep: slugs('mari-maasikas'), free: nulls, retire: slugs('mari-maasikas-1') })
+  })
+
+  it('does it per language and leaves the others alone', () => {
+    const plan = planSlugs({ keep: person(20, { ...slugs('mari-maasikas'), slug_ru: 'mari-maasikas-2' }), remove: person(500, { ...slugs('mari-maasikas-1'), slug_ru: 'mari-maasikas' }) })
+
+    expect(plan).toEqual({ keep: { slug_ru: 'mari-maasikas' }, free: { slug_ru: null }, retire: { slug_ru: 'mari-maasikas-2' } })
+  })
+
+  it('changes nothing when the kept record is plain, both are indexed, both are plain, or the names differ', () => {
+    expect(planSlugs({ keep: person(20, slugs('mari-maasikas')), remove: person(500, slugs('mari-maasikas-1')) })).toBeNull()
+    expect(planSlugs({ keep: person(20, slugs('mari-maasikas-2')), remove: person(500, slugs('mari-maasikas-1')) })).toBeNull()
+    expect(planSlugs({ keep: person(20, slugs('mari-maasikas')), remove: person(500, slugs('maria-maasikas')) })).toBeNull()
+    expect(planSlugs({ keep: person(20, slugs('mari-maasikas-1')), remove: person(500, slugs('maria-maasikas')) })).toBeNull()
+    expect(planSlugs({ keep: person(20, slugs('mari-maasikas-1')), remove: person(500, nulls) })).toBeNull() // no plain slug to take
+  })
+})
+
+describe('planMerge: slugs of the survivor', () => {
+  const OLD_INDEXED = person(20, { ...slugs('mari-maasikas-1'), updated_at: '2026-10-29T00:00:00.000Z' })
+  const COPY_PLAIN = person(500, { ...slugs('mari-maasikas'), updated_at: '2026-10-28T00:00:00.000Z' })
+
+  it('gives the kept record the plain slug of the other record and the other record the indexed one', () => {
+    const plan = planMerge({ keep: OLD_INDEXED, remove: COPY_PLAIN })
+
+    expect(plan.patch).toMatchObject(slugs('mari-maasikas'))
+    expect(plan.preRemovePatch).toEqual(nulls) // a uid is unique: freed on the other record before the kept one takes it
+    expect(plan.retirePatch).toMatchObject(slugs('mari-maasikas-1'))
+    expect(plan.changes).toEqual(expect.arrayContaining(['slug_en']))
+  })
+
+  it('leaves the slugs of a pair whose kept record is already plain', () => {
+    const plan = planMerge({ keep: person(20), remove: person(500, slugs('mari-maasikas-1')) })
+
+    expect(plan.patch.slug_en).toBeUndefined()
+    expect(plan.preRemovePatch).toBeNull()
+    expect(plan.retirePatch.slug_en).toBeUndefined()
+  })
+})
+
 describe('mergePersons', () => {
   const people = () => [clone(OLD), clone(COPY)]
 
@@ -391,6 +445,41 @@ describe('mergePersons', () => {
     const updates = strapi.calls.filter(([name]) => name === 'updatePerson')
     expect(updates[0].slice(1)).toEqual([500, expect.objectContaining({ slug_et: null, slug_en: null, slug_ru: null })])
     expect(updates[1].slice(1)).toEqual([20, expect.objectContaining({ slug_en: 'mari-maasikas-1' })])
+  })
+
+  it('swaps the slugs in an order a unique slug allows: freed on the other record, taken by the kept one, then given to the archived copy', async () => {
+    const strapi = fakeStrapi([person(20, slugs('mari-maasikas-1')), person(500, { ...clone(COPY), ...slugs('mari-maasikas') })])
+
+    const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
+
+    expect(result.status).toBe('merged')
+    const updates = strapi.calls.filter(([name, id]) => name === 'updatePerson' && [20, 500].includes(id))
+    expect(updates[0].slice(1)).toEqual([500, expect.objectContaining({ slug_en: null, cgFormSave: true, skipbuild: true })])
+    expect(updates[1].slice(1)).toEqual([20, expect.objectContaining({ slug_en: 'mari-maasikas', cgFormSave: true, skipbuild: true })])
+    expect(updates[2].slice(1)).toEqual([500, expect.objectContaining({ slug_en: 'mari-maasikas-1', public: false })])
+    expect(strapi.store.get(20)).toMatchObject(slugs('mari-maasikas'))
+    expect(strapi.store.get(500)).toMatchObject(slugs('mari-maasikas-1'))
+  })
+
+  it('checks that the archived copy holds the survivor\'s old slug', async () => {
+    const strapi = fakeStrapi([person(20, slugs('mari-maasikas-1')), person(500, { ...clone(COPY), ...slugs('mari-maasikas') })])
+    const updatePerson = strapi.updatePerson
+    strapi.updatePerson = (id, payload) => updatePerson(id, Number(id) === 500 && payload.slug_en === 'mari-maasikas-1' ? { ...payload, slug_en: null } : payload) // the write is lost
+
+    const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
+
+    expect(result.status).toBe('check-failed')
+    expect(result.verify.problems.join(' ')).toMatch(/slug_en/)
+  })
+
+  it('deletes the archived copy without giving it a slug when the merge deletes records', async () => {
+    const strapi = fakeStrapi([person(20, slugs('mari-maasikas-1')), person(500, { ...clone(COPY), ...slugs('mari-maasikas') })])
+
+    const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'delete', log: silent })
+
+    expect(result.status).toBe('merged')
+    expect(strapi.store.has(500)).toBe(false)
+    expect(strapi.store.get(20)).toMatchObject(slugs('mari-maasikas'))
   })
 
   it('deletes the retired record instead of hiding it when asked', async () => {
@@ -1074,5 +1163,91 @@ describe('mergeBatch', () => {
 
     const result = await mergeBatch({ pairs: [{ keep: 20, remove: 500 }, { keep: 20, remove: 500 }], strapi, dryRun: true, retire: 'hide', log: silent })
     expect(result.results).toHaveLength(1)
+  })
+})
+
+describe('repairSlugsBatch: pairs that were merged before the survivor got the good slug', () => {
+  const ARCH = ' (archived)'
+  const survivor = (slug, extra = {}) => person(20, { ...slugs(slug), public: true, ...extra })
+  const archived = (slug, extra = {}) => person(500, { ...slugs(slug), public: false, firstNameLastName: `Mari Maasikas${ARCH}`, lastName: `Maasikas${ARCH}`, ...extra })
+  const run = (people, { dryRun = false, pairs = [{ keep: 20, remove: 500 }] } = {}) => {
+    const strapi = fakeStrapi(people)
+    return repairSlugsBatch({ pairs, strapi, dryRun, log: silent }).then(result => ({ result, strapi }))
+  }
+
+  it('is a dry run that writes nothing and says what it would do', async () => {
+    const { result, strapi } = await run([survivor('mari-maasikas-1'), archived('mari-maasikas')], { dryRun: true })
+
+    expect(result).toMatchObject({ mode: 'slugs', dryRun: true, counts: { 'dry-run': 1 } })
+    expect(result.results[0]).toMatchObject({ keep: 20, remove: 500, status: 'dry-run' })
+    expect(result.results[0].changes.join(' ')).toMatch(/slug_en: mari-maasikas-1 → mari-maasikas/)
+    expect(strapi.calls.filter(([name]) => name === 'updatePerson')).toEqual([])
+  })
+
+  it('swaps the slugs of the survivor and the archived copy, silently and in an order a unique slug allows', async () => {
+    const { result, strapi } = await run([survivor('mari-maasikas-1'), archived('mari-maasikas')])
+
+    expect(result.counts.repaired).toBe(1)
+    const updates = strapi.calls.filter(([name]) => name === 'updatePerson')
+    expect(updates.map(update => update.slice(1, 3))).toEqual([[500, expect.objectContaining(nulls)], [20, expect.objectContaining(slugs('mari-maasikas'))], [500, expect.objectContaining(slugs('mari-maasikas-1'))]])
+    for (const update of updates) expect(update[2]).toMatchObject({ cgFormSave: true, skipbuild: true })
+    expect(strapi.store.get(20)).toMatchObject(slugs('mari-maasikas'))
+    expect(strapi.store.get(500)).toMatchObject({ ...slugs('mari-maasikas-1'), public: false })
+    expect(result.results[0].backup).toEqual({ keep: slugs('mari-maasikas-1'), remove: slugs('mari-maasikas') })
+  })
+
+  it('gives a survivor that took the copy\'s indexed slug the plain one when nobody holds it', async () => {
+    const { result, strapi } = await run([survivor('mari-maasikas-1'), archived(null)])
+
+    expect(result.counts.repaired).toBe(1)
+    expect(strapi.calls.filter(([name]) => name === 'updatePerson').map(update => update.slice(1, 2))).toEqual([[20]])
+    expect(strapi.store.get(20)).toMatchObject(slugs('mari-maasikas'))
+    expect(strapi.store.get(500)).toMatchObject(nulls)
+  })
+
+  it('leaves a pair alone and says who holds the plain slug when a third record has it', async () => {
+    const third = person(900, { ...slugs('mari-maasikas'), firstNameLastName: 'Mari Maasikas', public: true })
+    const { result, strapi } = await run([survivor('mari-maasikas-1'), archived(null), third])
+
+    expect(result.counts.skipped).toBe(1)
+    expect(result.results[0].reason).toMatch(/#900/)
+    expect(strapi.calls.filter(([name]) => name === 'updatePerson')).toEqual([])
+  })
+
+  it('has nothing to do when the survivor has the good slug already, so a run can be repeated', async () => {
+    const { result, strapi } = await run([survivor('mari-maasikas'), archived('mari-maasikas-1')])
+
+    expect(result.counts.unchanged).toBe(1)
+    expect(strapi.calls.filter(([name]) => name === 'updatePerson')).toEqual([])
+  })
+
+  it('only touches a pair that was merged: the record to remove must be archived and the survivor not', async () => {
+    const live = (await run([survivor('mari-maasikas-1'), person(500, { ...slugs('mari-maasikas'), public: true })])).result
+    expect(live.results[0]).toMatchObject({ status: 'skipped', reason: expect.stringMatching(/not archived/) })
+
+    const both = (await run([survivor('mari-maasikas-1', { firstNameLastName: `Mari Maasikas${ARCH}` }), archived('mari-maasikas')])).result
+    expect(both.results[0]).toMatchObject({ status: 'skipped', reason: expect.stringMatching(/survivor.*archived/) })
+
+    const other = (await run([survivor('mari-maasikas-1'), archived('mari-maasikas', { firstNameLastName: `Jaan Tamm${ARCH}`, firstName: 'Jaan', lastName: `Tamm${ARCH}` })])).result
+    expect(other.results[0]).toMatchObject({ status: 'skipped', reason: expect.stringMatching(/names differ/) })
+  })
+
+  it('stops at the first write that fails or does not check out', async () => {
+    const people = [survivor('mari-maasikas-1'), archived('mari-maasikas'), person(21, { ...slugs('jaan-tamm-1'), firstNameLastName: 'Jaan Tamm' }), person(501, { ...slugs('jaan-tamm'), firstNameLastName: `Jaan Tamm${ARCH}`, lastName: `Tamm${ARCH}`, firstName: 'Jaan' })]
+    const strapi = fakeStrapi(people, { failOn: 'updatePerson:20' })
+
+    const result = await repairSlugsBatch({ pairs: [{ keep: 20, remove: 500 }, { keep: 21, remove: 501 }], strapi, dryRun: false, log: silent })
+
+    expect(result.counts.failed).toBe(1)
+    expect(result.stoppedAt).toEqual({ keep: 20, remove: 500 })
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0].restored).toBe(true) // the plain slug was freed on the archived copy first: it gets it back
+    expect(strapi.store.get(500)).toMatchObject(slugs('mari-maasikas'))
+  })
+
+  it('takes at most 100 pairs and skips malformed ones', async () => {
+    await expect(repairSlugsBatch({ pairs: Array.from({ length: 101 }, (_, i) => ({ keep: i + 1, remove: i + 1000 })), strapi: fakeStrapi([]), log: silent })).rejects.toThrow(/at most 100/)
+    const result = await repairSlugsBatch({ pairs: [{ keep: 'x', remove: 5 }, null], strapi: fakeStrapi([]), log: silent })
+    expect(result.pairs).toBe(0)
   })
 })
