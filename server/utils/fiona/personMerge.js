@@ -8,7 +8,8 @@
  * Rules (decided with Jaan):
  *  - single values (e-mail, phone, bio, picture, ...): the most recently updated record's value wins, the other fills gaps
  *  - lists and relations (organisations, editions, roles, categories, images, ...): both added together, nothing taken away
- *  - names and the kept record's URLs stay; a missing slug is taken from the other record
+ *  - names and the kept record's URLs stay; a missing slug is taken from the other record; but the survivor never keeps an
+ *    indexed slug ("name-1") while the other record has the plain one ("name"): the two swap (see planSlugs)
  *  - Fiona ids come from the sync-managed record; the login user and the address move to the kept record
  *  - the record that is merged away is renamed "<name> (archived)" when it is hidden
  *  - a record that is used elsewhere (film credits, passes, articles, ...) is never the one removed, unless `repointCredits`
@@ -44,6 +45,8 @@ const UNIQUE_VALUES = ['slug_et', 'slug_en', 'slug_ru', 'remoteId', 'eventival_i
 const FIONA_FIELDS = ['fiona_person_id', 'fiona_accreditation_id', 'fiona_guestbook_ids', 'fiona_attached_edition_ids', 'fiona_assigned_role_ids', 'fiona_synced_at', 'fiona_unpublished_at']
 const SINGLE_COMPONENTS = ['biography', 'filmography']
 const ARCHIVED = ' (archived)' // added to the name of the record that is merged away
+const SLUG_FIELDS = ['slug_et', 'slug_en', 'slug_ru']
+const INDEXED_SLUG = /-\d+$/ // Strapi's unique slug when the plain one is taken: "juan-suarez-1"
 
 const asList = value => (Array.isArray(value) ? value : [])
 const idOf = value => (value && typeof value === 'object' ? value.id : value)
@@ -55,10 +58,35 @@ const nameOf = person => normalizeName(person?.firstNameLastName || [person?.fir
 const timeOf = person => Date.parse(person?.updated_at) || 0
 const isArchived = person => String(person?.firstNameLastName ?? '').trimEnd().endsWith(ARCHIVED.trim()) || String(person?.lastName ?? '').trimEnd().endsWith(ARCHIVED.trim())
 const copyOf = value => JSON.parse(JSON.stringify(value)) // not structuredClone: the app's Node has none
+const isIndexed = slug => INDEXED_SLUG.test(String(slug ?? ''))
+const unindexed = slug => String(slug ?? '').replace(INDEXED_SLUG, '')
+const unarchived = value => String(value ?? '').replace(/\s*\(archived\)\s*$/, '')
 const label = refs => asList(refs).slice(0, 3).map(ref => `${ref.source} #${ref.id}`).join(', ')
 
 const componentContent = component => Object.fromEntries(Object.entries(component || {}).filter(([key, value]) => !['id', '_id', '__component'].includes(key) && !isEmpty(value)))
 const roleOf = row => (row?.role_at_film === null || row?.role_at_film === undefined ? null : Number(idOf(row.role_at_film)))
+
+/**
+ * The survivor should have the good slug. When the kept record has "name-1" and the other record the plain "name" (the
+ * other record was there first, or the kept one is the newer), the two swap: the plain slug is freed on the other
+ * record, taken by the kept one, and the other record (hidden, "(archived)") gets the indexed one, so it is never left
+ * without a slug and never holds the good one. Per language; only for the same name (the plain slug is the indexed
+ * one without its number).
+ * @returns {null | { keep: object, free: object, retire: object }} keep = the kept record's new slugs, free = nulls on the
+ *   other record (a uid is unique), retire = what the other record is left with
+ */
+export function planSlugs ({ keep, remove }) {
+  const plan = { keep: {}, free: {}, retire: {} }
+  for (const field of SLUG_FIELDS) {
+    const kept = keep?.[field]
+    const other = remove?.[field]
+    if (isEmpty(kept) || isEmpty(other) || !isIndexed(kept) || isIndexed(other) || unindexed(kept) !== other) continue
+    plan.keep[field] = other
+    plan.free[field] = null
+    plan.retire[field] = kept
+  }
+  return Object.keys(plan.keep).length ? plan : null
+}
 
 /**
  * @returns {{ ok: false, reason: string } | { ok: true, patch: object, preRemovePatch: object|null, retirePatch: object, link: object, changes: string[] }}
@@ -110,6 +138,11 @@ export function planMerge ({ keep, remove, removeRefs = [], mainUserId = null, i
       preRemovePatch[field] = null
     }
   }
+  const slugSwap = planSlugs({ keep, remove })
+  if (slugSwap) {
+    Object.assign(patch, slugSwap.keep)
+    Object.assign(preRemovePatch, slugSwap.free)
+  }
   if (remove.fiona_person_id && !keep.fiona_person_id) {
     for (const field of FIONA_FIELDS) if (!sameValue(remove[field], keep[field])) patch[field] = remove[field]
   }
@@ -158,6 +191,7 @@ export function planMerge ({ keep, remove, removeRefs = [], mainUserId = null, i
   const fullName = String(remove.firstNameLastName || [remove.firstName, remove.lastName].filter(Boolean).join(' ')).trim()
   if (fullName) retirePatch.firstNameLastName = fullName + ARCHIVED
   if (String(remove.lastName ?? '').trim()) retirePatch.lastName = String(remove.lastName).trim() + ARCHIVED
+  if (slugSwap) Object.assign(retirePatch, slugSwap.retire)
 
   return { ok: true, patch, preRemovePatch: Object.keys(preRemovePatch).length ? preRemovePatch : null, retirePatch, link, changes: Object.keys(patch) }
 }
@@ -209,6 +243,10 @@ async function verifyMerge ({ strapi, plan, keepId, removeId, retire, alias = nu
     problems.push(`#${removeId} still carries its Fiona id, e-mail or is public`)
   } else if (!isArchived(removed)) {
     problems.push(`#${removeId} was not marked as archived`)
+  } else {
+    for (const field of SLUG_FIELDS) {
+      if (field in plan.retirePatch && removed[field] !== plan.retirePatch[field]) problems.push(`${field} of #${removeId} is not ${plan.retirePatch[field]}`)
+    }
   }
   return { ok: problems.length === 0, problems }
 }
@@ -408,12 +446,8 @@ export async function mergePersons ({ keepId, removeId, strapi, dryRun = true, r
   }
 }
 
-/**
- * Merge several pairs one after the other; stops at the first pair that fails or does not check out.
- * The places that use the persons to remove are read once for the whole batch (a slow read), and the batch refuses to
- * run when one of those places cannot be read: "not used" would then be a guess.
- */
-export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, fionaLogin = null, log = console }) {
+/** The pairs of a batch: numbers only, no repeats; refuses a batch that is too long. */
+function pairList (pairs, what) {
   const list = []
   const seen = new Set()
   for (const pair of Array.isArray(pairs) ? pairs : []) {
@@ -422,7 +456,17 @@ export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide
     seen.add(key)
     list.push({ keep: Number(pair.keep), remove: Number(pair.remove), mainUser: Number(pair.mainUser) || null })
   }
-  if (list.length > MAX_PAIRS) throw new Error(`merge takes at most ${MAX_PAIRS} pairs per call`)
+  if (list.length > MAX_PAIRS) throw new Error(`${what} takes at most ${MAX_PAIRS} pairs per call`)
+  return list
+}
+
+/**
+ * Merge several pairs one after the other; stops at the first pair that fails or does not check out.
+ * The places that use the persons to remove are read once for the whole batch (a slow read), and the batch refuses to
+ * run when one of those places cannot be read: "not used" would then be a guess.
+ */
+export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, fionaLogin = null, log = console }) {
+  const list = pairList(pairs, 'merge')
   if (!['hide', 'delete'].includes(retire)) throw new Error('retire must be "hide" or "delete"')
 
   const references = list.length ? await strapi.findPersonReferences(list.map(pair => pair.remove)) : { refs: {}, failed: [] }
@@ -441,4 +485,91 @@ export async function mergeBatch ({ pairs, strapi, dryRun = true, retire = 'hide
   for (const result of results) counts[result.status]++
   log.info?.(`[merge] ${dryRun ? 'dry run' : 'run'}: ${JSON.stringify(counts)}${stoppedAt ? ` — stopped at #${stoppedAt.remove} into #${stoppedAt.keep}` : ''}`)
   return { mode: 'merge', dryRun, retire, repointCredits, aliasLogins, moveToMain: asList(moveToMain), ignoreEventivalIds, pairs: list.length, counts, stoppedAt, results }
+}
+
+/**
+ * Give the survivor of a pair that was merged earlier the good slug (see planSlugs). Also the survivor that took the indexed
+ * slug of a copy that had none: it gets the plain slug when nobody holds it; a pair whose plain slug a third record holds is
+ * left alone and says who. Writes are silent; the slugs are read back.
+ * @returns {Promise<object>} status: dry-run | repaired | unchanged | skipped | check-failed | failed
+ */
+async function repairSlugs ({ keepId, removeId, strapi, dryRun, log }) {
+  const result = { keep: Number(keepId), remove: Number(removeId), name: null, status: 'skipped' }
+  let freed = null
+  try {
+    const keep = await strapi.findPersonById(keepId)
+    const remove = await strapi.findPersonById(removeId)
+    if (!keep || !remove) return { ...result, reason: `#${keep ? removeId : keepId} does not exist` }
+    result.name = unarchived(keep.firstNameLastName || [keep.firstName, keep.lastName].filter(Boolean).join(' '))
+    if (isArchived(keep)) return { ...result, reason: `the survivor #${keepId} is archived` }
+    if (!isArchived(remove)) return { ...result, reason: `#${removeId} is not archived (this only repairs pairs that were merged)` }
+    if (normalizeName(unarchived(keep.firstNameLastName)) !== normalizeName(unarchived(remove.firstNameLastName))) return { ...result, reason: `names differ ("${keep.firstNameLastName}" and "${remove.firstNameLastName}")` }
+
+    const swap = planSlugs({ keep, remove })
+    const keepPatch = { ...(swap?.keep || {}) }
+    const changes = Object.entries(keepPatch).map(([field, slug]) => `${field}: ${keep[field]} → ${slug} (the archived copy gets ${keep[field]})`)
+    const blocked = []
+    for (const field of SLUG_FIELDS) { // a copy that had no slug: the survivor took its indexed one
+      if (field in keepPatch || isEmpty(keep[field]) || !isIndexed(keep[field]) || !isEmpty(remove[field])) continue
+      const plain = unindexed(keep[field])
+      const holders = asList(await strapi.findPeopleBySlug(field, plain)).filter(holder => Number(holder.id) !== Number(keepId))
+      if (holders.length) blocked.push(`${field} ${plain} is held by #${holders[0].id} (${holders[0].firstNameLastName})`)
+      else {
+        keepPatch[field] = plain
+        changes.push(`${field}: ${keep[field]} → ${plain}`)
+      }
+    }
+    if (blocked.length) return { ...result, reason: blocked.join('; ') }
+    if (!Object.keys(keepPatch).length) return { ...result, status: 'unchanged', reason: 'the survivor has the good slugs already' }
+    result.changes = changes
+    if (dryRun) return { ...result, status: 'dry-run' }
+
+    const pick = person => Object.fromEntries(SLUG_FIELDS.map(field => [field, person[field] ?? null]))
+    result.backup = { keep: pick(keep), remove: pick(remove) }
+    if (swap) {
+      freed = Object.keys(swap.free)
+      await strapi.updatePerson(removeId, { ...swap.free, ...SILENT })
+    }
+    await strapi.updatePerson(keepId, { ...keepPatch, ...SILENT })
+    if (swap) await strapi.updatePerson(removeId, { ...swap.retire, ...SILENT })
+    freed = null
+
+    const problems = []
+    const after = await strapi.findPersonById(keepId)
+    const archivedAfter = await strapi.findPersonById(removeId)
+    for (const [field, slug] of Object.entries(keepPatch)) if (after?.[field] !== slug) problems.push(`${field} of #${keepId} is not ${slug}`)
+    for (const [field, slug] of Object.entries(swap?.retire || {})) if (archivedAfter?.[field] !== slug) problems.push(`${field} of #${removeId} is not ${slug}`)
+    result.verify = { ok: problems.length === 0, problems }
+    result.status = result.verify.ok ? 'repaired' : 'check-failed'
+    return result
+  } catch (err) {
+    log.error?.(`[slugs] #${removeId} into #${keepId}: ${err?.message || err}`)
+    const failed = { ...result, status: 'failed', error: err?.message || String(err) }
+    if (freed && result.backup) { // the plain slug was freed on the archived copy but the survivor did not get it: give it back
+      try {
+        await strapi.updatePerson(removeId, { ...Object.fromEntries(freed.map(field => [field, result.backup.remove[field]])), ...SILENT })
+        failed.restored = true
+      } catch (restoreError) {
+        failed.restored = false
+        log.error?.(`[slugs] #${removeId}: the slugs could not be given back: ${restoreError?.message || restoreError}`)
+      }
+    }
+    return failed
+  }
+}
+
+/** Repair the slugs of pairs that were merged earlier, one after the other; stops at the first pair that fails or does not check out. A dry run unless told otherwise. */
+export async function repairSlugsBatch ({ pairs, strapi, dryRun = true, log = console }) {
+  const list = pairList(pairs, 'slugs')
+  const results = []
+  let stoppedAt = null
+  for (const pair of list) {
+    const result = await repairSlugs({ keepId: pair.keep, removeId: pair.remove, strapi, dryRun, log })
+    results.push(result)
+    if (result.status === 'failed' || result.status === 'check-failed') { stoppedAt = { keep: pair.keep, remove: pair.remove }; break }
+  }
+  const counts = { repaired: 0, unchanged: 0, skipped: 0, 'dry-run': 0, 'check-failed': 0, failed: 0 }
+  for (const result of results) counts[result.status]++
+  log.info?.(`[slugs] ${dryRun ? 'dry run' : 'run'}: ${JSON.stringify(counts)}${stoppedAt ? ` — stopped at #${stoppedAt.remove} into #${stoppedAt.keep}` : ''}`)
+  return { mode: 'slugs', dryRun, pairs: list.length, counts, stoppedAt, results }
 }

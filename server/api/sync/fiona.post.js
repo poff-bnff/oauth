@@ -50,6 +50,12 @@
  *                A pair may name its main login: { "keep": 20, "remove": 500, "mainUser": 18991 } (one of the pair's two logins, or a
  *                third one such as Fiona's that belongs to no other person: both logins of the pair then become its aliases).
  *                "ignoreEventivalIds": true lets two different Eventival ids (remoteId / eventival_id) pass: they are history.
+ *                A merge also gives the kept record the good slug: when it has "name-1" and the record that is merged away the
+ *                plain "name", the two swap (the hidden record gets "name-1"), in every language.
+ *                { "mode": "slugs", "pairs": [{ "keep": 20, "remove": 500 }, ..], "dryRun": false } — the same for pairs merged earlier
+ *                (at most 100; ALWAYS a dry run unless dryRun is explicitly false): the archived "remove" must still be there. A survivor
+ *                that took the indexed slug of a copy without one gets the plain slug when nobody holds it; a pair whose plain slug a
+ *                third record holds is skipped and the reason names that record. Silent saves, read back.
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
@@ -113,11 +119,11 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
-  const dryRun = ['renotify', 'merge'].includes(mode) || sentDecisions ? body?.dryRun !== false : body?.dryRun === true
+  const dryRun = ['renotify', 'merge', 'slugs'].includes(mode) || sentDecisions ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []

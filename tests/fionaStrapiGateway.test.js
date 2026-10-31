@@ -112,6 +112,29 @@ describe('createStrapiGateway', () => {
     })
   })
 
+  describe('findPeopleBySlug', () => {
+    it('asks Strapi for the exact slug in one language and returns the persons that hold it, lowest id first', async () => {
+      const urls = []
+      const fetch = (url) => {
+        urls.push(decodeURIComponent(url.replace(STRAPI, '')))
+        return [{ id: 40, slug_en: 'juan-suarez' }, { id: 12, slug_en: 'juan-suarez' }, { id: 41, slug_en: 'juan-suarez-1' }]
+      }
+
+      const found = await createStrapiGateway({ fetch, ...deps() }).findPeopleBySlug('slug_en', 'juan-suarez')
+
+      expect(urls).toEqual(['/people?slug_en=juan-suarez&_limit=20'])
+      expect(found.map(person => person.id)).toEqual([12, 40]) // a looser answer from Strapi is narrowed to the exact slug
+    })
+
+    it('refuses a field that is not a slug and an empty slug, without asking Strapi', async () => {
+      const fetch = () => { throw new Error('must not be called') }
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      await expect(gateway.findPeopleBySlug('eMail', 'x')).rejects.toThrow(/not a slug field/)
+      expect(await gateway.findPeopleBySlug('slug_en', '  ')).toEqual([])
+    })
+  })
+
   describe('credit entries (films, course events, projects, teams, ... that name a person)', () => {
     it('reads an entry through the route of its source and writes the changed fields back to the same route', async () => {
       const { fetch, calls } = fakeFetch({ 'GET /films/9213': { id: 9213, credentials: { id: 77 } }, 'PUT /films/9213': { id: 9213 } })
