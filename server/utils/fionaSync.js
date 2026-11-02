@@ -33,6 +33,7 @@ import { describeFionaFields } from './fiona/fieldDiagnostic.js'
 import { buildTwinReport } from './fiona/twinReport.js'
 import { mergeBatch, repairSlugsBatch, purgeArchivedBatch } from './fiona/personMerge.js'
 import { explainPersons } from './fiona/explainPerson.js'
+import { lostEditionsReport } from './fiona/lostEditions.js'
 import { listBadgeTypes } from './fiona/badgeTypes.js'
 
 const config = useRuntimeConfig()
@@ -199,6 +200,8 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
   }
   // read-only: why does a person have or lack an edition? (Strapi state, Fiona badges and statuses, the rules that match)
   if (mode === 'explain') return { mode, ...(await explainPersons({ personIds, strapi: buildStrapiGateway(), fiona: buildFionaClient(), log })) }
+  // read-only: persons that hold fewer festival editions than the sync attached to them (taken off by their own profile form or an editor)
+  if (mode === 'lost') return { mode, ...(await lostEditionsReport({ strapi: buildStrapiGateway(), log })) }
   // gives the survivor of pairs merged earlier the good (not indexed) slug; a dry run unless dryRun is explicitly false
   if (mode === 'slugs') return await repairSlugsBatch({ pairs: mergePairs, strapi: buildStrapiGateway(), dryRun, log })
   // deletes the archived copies of persons merged earlier (their remaining credits go to the survivor first); a dry run unless dryRun is explicitly false
