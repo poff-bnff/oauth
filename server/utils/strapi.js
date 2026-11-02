@@ -3096,6 +3096,15 @@ export async function getStrapiClients (ids) {
   return getStrapiCollections(ids, 'clients')
 }
 
+/** The ids of the festival editions the Creative Gate profile form offers (those marked use_in_cg). */
+export async function getStrapiCgEditionIds () {
+  const token = await getStrapiToken()
+  const editions = await $fetch(`${config.strapiUrl}/festival-editions?use_in_cg=true&_limit=-1`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return (Array.isArray(editions) ? editions : []).map(edition => Number(edition.id)).filter(Number.isFinite)
+}
+
 export async function getStrapiCollections (ids, apiEndpoint) {
   if (!ids) return null
   const token = await getStrapiToken()
