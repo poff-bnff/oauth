@@ -238,7 +238,7 @@ describe('planMerge: login user, address, and the retired record', () => {
 })
 
 // An in-memory Strapi that applies what it is told, so a merge can be followed from start to end
-function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null, credits = [], ignoreCreditWrites = false, keepStaleLinks = false, refs = {}, keepOnDelete = false } = {}) {
+function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null, credits = [], ignoreCreditWrites = false, keepStaleLinks = false, refs = {}, keepOnDelete = false, missingThrows = false } = {}) {
   const store = new Map(people.map(p => [p.id, clone(p)]))
   const entries = new Map(credits.map(({ source, entry }) => [`${source}:${entry.id}`, clone(entry)]))
   const calls = []
@@ -255,7 +255,12 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
     calls,
     store,
     users,
-    findPersonById (id) { return store.has(Number(id)) ? clone(store.get(Number(id))) : null },
+    // live: GET /people/:id answers 500 (not 404) for a person that is gone (the person model's afterFindOne reads result.user of null)
+    findPersonById (id) {
+      if (!store.has(Number(id)) && missingThrows) throw new Error(`[GET] "/people/${id}": 500 Internal Server Error`)
+      return store.has(Number(id)) ? clone(store.get(Number(id))) : null
+    },
+    personExists (id) { return store.has(Number(id)) },
     findPeopleBySlug (field, slug) {
       calls.push(['findPeopleBySlug', field, slug])
       return [...store.values()].filter(person => person[field] === slug).map(clone)
@@ -488,7 +493,7 @@ describe('mergePersons', () => {
   })
 
   it('deletes the retired record instead of hiding it when asked', async () => {
-    const strapi = fakeStrapi(people())
+    const strapi = fakeStrapi(people(), { missingThrows: true })
 
     const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'delete', log: silent })
 
@@ -1263,7 +1268,7 @@ describe('purgeArchivedBatch: delete the archived copies of merged persons', () 
   const archived = (extra = {}) => person(500, { firstNameLastName: `Mari Maasikas${ARCH}`, lastName: `Maasikas${ARCH}`, public: false, show_in_cg_search: false, slug_et: 'mari-maasikas-1', slug_en: 'mari-maasikas-1', slug_ru: 'mari-maasikas-1', ...extra })
   const filmEntry = () => ({ id: 9213, credentials: { id: 77, rolePerson: [{ id: 11, order: 1, person: { id: 99 } }, { id: 12, order: 2, person: { id: 500 } }] } })
   const run = (people, { dryRun = false, pairs = [{ keep: 20, remove: 500 }], ...options } = {}) => {
-    const strapi = fakeStrapi(people, options)
+    const strapi = fakeStrapi(people, { missingThrows: true, ...options })
     return purgeArchivedBatch({ pairs, strapi, dryRun, log: silent }).then(result => ({ result, strapi }))
   }
   const writes = strapi => strapi.calls.filter(([name]) => ['updatePerson', 'updateCreditEntry', 'deletePerson'].includes(name))
@@ -1339,6 +1344,13 @@ describe('purgeArchivedBatch: delete the archived copies of merged persons', () 
     expect(result.results[0].status).toBe('skipped')
     expect(result.results[0].reason).toMatch(reason)
     expect(writes(strapi)).toEqual([])
+  })
+
+  it('checks that the copy is gone without reading it by id (live answers 500 for a person that does not exist)', async () => {
+    const { result, strapi } = await run([survivor(), archived()])
+
+    expect(result.results[0]).toMatchObject({ status: 'deleted', verify: { ok: true, problems: [] } })
+    expect(strapi.store.has(500)).toBe(false)
   })
 
   it('says "gone" for a copy that was deleted already, so a run can be repeated', async () => {

@@ -228,6 +228,14 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return await getOrNull(`/people/${encodeURIComponent(id)}`)
     },
 
+    /**
+     * Whether a person exists. GET /people/:id answers 500 (not 404) for a person that is gone: the person model's
+     * afterFindOne reads `result.user` of null. The list route answers an empty list.
+     */
+    async personExists (id) {
+      return asList(await get(`/people?id=${encodeURIComponent(id)}&_limit=1`)).some(person => Number(person?.id) === Number(id))
+    },
+
     async getUser (id) {
       return await getOrNull(`/users/${encodeURIComponent(id)}`)
     },

@@ -236,9 +236,10 @@ async function verifyMerge ({ strapi, plan, keepId, removeId, retire, alias = nu
       if (alias.moves.business_profiles && !alias.moves.business_profiles.every(id => idsOf(main?.business_profiles).includes(id))) problems.push(`the business profiles are not all on login #${alias.main}`)
     }
   }
-  const removed = await strapi.findPersonById(removeId)
+  // a deleted person is not read by id: GET /people/:id answers 500 for it (see personExists in the gateway)
+  const removed = retire === 'delete' ? null : await strapi.findPersonById(removeId)
   if (retire === 'delete') {
-    if (removed) problems.push(`#${removeId} still exists after the delete`)
+    if (await strapi.personExists(removeId)) problems.push(`#${removeId} still exists after the delete`)
   } else if (!removed) {
     problems.push(`#${removeId} cannot be read after hiding it`)
   } else if (removed.fiona_person_id || removed.eMail || removed.public !== false) {
@@ -586,13 +587,14 @@ export async function repairSlugsBatch ({ pairs, strapi, dryRun = true, log = co
 async function purgeArchived ({ keepId, removeId, strapi, dryRun, removeRefs, log }) {
   const result = { keep: Number(keepId), remove: Number(removeId), name: null, status: 'skipped' }
   try {
+    // not read by id before it is known to exist: GET /people/:id answers 500 for a person that is gone
+    if (!(await strapi.personExists(removeId))) return { ...result, status: 'gone', reason: `#${removeId} does not exist (deleted already)` }
     const remove = await strapi.findPersonById(removeId)
-    if (!remove) return { ...result, status: 'gone', reason: `#${removeId} does not exist (deleted already)` }
-    const keep = await strapi.findPersonById(keepId)
     const removeName = remove.firstNameLastName || [remove.firstName, remove.lastName].filter(Boolean).join(' ')
     result.name = unarchived(removeName)
     if (!isArchived(remove)) return { ...result, reason: `#${removeId} is not archived` }
-    if (!keep) return { ...result, reason: `the survivor #${keepId} does not exist` }
+    if (!(await strapi.personExists(keepId))) return { ...result, reason: `the survivor #${keepId} does not exist` }
+    const keep = await strapi.findPersonById(keepId)
     if (isArchived(keep)) return { ...result, reason: `the survivor #${keepId} is archived` }
     if (nameOf({ firstNameLastName: unarchived(removeName) }) !== nameOf(keep)) return { ...result, reason: `names differ ("${keep.firstNameLastName}" and "${remove.firstNameLastName}")` }
     const inUse = [remove.public === true && 'public', idOf(remove.user) && 'a login', !isEmpty(remove.fiona_person_id) && 'a Fiona id'].filter(Boolean)
@@ -614,7 +616,7 @@ async function purgeArchived ({ keepId, removeId, strapi, dryRun, removeRefs, lo
       if (problems.length) return { ...result, status: 'check-failed', verify: { ok: false, problems } }
     }
     await strapi.deletePerson(removeId)
-    const problems = (await strapi.findPersonById(removeId)) ? [`#${removeId} still exists after the delete`] : []
+    const problems = (await strapi.personExists(removeId)) ? [`#${removeId} still exists after the delete`] : []
     result.verify = { ok: problems.length === 0, problems }
     result.status = result.verify.ok ? 'deleted' : 'check-failed'
     return result
