@@ -135,6 +135,24 @@ describe('createStrapiGateway', () => {
     })
   })
 
+  describe('personExists', () => {
+    it('asks the list route, never GET /people/:id, because that answers 500 (not 404) for a person that is gone', async () => {
+      const urls = []
+      const fetch = (url) => { urls.push(url.replace(STRAPI, '')); return url.includes('id=39757') ? [] : [{ id: 40 }] }
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      expect(await gateway.personExists(40)).toBe(true)
+      expect(await gateway.personExists(39757)).toBe(false)
+      expect(urls).toEqual(['/people?id=40&_limit=1', '/people?id=39757&_limit=1'])
+    })
+
+    it('does not take another person for the one asked about', async () => {
+      const gateway = createStrapiGateway({ fetch: () => [{ id: 41 }], ...deps() })
+
+      expect(await gateway.personExists(40)).toBe(false)
+    })
+  })
+
   describe('credit entries (films, course events, projects, teams, ... that name a person)', () => {
     it('reads an entry through the route of its source and writes the changed fields back to the same route', async () => {
       const { fetch, calls } = fakeFetch({ 'GET /films/9213': { id: 9213, credentials: { id: 77 } }, 'PUT /films/9213': { id: 9213 } })
