@@ -30,6 +30,10 @@
  *                festival edition or role? Shows the sync's fields on the person, the badges of each accreditation with their status,
  *                which rules match them (full profile, basic only, status not listed) and the editions and roles those give, what the
  *                person is missing, and a plain sentence. Writes nothing.
+ *                { "mode": "lost" } — read-only: which persons the sync manages hold fewer festival editions than the sync attached (the
+ *                editions recorded in fiona_attached_edition_ids but no longer on the person: their own profile form wrote a shorter
+ *                list over it, or an editor took it off)? Counts per edition, and per person what was lost, what is held, and whether
+ *                the person was saved after the sync's own write. Writes nothing.
  *                { "mode": "twins", "background": true } — read-only: the persons the sync created that have a "twin", a person
  *                with the same name that the sync does not manage (duplicates). Every pair is put in tier A (obvious), B (look
  *                at it) or C (never automatic) with the reasons, and the places that use each person are listed. Takes a few
@@ -129,7 +133,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
