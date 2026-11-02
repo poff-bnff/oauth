@@ -1,3 +1,5 @@
+import { keepEditionsTheFormDoesNotOffer } from './festivalEditions.js'
+
 const FESTIVAL_EDITION_CREATIVE_GATE_ID = 59
 
 export async function getAddProOrganisationPostData (body, originalData, newCollectionIds) {
@@ -48,7 +50,7 @@ export async function getAddProOrganisationPostData (body, originalData, newColl
 
   addIntArrayField('tag_looking_fors', body, originalData, cleanedPostData)
 
-  addIntArrayField('festival_editions', body, originalData, cleanedPostData)
+  await addFestivalEditions(body, originalData, cleanedPostData)
 
   addTextField('webpage_url', body, originalData, cleanedPostData)
   addTextField('acc_imdb', body, originalData, cleanedPostData)
@@ -119,7 +121,7 @@ export async function getAddProPersonPostData (body, originalData, newCollection
 
   addIntArrayField('tag_looking_fors', body, originalData, cleanedPostData)
 
-  addIntArrayField('festival_editions', body, originalData, cleanedPostData)
+  await addFestivalEditions(body, originalData, cleanedPostData)
 
   addTextField('webpage_url', body, originalData, cleanedPostData)
   addTextField('acc_imdb', body, originalData, cleanedPostData)
@@ -162,6 +164,21 @@ export async function getAddProPersonPostData (body, originalData, newCollection
   cleanedPostData.public = 1
 
   return cleanedPostData
+}
+
+// The form offers only the editions marked use_in_cg and a save writes the submitted list over the whole relation: an edition
+// the form does not offer (the one the Fiona sync attached, one an editor gave) must not be dropped by it.
+async function addFestivalEditions (body, originalData, cleanedPostData) {
+  addIntArrayField('festival_editions', body, originalData, cleanedPostData)
+  if (!cleanedPostData.festival_editions) return // the form left the list as it was: addFestivalEdition sends the held list
+
+  let offered = null
+  try {
+    offered = await getStrapiCgEditionIds()
+  } catch (error) {
+    console.log(`addpro: the editions the form offers could not be read (${error?.message || error}); no edition is dropped`) // eslint-disable-line no-console
+  }
+  cleanedPostData.festival_editions = keepEditionsTheFormDoesNotOffer({ submitted: cleanedPostData.festival_editions, original: originalData.festival_editions, offered })
 }
 
 function addFestivalEdition (originalData, cleanedPostData) {
