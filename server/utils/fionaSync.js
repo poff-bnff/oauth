@@ -31,7 +31,7 @@ import { renotifyPersons } from './fiona/renotify.js'
 import { describePhotos } from './fiona/photoDiagnostic.js'
 import { describeFionaFields } from './fiona/fieldDiagnostic.js'
 import { buildTwinReport } from './fiona/twinReport.js'
-import { mergeBatch, repairSlugsBatch } from './fiona/personMerge.js'
+import { mergeBatch, repairSlugsBatch, purgeArchivedBatch } from './fiona/personMerge.js'
 import { explainPersons } from './fiona/explainPerson.js'
 import { listBadgeTypes } from './fiona/badgeTypes.js'
 
@@ -201,6 +201,8 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
   if (mode === 'explain') return { mode, ...(await explainPersons({ personIds, strapi: buildStrapiGateway(), fiona: buildFionaClient(), log })) }
   // gives the survivor of pairs merged earlier the good (not indexed) slug; a dry run unless dryRun is explicitly false
   if (mode === 'slugs') return await repairSlugsBatch({ pairs: mergePairs, strapi: buildStrapiGateway(), dryRun, log })
+  // deletes the archived copies of persons merged earlier (their remaining credits go to the survivor first); a dry run unless dryRun is explicitly false
+  if (mode === 'purge') return await purgeArchivedBatch({ pairs: mergePairs, strapi: buildStrapiGateway(), dryRun, log })
   // read-only: persons the sync created that have a same-name person it does not manage (duplicates), in tiers
   if (mode === 'twins') return await buildTwinReport({ strapi: buildStrapiGateway(), log })
   // read-only: the raw field structure of a few persons from both Fiona APIs (where is a value kept?)

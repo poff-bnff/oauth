@@ -60,6 +60,12 @@
  *                (at most 100; ALWAYS a dry run unless dryRun is explicitly false): the archived "remove" must still be there. A survivor
  *                that took the indexed slug of a copy without one gets the plain slug when nobody holds it; a pair whose plain slug a
  *                third record holds is skipped and the reason names that record. Silent saves, read back.
+ *                { "mode": "purge", "pairs": [{ "keep": 20, "remove": 500 }, ..], "dryRun": false } — delete the archived copies of persons
+ *                merged earlier ("remove" = the archived copy, "keep" = its survivor; at most 100; ALWAYS a dry run unless dryRun is
+ *                explicitly false). Credits that still name the copy (a film, a course event, ...) are pointed to the survivor first,
+ *                silently and read back; only then is the copy deleted. A copy that is not archived, is public / has a login / has a
+ *                Fiona id again, has another name than the survivor, or is used where credits are not moved (a festival pass) is left
+ *                alone and the reason says why. The answer lists `unlisted`: archived persons that are in none of the pairs.
  *                A TEST run of the real thing: add "testRuleIds": [ruleId, ..] and "testMaxPersons": 10 to a full run. Only
  *                the persons those rules match are handled, at most that many are written, and nothing is saved in the
  *                job entry, so a test cannot start, delay or shorten the real import.
@@ -123,11 +129,11 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'explain', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
-  const dryRun = ['renotify', 'merge', 'slugs'].includes(mode) || sentDecisions ? body?.dryRun !== false : body?.dryRun === true
+  const dryRun = ['renotify', 'merge', 'slugs', 'purge'].includes(mode) || sentDecisions ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []
