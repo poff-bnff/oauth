@@ -21,6 +21,8 @@
  *    that owns purchases, payments, an organisation or roles the main one lacks is never made an alias, unless `moveToMain`
  *    says that its roles (added to the main login's), organisation and business profiles (moved to it) may move across.
  *  - every save is silent: `cgFormSave` stops the "Creative Gate profile created" e-mail and `skipbuild` the site build
+ *  - a hidden "(archived)" copy is still named wherever it is credited (a film, a course event, ...): purgeArchivedBatch points
+ *    those credits to the survivor and then deletes the copy for good
  */
 
 import { normalizeName } from './extraFields.js'
@@ -572,4 +574,89 @@ export async function repairSlugsBatch ({ pairs, strapi, dryRun = true, log = co
   for (const result of results) counts[result.status]++
   log.info?.(`[slugs] ${dryRun ? 'dry run' : 'run'}: ${JSON.stringify(counts)}${stoppedAt ? ` — stopped at #${stoppedAt.remove} into #${stoppedAt.keep}` : ''}`)
   return { mode: 'slugs', dryRun, pairs: list.length, counts, stoppedAt, results }
+}
+
+/**
+ * Delete the archived copy of a person that was merged: its credits that still name it (merges before `repointCredits` left
+ * them, and a page shows the credited copy as "Name (archived)") are pointed to the survivor first, checked, and only then
+ * is the copy deleted. A copy that is not what a merge left (not archived, public or with a login or a Fiona id again, another
+ * name than the survivor) or that is used where credits are not moved (a festival pass) is left alone and says why.
+ * @returns {Promise<object>} status: dry-run | deleted | gone | skipped | check-failed | failed
+ */
+async function purgeArchived ({ keepId, removeId, strapi, dryRun, removeRefs, log }) {
+  const result = { keep: Number(keepId), remove: Number(removeId), name: null, status: 'skipped' }
+  try {
+    const remove = await strapi.findPersonById(removeId)
+    if (!remove) return { ...result, status: 'gone', reason: `#${removeId} does not exist (deleted already)` }
+    const keep = await strapi.findPersonById(keepId)
+    const removeName = remove.firstNameLastName || [remove.firstName, remove.lastName].filter(Boolean).join(' ')
+    result.name = unarchived(removeName)
+    if (!isArchived(remove)) return { ...result, reason: `#${removeId} is not archived` }
+    if (!keep) return { ...result, reason: `the survivor #${keepId} does not exist` }
+    if (isArchived(keep)) return { ...result, reason: `the survivor #${keepId} is archived` }
+    if (nameOf({ firstNameLastName: unarchived(removeName) }) !== nameOf(keep)) return { ...result, reason: `names differ ("${keep.firstNameLastName}" and "${remove.firstNameLastName}")` }
+    const inUse = [remove.public === true && 'public', idOf(remove.user) && 'a login', !isEmpty(remove.fiona_person_id) && 'a Fiona id'].filter(Boolean)
+    if (inUse.length) return { ...result, reason: `#${removeId} is in use again (${inUse.join(', ')})` }
+
+    const refs = asList(removeRefs)
+    const fixed = refs.filter(ref => !CREDIT_SOURCES.includes(ref.source))
+    if (fixed.length) return { ...result, reason: `#${removeId} is used in ${label(fixed)}` }
+    const credits = refs.length ? await planCredits({ strapi, keepId: Number(keepId), removeId: Number(removeId), refs }) : { ok: true, plans: [] }
+    if (!credits.ok) return { ...result, reason: credits.reason }
+    if (credits.plans.length) result.credits = credits.plans.map(({ source, id, changes, dropped }) => ({ source, id, changes, dropped }))
+    if (dryRun) return { ...result, status: 'dry-run' }
+
+    result.backup = { remove: copyOf(remove) }
+    if (credits.plans.length) {
+      result.backup.credits = credits.plans.map(({ source, id, patch, entry }) => ({ source, id, before: copyOf(Object.fromEntries(Object.keys(patch).map(key => [key, entry[key]]))) }))
+      for (const credit of credits.plans) await strapi.updateCreditEntry(credit.source, credit.id, { ...credit.patch, skipbuild: true })
+      const problems = await verifyCredits({ strapi, plans: credits.plans, keepId: Number(keepId), removeId: Number(removeId) })
+      if (problems.length) return { ...result, status: 'check-failed', verify: { ok: false, problems } }
+    }
+    await strapi.deletePerson(removeId)
+    const problems = (await strapi.findPersonById(removeId)) ? [`#${removeId} still exists after the delete`] : []
+    result.verify = { ok: problems.length === 0, problems }
+    result.status = result.verify.ok ? 'deleted' : 'check-failed'
+    return result
+  } catch (err) {
+    log.error?.(`[purge] #${removeId} (survivor #${keepId}): ${err?.message || err}`)
+    return { ...result, status: 'failed', error: err?.message || String(err) }
+  }
+}
+
+/**
+ * Delete the archived copies of merged persons, one pair after the other (`remove` = the archived copy, `keep` = the survivor
+ * its credits go to); stops at the first pair that fails or does not check out. A dry run unless told otherwise. The places
+ * that use persons are read once for the batch, and the batch refuses to run when one of them cannot be read. `unlisted` =
+ * archived persons that are in none of the pairs (read only, so none is forgotten).
+ */
+export async function purgeArchivedBatch ({ pairs, strapi, dryRun = true, log = console }) {
+  const list = pairList(pairs, 'purge')
+  const references = list.length ? await strapi.findPersonReferences(list.map(pair => pair.remove)) : { refs: {}, failed: [] }
+  if (asList(references.failed).length) {
+    throw new Error(`the places that use persons could not all be read (${references.failed.map(f => `${f.source}: ${f.error}`).join('; ')}), so nothing was deleted`)
+  }
+
+  const results = []
+  let stoppedAt = null
+  for (const pair of list) {
+    const result = await purgeArchived({ keepId: pair.keep, removeId: pair.remove, strapi, dryRun, removeRefs: references.refs?.[pair.remove] || [], log })
+    results.push(result)
+    if (result.status === 'failed' || result.status === 'check-failed') { stoppedAt = { keep: pair.keep, remove: pair.remove }; break }
+  }
+  const counts = { deleted: 0, gone: 0, skipped: 0, 'dry-run': 0, 'check-failed': 0, failed: 0 }
+  for (const result of results) counts[result.status]++
+
+  let unlisted = null
+  try {
+    const listed = new Set(list.map(pair => pair.remove))
+    unlisted = asList(await strapi.findPeopleByNameTerm(ARCHIVED.trim()))
+      .filter(found => isArchived(found) && !listed.has(Number(found.id)))
+      .map(found => ({ id: Number(found.id), name: found.firstNameLastName || [found.firstName, found.lastName].filter(Boolean).join(' ') }))
+      .sort((a, b) => a.id - b.id)
+  } catch (err) {
+    log.warn?.(`[purge] the archived persons outside the pairs could not be listed: ${err?.message || err}`)
+  }
+  log.info?.(`[purge] ${dryRun ? 'dry run' : 'run'}: ${JSON.stringify(counts)}${stoppedAt ? ` — stopped at #${stoppedAt.remove} (survivor #${stoppedAt.keep})` : ''}`)
+  return { mode: 'purge', dryRun, pairs: list.length, counts, stoppedAt, unlisted, results }
 }

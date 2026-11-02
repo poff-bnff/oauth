@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { planMerge, planSlugs, mergePersons, mergeBatch, repairSlugsBatch } from '../server/utils/fiona/personMerge.js'
+import { planMerge, planSlugs, mergePersons, mergeBatch, repairSlugsBatch, purgeArchivedBatch } from '../server/utils/fiona/personMerge.js'
 
 const silent = { info () {}, warn () {}, error () {} }
 const clone = value => JSON.parse(JSON.stringify(value))
@@ -238,7 +238,7 @@ describe('planMerge: login user, address, and the retired record', () => {
 })
 
 // An in-memory Strapi that applies what it is told, so a merge can be followed from start to end
-function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null, credits = [], ignoreCreditWrites = false, keepStaleLinks = false } = {}) {
+function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn = null, credits = [], ignoreCreditWrites = false, keepStaleLinks = false, refs = {}, keepOnDelete = false } = {}) {
   const store = new Map(people.map(p => [p.id, clone(p)]))
   const entries = new Map(credits.map(({ source, entry }) => [`${source}:${entry.id}`, clone(entry)]))
   const calls = []
@@ -309,8 +309,13 @@ function fakeStrapi (people, { users = { 70: { id: 70, person: 500 } }, failOn =
       store.get(Number(personId)).addr_coll = { id: addressId, country: { id: 7 } }
     },
     setAddressCountry (addressId, countryId) { calls.push(['setAddressCountry', addressId, countryId]) },
-    deletePerson (id) { calls.push(['deletePerson', Number(id)]); store.delete(Number(id)) },
-    findPersonReferences (ids) { calls.push(['findPersonReferences', ids]); return { refs: {}, covered: ['film'], failed: [] } },
+    deletePerson (id) {
+      calls.push(['deletePerson', Number(id)])
+      if (failOn === `deletePerson:${id}`) throw new Error('HTTP 500')
+      if (!keepOnDelete) store.delete(Number(id))
+    },
+    findPersonReferences (ids) { calls.push(['findPersonReferences', ids]); return { refs, covered: ['film'], failed: [] } },
+    findPeopleByNameTerm (term) { calls.push(['findPeopleByNameTerm', term]); return [...store.values()].filter(p => String(p.firstNameLastName).includes(term)).map(clone) },
     // entries that name a person (films, ...), keyed "source:id"
     entries,
     getCreditEntry (source, id) { return entries.has(`${source}:${id}`) ? clone(entries.get(`${source}:${id}`)) : null },
@@ -1249,5 +1254,149 @@ describe('repairSlugsBatch: pairs that were merged before the survivor got the g
     await expect(repairSlugsBatch({ pairs: Array.from({ length: 101 }, (_, i) => ({ keep: i + 1, remove: i + 1000 })), strapi: fakeStrapi([]), log: silent })).rejects.toThrow(/at most 100/)
     const result = await repairSlugsBatch({ pairs: [{ keep: 'x', remove: 5 }, null], strapi: fakeStrapi([]), log: silent })
     expect(result.pairs).toBe(0)
+  })
+})
+
+describe('purgeArchivedBatch: delete the archived copies of merged persons', () => {
+  const ARCH = ' (archived)'
+  const survivor = (extra = {}) => person(20, { public: true, ...extra })
+  const archived = (extra = {}) => person(500, { firstNameLastName: `Mari Maasikas${ARCH}`, lastName: `Maasikas${ARCH}`, public: false, show_in_cg_search: false, slug_et: 'mari-maasikas-1', slug_en: 'mari-maasikas-1', slug_ru: 'mari-maasikas-1', ...extra })
+  const filmEntry = () => ({ id: 9213, credentials: { id: 77, rolePerson: [{ id: 11, order: 1, person: { id: 99 } }, { id: 12, order: 2, person: { id: 500 } }] } })
+  const run = (people, { dryRun = false, pairs = [{ keep: 20, remove: 500 }], ...options } = {}) => {
+    const strapi = fakeStrapi(people, options)
+    return purgeArchivedBatch({ pairs, strapi, dryRun, log: silent }).then(result => ({ result, strapi }))
+  }
+  const writes = strapi => strapi.calls.filter(([name]) => ['updatePerson', 'updateCreditEntry', 'deletePerson'].includes(name))
+
+  it('is a dry run unless told otherwise, and writes nothing', async () => {
+    const strapi = fakeStrapi([survivor(), archived()])
+
+    const result = await purgeArchivedBatch({ pairs: [{ keep: 20, remove: 500 }], strapi, log: silent })
+
+    expect(result).toMatchObject({ mode: 'purge', dryRun: true, pairs: 1, counts: { 'dry-run': 1, deleted: 0 } })
+    expect(result.results[0]).toMatchObject({ keep: 20, remove: 500, name: 'Mari Maasikas', status: 'dry-run' })
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('deletes an archived copy that nothing uses, and hands back what it was', async () => {
+    const { result, strapi } = await run([survivor(), archived()])
+
+    expect(result.counts.deleted).toBe(1)
+    expect(result.results[0]).toMatchObject({ status: 'deleted', keep: 20, remove: 500 })
+    expect(result.results[0].backup.remove).toMatchObject({ id: 500, firstNameLastName: 'Mari Maasikas (archived)' })
+    expect(writes(strapi)).toEqual([['deletePerson', 500]])
+    expect(strapi.store.has(500)).toBe(false)
+    expect(strapi.store.has(20)).toBe(true)
+  })
+
+  it('points the credits that still name the archived copy to the survivor first (silently, checked), then deletes it', async () => {
+    const { result, strapi } = await run([survivor(), archived()], { refs: { 500: [{ source: 'film', id: 9213 }] }, credits: [{ source: 'film', entry: filmEntry() }] })
+
+    expect(result.results[0].status).toBe('deleted')
+    expect(writes(strapi).map(([name, id]) => `${name}:${id}`)).toEqual(['updateCreditEntry:film:9213', 'deletePerson:500'])
+    expect(writes(strapi)[0][2]).toEqual({ credentials: { id: 77, rolePerson: [{ id: 11 }, { id: 12, person: 20 }] }, skipbuild: true })
+    expect(strapi.entries.get('film:9213').credentials.rolePerson.map(row => row.person.id)).toEqual([99, 20])
+    expect(result.results[0].credits).toEqual([{ source: 'film', id: 9213, changes: ['credentials.rolePerson #12: person 500 → 20'], dropped: 0 }])
+    expect(result.results[0].backup.credits).toEqual([{ source: 'film', id: 9213, before: { credentials: filmEntry().credentials } }])
+  })
+
+  it('a dry run says which credits would move and writes nothing', async () => {
+    const { result, strapi } = await run([survivor(), archived()], { dryRun: true, refs: { 500: [{ source: 'film', id: 9213 }] }, credits: [{ source: 'film', entry: filmEntry() }] })
+
+    expect(result.results[0].status).toBe('dry-run')
+    expect(result.results[0].credits).toEqual([{ source: 'film', id: 9213, changes: ['credentials.rolePerson #12: person 500 → 20'], dropped: 0 }])
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('leaves a copy that is used where credits are not moved (a festival pass) and says where', async () => {
+    const { result, strapi } = await run([survivor(), archived()], { refs: { 500: [{ source: 'festival-pass', id: 5 }] } })
+
+    expect(result.results[0]).toMatchObject({ status: 'skipped' })
+    expect(result.results[0].reason).toMatch(/festival-pass #5/)
+    expect(result.counts.skipped).toBe(1)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('leaves a copy whose credit entry cannot be read or does not hold the person where expected', async () => {
+    const { result, strapi } = await run([survivor(), archived()], { refs: { 500: [{ source: 'film', id: 404 }] } })
+
+    expect(result.results[0].status).toBe('skipped')
+    expect(result.results[0].reason).toMatch(/film #404/)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it.each([
+    ['is not archived', [survivor(), person(500, { public: false })], /not archived/],
+    ['has a survivor that is archived itself', [survivor({ firstNameLastName: `Mari Maasikas${ARCH}` }), archived()], /survivor #20 is archived/],
+    ['has another name than the survivor', [survivor({ firstNameLastName: 'Jaan Tamm' }), archived()], /names differ/],
+    ['is public again', [survivor(), archived({ public: true })], /in use again.*public/],
+    ['has a login again', [survivor(), archived({ user: { id: 70 } })], /in use again.*login/],
+    ['has a Fiona id again', [survivor(), archived({ fiona_person_id: 'f-1' })], /in use again.*Fiona/],
+    ['has no survivor', [archived()], /survivor #20 does not exist/]
+  ])('leaves a copy that %s', async (_name, people, reason) => {
+    const { result, strapi } = await run(people)
+
+    expect(result.results[0].status).toBe('skipped')
+    expect(result.results[0].reason).toMatch(reason)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('says "gone" for a copy that was deleted already, so a run can be repeated', async () => {
+    const { result, strapi } = await run([survivor()])
+
+    expect(result.results[0]).toMatchObject({ status: 'gone', remove: 500 })
+    expect(result.counts.gone).toBe(1)
+    expect(writes(strapi)).toEqual([])
+  })
+
+  it('does not delete when the credits cannot be written, and stops the batch there', async () => {
+    const people = [survivor(), archived(), person(21, { firstNameLastName: 'Jaan Tamm' }), person(501, { firstNameLastName: `Jaan Tamm${ARCH}`, public: false })]
+    const { result, strapi } = await run(people, { pairs: [{ keep: 20, remove: 500 }, { keep: 21, remove: 501 }], refs: { 500: [{ source: 'film', id: 9213 }] }, credits: [{ source: 'film', entry: filmEntry() }], failOn: 'updateCreditEntry:film:9213' })
+
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0]).toMatchObject({ status: 'failed', error: 'HTTP 500' })
+    expect(result.stoppedAt).toEqual({ keep: 20, remove: 500 })
+    expect(strapi.store.has(500)).toBe(true)
+    expect(strapi.calls.some(([name]) => name === 'deletePerson')).toBe(false)
+  })
+
+  it('does not delete when the credits still name the copy after the write', async () => {
+    const { result, strapi } = await run([survivor(), archived()], { refs: { 500: [{ source: 'film', id: 9213 }] }, credits: [{ source: 'film', entry: filmEntry() }], ignoreCreditWrites: true })
+
+    expect(result.results[0].status).toBe('check-failed')
+    expect(result.results[0].verify.problems.join(' ')).toMatch(/film #9213/)
+    expect(result.stoppedAt).toEqual({ keep: 20, remove: 500 })
+    expect(strapi.calls.some(([name]) => name === 'deletePerson')).toBe(false)
+  })
+
+  it('reports a delete that did not take, and a delete that failed', async () => {
+    const stays = await run([survivor(), archived()], { keepOnDelete: true })
+    expect(stays.result.results[0].status).toBe('check-failed')
+    expect(stays.result.results[0].verify.problems.join(' ')).toMatch(/#500 still exists/)
+
+    const fails = await run([survivor(), archived()], { failOn: 'deletePerson:500' })
+    expect(fails.result.results[0]).toMatchObject({ status: 'failed', error: 'HTTP 500' })
+  })
+
+  it('reads the places that use persons once for the whole batch, and refuses to run when one cannot be read', async () => {
+    const { strapi } = await run([survivor(), archived()])
+    expect(strapi.calls.filter(([name]) => name === 'findPersonReferences')).toEqual([['findPersonReferences', [500]]])
+
+    const broken = fakeStrapi([survivor(), archived()])
+    broken.findPersonReferences = () => ({ refs: {}, covered: [], failed: [{ source: 'film', error: 'HTTP 403' }] })
+    await expect(purgeArchivedBatch({ pairs: [{ keep: 20, remove: 500 }], strapi: broken, dryRun: false, log: silent })).rejects.toThrow(/film/)
+    expect(broken.calls.some(([name]) => name === 'deletePerson')).toBe(false)
+  })
+
+  it('lists archived persons on live that are in none of the pairs, so none is forgotten (read only)', async () => {
+    const other = person(600, { firstNameLastName: `Jaan Tamm${ARCH}`, lastName: `Tamm${ARCH}`, public: false })
+    const { result } = await run([survivor(), archived(), other], { dryRun: true })
+
+    expect(result.unlisted).toEqual([{ id: 600, name: 'Jaan Tamm (archived)' }])
+  })
+
+  it('takes at most 100 pairs', async () => {
+    const pairs = Array.from({ length: 101 }, (_, i) => ({ keep: 1000 + i, remove: 2000 + i }))
+    await expect(purgeArchivedBatch({ pairs, strapi: fakeStrapi([]), log: silent })).rejects.toThrow(/at most 100 pairs/)
   })
 })
