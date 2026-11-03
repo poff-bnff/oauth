@@ -41,6 +41,7 @@ export function createHybridClient ({ publication, xapi = null, log = console, a
     listMutations: (...args) => publication.listMutations(...args),
     getAccreditationBadgeRecord: (...args) => publication.getAccreditationBadgeRecord(...args),
     getPersonAccreditations: (...args) => publication.getPersonAccreditations(...args),
+    getPersonFilms: (...args) => publication.getPersonFilms(...args),
 
     async getPerson (personId, { accreditationIds = [], level = 1 } = {}) {
       let result = await publication.getPerson(personId)

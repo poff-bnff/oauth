@@ -220,3 +220,14 @@ describe('createHybridClient person companies', () => {
     expect((await client.getPerson('p', { level: 2 })).companies).toBeUndefined()
   })
 })
+
+describe('createHybridClient person films', () => {
+  it('passes the films of the person through from the publication client', async () => {
+    const asked = []
+    const publication = publicationStub({ getPersonFilms: (id) => { asked.push(id); return [{ id: 'film-1', title: 'The Fish', editionId: 'e1', roles: ['Director'] }] } })
+    const client = createHybridClient({ publication, xapi: null, log: { warn () {} } })
+
+    expect(await client.getPersonFilms('p')).toEqual([{ id: 'film-1', title: 'The Fish', editionId: 'e1', roles: ['Director'] }])
+    expect(asked).toEqual(['p'])
+  })
+})
