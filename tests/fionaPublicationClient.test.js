@@ -316,3 +316,35 @@ describe('createPublicationClient getPersonCompanies', () => {
     expect(await client.getPersonCompanies('p')).toEqual([])
   })
 })
+
+describe('createPublicationClient getPersonFilms', () => {
+  const personWithFilms = {
+    id: 'person-1',
+    accreditations: [{ id: 'acc-1', guestbook: { id: 'gb-30' } }],
+    films: [
+      { id: 'link-1', film: { id: 'film-1', description: 'The Fish' }, fullTitle: 'The Fish (2020)', edition: { id: 'e1' }, role: { key: 'Director' } },
+      { id: 'link-2', film: { id: 'film-1', description: 'The Fish' }, fullTitle: 'The Fish (2020)', edition: { id: 'e1' }, role: { key: 'Producer' } },
+      { id: 'link-3', film: { id: 'film-2' }, fullTitle: 'Second Film', edition: { id: 'e0' }, role: { key: 'Representative' } },
+      { id: 'link-4', film: {}, fullTitle: '', role: { key: 'Director' } }
+    ]
+  }
+
+  it('lists the films on the person record, one entry per film with the roles together', async () => {
+    const calls = []
+    const fetch = (url) => { calls.push(url); return personWithFilms }
+    const client = createPublicationClient({ fetch, apiKey: 'K', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    expect(await client.getPersonFilms('person-1')).toEqual([
+      { id: 'film-1', title: 'The Fish', editionId: 'e1', roles: ['Director', 'Producer'] },
+      { id: 'film-2', title: 'Second Film', editionId: 'e0', roles: ['Representative'] }
+    ])
+    await client.getPersonFilms('person-1')
+    expect(calls).toEqual(['https://pub.example/v1/persons/person-1'])
+  })
+
+  it('is empty for a person without films', async () => {
+    const client = createPublicationClient({ fetch: () => ({ id: 'p', accreditations: [] }), apiKey: 'K', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    expect(await client.getPersonFilms('p')).toEqual([])
+  })
+})

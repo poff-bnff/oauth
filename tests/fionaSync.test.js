@@ -27,6 +27,8 @@ function fakeFiona () {
     failPersons: new Set(),
     photoCalls: [],
     personCalls: [],
+    filmCalls: [], // person ids whose own films were read
+    failPersonFilms: false,
     knownGuestbooks: null, // null = same as configured guestbooks
     mutations: [] // returned by listMutations regardless of `since`
   }
@@ -61,8 +63,13 @@ function fakeFiona () {
         occupation: a.occupation || null,
         categories: a.categories || [],
         companies: a.companies || [],
-        films: []
+        films: a.films || []
       }
+    },
+    getPersonFilms (personId) {
+      state.filmCalls.push(personId)
+      if (state.failPersonFilms) throw new Error('HTTP 502')
+      return state.persons.get(personId)?.films || []
     },
     getPerson (personId, options) {
       state.personCalls.push({ personId, ...options })
@@ -106,6 +113,9 @@ function fakeStrapi () {
     orphanUploads: [], // files already in the media library that no person uses: { id, filename, size }
     writes: [],
     emails: [], // Creative Gate "created" emails Strapi's hooks would send: { userId, personId }
+    filmCredits: new Map(), // personId → the Strapi films the person is credited in: { id, remoteId, title_en, ... }
+    filmIndexCalls: 0,
+    failFilmIndex: false,
     publisherRoleIds: new Set([ROLE_CG]), // roles with publish_cg_person
     countries: [], // { id, name_en }
     industryCategories: [], // { id, name }
@@ -155,6 +165,11 @@ function fakeStrapi () {
     findPersonByFionaId (fid) {
       const p = [...state.people.values()].find(p => p.fiona_person_id === fid)
       return p ? populated(p) : null
+    },
+    getFilmCreditIndex () {
+      state.filmIndexCalls++
+      if (state.failFilmIndex) throw new Error('HTTP 502')
+      return new Map(state.filmCredits)
     },
     findPeopleByEmail (email) {
       const wanted = String(email).trim().toLowerCase()
@@ -962,6 +977,181 @@ describe('runSync', () => {
     })
   })
 
+  describe('same-name persons judged by a shared film', () => {
+    const mari = { id: 20, firstName: 'Mari', lastName: 'Maasikas', firstNameLastName: 'Mari Maasikas', eMail: null, festival_editions: [] }
+    const strapiFilm = (over = {}) => ({ id: 500, remoteId: 'film-guid-1', title_en: 'The Fish', title_et: null, title_ru: null, titleOriginal: null, ...over })
+    const fionaFilm = (over = {}) => ({ id: 'film-guid-1', title: 'The Fish', editionId: 'e1', roles: ['Director'], ...over })
+
+    beforeEach(() => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created')))
+      fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com', films: [fionaFilm()] })
+      strapi.state.people.set(20, { ...mari })
+      strapi.state.filmCredits.set(20, [strapiFilm()])
+    })
+
+    it('still holds the person back while the switch is off, but says that a film confirms it, and counts it', async () => {
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.persons).toMatchObject({ created: 0, needsDecision: 1 })
+      expect(stats.needsDecision[0].film).toMatchObject({ verdict: 'confirmed', candidateId: 20, by: 'id', fionaFilmCount: 1 })
+      expect(stats.needsDecision[0].film.matches[0]).toMatchObject({ candidateId: 20, by: 'id', fionaFilm: { id: 'film-guid-1' }, strapiFilm: { id: 500, remoteId: 'film-guid-1' } })
+      expect(stats.sameName).toMatchObject({ confirmedById: 1, confirmedByTitle: 0, adopted: 0 })
+      expect(stats.switches.adoptByFilm).toBe(false)
+    })
+
+    it('with the switch on, adopts the same-name person the film confirms: no second person, a login, the Fiona ids and the editions', async () => {
+      deps.config.adoptByFilm = true
+      strapi.state.rules = [TEAM_RULE, PRO_RULE]
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_PRO, 'paid')))
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.size).toBe(1)
+      expect(strapi.state.people.get(20)).toMatchObject({ fiona_person_id: 'fp1', eMail: 'mari@example.com' })
+      expect(strapi.state.people.get(20).festival_editions).toEqual(expect.arrayContaining([CG, IND]))
+      expect(strapi.state.people.get(20).user).toBeTruthy()
+      expect(stats.persons).toMatchObject({ created: 0, updated: 1, needsDecision: 0 })
+      expect(stats.sameName).toMatchObject({ confirmedById: 1, adopted: 1 })
+      expect(stats.switches.adoptByFilm).toBe(true)
+      expect(log.lines.info.some(line => line.includes('fp1') && line.includes('#20') && line.includes('film'))).toBe(true)
+    })
+
+    it('adopts in a run that asks for it (a test or decision run), without the environment switch', async () => {
+      const stats = await runSync({ only: { ruleIds: [TEAM_RULE.id], adoptByFilm: true, fionaPersonIds: ['fp1'] } }, deps)
+
+      expect(strapi.state.people.size).toBe(1)
+      expect(strapi.state.people.get(20).fiona_person_id).toBe('fp1')
+      expect(stats.sameName.adopted).toBe(1)
+    })
+
+    it('a dry run with the switch on shows the adoption as an update and writes nothing', async () => {
+      deps.config.adoptByFilm = true
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.dryRunActions).toEqual([expect.objectContaining({ action: 'UPDATE', personId: 20, fionaPersonId: 'fp1' })])
+      expect(stats.persons).toMatchObject({ created: 0, updated: 1, needsDecision: 0 })
+    })
+
+    it('confirms by title when the film ids differ, and counts it apart', async () => {
+      deps.config.adoptByFilm = true
+      strapi.state.filmCredits.set(20, [strapiFilm({ remoteId: 'eventival-1', title_et: 'Kala', title_en: null })])
+      fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com', films: [fionaFilm({ id: 'other-guid', title: 'KALA' })] })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.people.get(20).fiona_person_id).toBe('fp1')
+      expect(stats.sameName).toMatchObject({ confirmedById: 0, confirmedByTitle: 1, adopted: 1 })
+    })
+
+    it('uses the films of the accreditation as well as those of the person', async () => {
+      deps.config.adoptByFilm = true
+      fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com', films: [] })
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created', { films: [fionaFilm()] })))
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.sameName.adopted).toBe(1)
+    })
+
+    it('holds the person back, switch on or off, when Fiona has films but none is shared', async () => {
+      deps.config.adoptByFilm = true
+      fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com', films: [fionaFilm({ id: 'g2', title: 'Another film' })] })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.needsDecision[0].film).toMatchObject({ verdict: 'unconfirmed', fionaFilmCount: 1, matches: [] })
+      expect(stats.sameName).toMatchObject({ unconfirmed: 1, adopted: 0 })
+    })
+
+    it('holds the person back and counts it apart when Fiona knows no film of the person', async () => {
+      deps.config.adoptByFilm = true
+      fiona.state.persons.set('fp1', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com', films: [] })
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.needsDecision[0].film).toMatchObject({ verdict: 'no-film', fionaFilmCount: 0 })
+      expect(stats.sameName).toMatchObject({ noFilm: 1, adopted: 0 })
+    })
+
+    it('holds the person back when two same-name persons share the film: the sync must not choose', async () => {
+      deps.config.adoptByFilm = true
+      strapi.state.people.set(21, { ...mari, id: 21 })
+      strapi.state.filmCredits.set(21, [strapiFilm({ id: 501 })])
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.needsDecision[0].film).toMatchObject({ verdict: 'ambiguous' })
+      expect(stats.sameName).toMatchObject({ ambiguous: 1, adopted: 0 })
+    })
+
+    it('does not adopt a person that already belongs to another Fiona person: it is not a candidate at all', async () => {
+      deps.config.adoptByFilm = true
+      strapi.state.people.set(20, { ...mari, fiona_person_id: 'someone-else' })
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.persons).toMatchObject({ created: 1, needsDecision: 0 })
+      expect(strapi.state.people.get(20).fiona_person_id).toBe('someone-else')
+      expect(stats.sameName).toMatchObject({ adopted: 0 })
+    })
+
+    it('holds the person back and says so when the films of Strapi cannot be read: the run carries on', async () => {
+      deps.config.adoptByFilm = true
+      strapi.state.failFilmIndex = true
+
+      const stats = await runSync({}, deps)
+
+      expect(strapi.state.writes).toEqual([])
+      expect(stats.needsDecision[0].film).toMatchObject({ verdict: 'unknown', error: expect.stringMatching(/502/) })
+      expect(stats.sameName).toMatchObject({ unknown: 1, adopted: 0 })
+      expect(stats.errors).toBe(0)
+    })
+
+    it('still compares the films of the accreditation when the films of the person cannot be read', async () => {
+      deps.config.adoptByFilm = true
+      fiona.state.failPersonFilms = true
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created', { films: [fionaFilm()] })))
+
+      const stats = await runSync({}, deps)
+
+      expect(stats.sameName.adopted).toBe(1)
+      expect(log.lines.warn.some(line => line.includes('fp1') && line.includes('502'))).toBe(true)
+    })
+
+    it('reads the films of Strapi once per run however many persons are held, and not at all when nobody is held', async () => {
+      fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created'), accreditation('acc2', 'fp2', BADGE_TEAM, 'Created')))
+      fiona.state.persons.set('fp2', { firstName: 'Mari', lastName: 'Maasikas', email: 'other@example.com', films: [] })
+      await runSync({}, deps)
+      expect(strapi.state.filmIndexCalls).toBeLessThanOrEqual(2)
+
+      strapi.state.filmIndexCalls = 0
+      strapi.state.people.clear()
+      await runSync({ dryRun: true }, deps)
+      expect(strapi.state.filmIndexCalls).toBe(0)
+    })
+
+    it('lists up to 1000 held-back persons, not 200', async () => {
+      const accreditations = []
+      for (let i = 0; i < 260; i++) {
+        accreditations.push(accreditation(`acc-${i}`, `fp-${i}`, BADGE_TEAM, 'Created'))
+        fiona.state.persons.set(`fp-${i}`, { firstName: `Name${i}`, lastName: 'Same', email: `p${i}@example.com`, films: [] })
+        strapi.state.people.set(1000 + i, { id: 1000 + i, firstName: `Name${i}`, lastName: 'Same', firstNameLastName: `Name${i} Same`, eMail: null, festival_editions: [] })
+      }
+      fiona.state.guestbooks.set(GB, guestbookWith(...accreditations))
+
+      const stats = await runSync({ dryRun: true }, deps)
+
+      expect(stats.persons.needsDecision).toBeGreaterThan(250)
+      expect(stats.needsDecision.length).toBe(stats.persons.needsDecision)
+    })
+  })
+
   describe('Creative Gate "created" email from Strapi', () => {
     it('a new full-profile person: the user is notified once, because the publisher role is in place before the person becomes ready', async () => {
       fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc80', 'fp80', BADGE_PRO, 'approved')))
@@ -1270,14 +1460,15 @@ describe('runSync', () => {
     })
   })
 
-  it('shows in its stats whether the unpublished photo and biography and the extra values switches are on', async () => {
+  it('shows in its stats whether the unpublished photo and biography, the extra values and the adopt-by-film switches are on', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith())
-    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: false, unpublishedBios: false, extraFields: false })
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: false, unpublishedBios: false, extraFields: false, adoptByFilm: false })
 
     deps.config.unpublishedPhotos = true
     deps.config.unpublishedBios = true
     deps.config.extraFields = true
-    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true, extraFields: true })
+    deps.config.adoptByFilm = true
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true, extraFields: true, adoptByFilm: true })
   })
 
   it('reports per rule how many persons it matches, and how many of them get the full profile', async () => {
