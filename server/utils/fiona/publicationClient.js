@@ -311,6 +311,23 @@ export function createPublicationClient ({
       return uniqueNames((Array.isArray(record?.companies) ? record.companies : []).map(company => company?.name))
     },
 
+    /**
+     * The films on the person's own card, all editions: one entry per film { id (the Fiona film id), title, editionId, roles }.
+     * The Strapi film carries the same id in `remoteId`.
+     */
+    async getPersonFilms (personId) {
+      const record = await getPersonRecord(personId)
+      const byFilm = new Map()
+      for (const item of (Array.isArray(record?.films) ? record.films : [])) {
+        const id = text(item?.film?.id)
+        if (!id) continue
+        if (!byFilm.has(id)) byFilm.set(id, { id, title: text(item?.film?.description) || text(item?.fullTitle), editionId: text(item?.edition?.id), roles: [] })
+        const role = text(item?.role?.key)
+        if (role && !byFilm.get(id).roles.includes(role)) byFilm.get(id).roles.push(role)
+      }
+      return [...byFilm.values()]
+    },
+
     async getMyPoffUserId (personId) {
       return (await getPerson(personId)).externalAccountId || null
     },

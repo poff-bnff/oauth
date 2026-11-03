@@ -29,8 +29,11 @@ import { buildPersonPayload, valuesToClear } from './personMapper.js'
 import { normalizeName, uniqueNames, splitOccupations, isPlaceholderCompany, planCategories, planRoles, planCountry } from './extraFields.js'
 import { headshotFileName } from './photoName.js'
 import { findSameNamePersons, describeCandidate } from './sameName.js'
+import { assessSameName, collectFionaFilms } from './filmEvidence.js'
 
 export const JOB_KEY = 'accreditations'
+const MAX_LISTED_HOLDS = 1000 // the held-back Fiona persons the result lists (the count is always complete)
+const MAX_LISTED_MATCHES = 20 // the shared films the result lists per held-back person
 const RELEVANT_ENTITIES = new Set(['Accreditation', 'AccreditationBadge', 'Person'])
 const MUTATION_OVERLAP_MS = 5 * 60 * 1000
 const JOB_TIME_ZONE = 'Europe/Tallinn'
@@ -82,8 +85,12 @@ function newStats (dryRun, mode) {
     rules: { active: 0, mapped: 0, unmapped: 0 },
     accreditations: { seen: 0, matched: 0, errors: 0 },
     persons: { desired: 0, created: 0, updated: 0, unchanged: 0, downgraded: 0, unpublished: 0, conflicts: 0, skippedNoEmail: 0, needsDecision: 0 },
-    // Fiona persons the sync did not create because Strapi may already hold them: { fionaPersonId, name, email, reason, candidates }
+    // Fiona persons the sync did not create because Strapi may already hold them: { fionaPersonId, name, email, reason, candidates, film }
     needsDecision: [],
+    // the Fiona persons held back for a same-name Strapi person, by what the films say (see filmEvidence.js): a shared film
+    // confirms it (by Fiona film id or by title), several candidates share one, Fiona has films and none is shared, Fiona knows
+    // no film of the person, the films could not be compared; `adopted` = confirmed ones the sync took over (switch on)
+    sameName: { confirmedById: 0, confirmedByTitle: 0, ambiguous: 0, unconfirmed: 0, noFilm: 0, unknown: 0, adopted: 0 },
     decisions: { adopted: 0, created: 0, unmatched: [] },
     editions: { attached: 0, detached: 0 },
     users: { created: 0, linked: 0, confirmed: 0, unconfirmedSeen: 0, confirmedFieldMissing: 0 },
@@ -92,7 +99,7 @@ function newStats (dryRun, mode) {
     customFieldKeys: {},
     ruleRoles: [],
     build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
-    switches: { unpublishedPhotos: false, unpublishedBios: false, extraFields: false },
+    switches: { unpublishedPhotos: false, unpublishedBios: false, extraFields: false, adoptByFilm: false },
     backlog: { cap: 0, more: false },
     photos: { published: 0, headshot: 0, missing: [] },
     bios: { accreditation: 0, missing: [] },
@@ -268,7 +275,10 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   // extra values (country, companies, Programme/category, occupation): written only with the switch on (or in a test run
   // that asks for it); a dry run always shows what they would do
   const extraFieldsOn = Boolean(config.extraFields) || Boolean(only?.extraFields)
-  stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios), extraFields: extraFieldsOn }
+  // a same-name Strapi person that a shared film confirms is adopted only with the switch on (or in a test run that asks for it);
+  // the counts in stats.sameName are always there
+  const adoptByFilmOn = Boolean(config.adoptByFilm) || Boolean(only?.adoptByFilm)
+  stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios), extraFields: extraFieldsOn, adoptByFilm: adoptByFilmOn }
   stats.backlog = { cap: maxPersonsPerRun, more: false }
   if (only) stats.test = { ruleIds: [...(testRuleIds || [])], maxPersons: maxPersonsPerRun, scope: testScope, outsideRules: 0, alreadyInStrapi: 0 }
   const would = dryRun ? 'DRY RUN would ' : ''
@@ -746,11 +756,24 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   if (testRuleIds) stats.test.outsideRules = [...desired.values()].filter(entry => ![...entry.matchedRuleIds].some(id => testRuleIds.has(Number(id)))).length
   for (const id of decisions.keys()) if (!desired.has(id)) stats.decisions.unmatched.push(id)
   // A Fiona person the sync does not create because Strapi may hold it already: the list below is what a person has to decide
-  const holdBack = (fionaPersonId, fionaPerson, email, reason, candidates) => {
+  const holdBack = (fionaPersonId, fionaPerson, email, reason, candidates, film = null) => {
     const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
     stats.persons.needsDecision++
-    if (stats.needsDecision.length < 200) stats.needsDecision.push({ fionaPersonId, name, email, reason, candidates: candidates.map(describeCandidate) })
+    if (stats.needsDecision.length < MAX_LISTED_HOLDS) stats.needsDecision.push({ fionaPersonId, name, email, reason, candidates: candidates.map(describeCandidate), ...(film ? { film } : {}) })
     warn(`person ${fionaPersonId} (${name}, ${email}) needs a decision: ${reason}, ${candidates.map(candidate => `#${candidate.id}`).join(', ')} — not created`)
+  }
+  // What the films say about a Fiona person and the same-name Strapi persons. Never throws: when the films cannot be compared
+  // the verdict is 'unknown' and the person is held back as before. The Strapi films are read once per run, on first use.
+  const compareFilms = async ({ fionaPersonId, accreditationIds, candidates }) => {
+    try {
+      const fionaFilms = await collectFionaFilms({ fiona, fionaPersonId, accreditationIds, log })
+      const index = fionaFilms.length ? await strapi.getFilmCreditIndex() : null
+      const assessment = assessSameName({ fionaFilms, candidates, filmsOf: personId => index?.get(Number(personId)) || [] })
+      return { ...assessment, matches: assessment.matches.slice(0, MAX_LISTED_MATCHES) }
+    } catch (err) {
+      warn(`person ${fionaPersonId}: the films could not be compared (${err?.message || err}) — held back as before`)
+      return { verdict: 'unknown', error: err?.message || String(err), fionaFilmCount: null, matches: [] }
+    }
   }
   let written = 0 // persons this run writes: created, or updated because something differs
   for (const [fionaPersonId, want] of desired) {
@@ -832,8 +855,18 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       if (!existing && decision?.action !== 'create') {
         const sameName = await findSameNamePersons({ strapi, firstName: fionaPerson.firstName, lastName: fionaPerson.lastName })
         if (sameName.length) {
-          holdBack(fionaPersonId, fionaPerson, contactEmail, 'same name', sameName)
-          continue
+          // same name and the same film is the same person; the sync adopts it when the switch is on, and always counts what the films say
+          const film = await compareFilms({ fionaPersonId, accreditationIds: [...want.accreditationIds], candidates: sameName })
+          if (film.verdict === 'confirmed') stats.sameName[film.by === 'id' ? 'confirmedById' : 'confirmedByTitle']++
+          else stats.sameName[{ ambiguous: 'ambiguous', unconfirmed: 'unconfirmed', 'no-film': 'noFilm' }[film.verdict] || 'unknown']++
+          if (film.verdict === 'confirmed' && adoptByFilmOn) {
+            existing = sameName.find(candidate => Number(candidate.id) === film.candidateId)
+            stats.sameName.adopted++
+            log.info(`person ${fionaPersonId} (${fionaPerson.firstName} ${fionaPerson.lastName}) is #${existing.id}: the same name and the same film (${film.matches.filter(match => match.candidateId === film.candidateId).map(match => `"${match.fionaFilm.title || match.strapiFilm.title}" by ${match.by}`).join(', ')}) — adopted`)
+          } else {
+            holdBack(fionaPersonId, fionaPerson, contactEmail, 'same name', sameName, film)
+            continue
+          }
         }
       }
       if (!existing && decision?.action === 'create') stats.decisions.created++

@@ -75,6 +75,9 @@
  *                job entry, so a test cannot start, delay or shorten the real import.
  *                Add "extraFields": true to a test run to let it write the extra values (country, companies, Programme/category,
  *                Current occupation) while the NUXT_SYNC_EXTRA_FIELDS switch is still off; a dry run always shows them.
+ *                Add "adoptByFilm": true to a test run to let it adopt a same-name Strapi person that a shared film confirms (the
+ *                Fiona person and the Strapi person are linked to the same film: the Strapi film's remoteId is the Fiona film id, or
+ *                the titles are the same) while the NUXT_SYNC_ADOPT_BY_FILM switch is off; every run shows `sameName` counts.
  *                Add "testFionaPersonIds": ["<Fiona person id>", ..] to a test run to handle only those persons.
  *                Add "testScope": "new" to test only persons Strapi does not hold yet (the creation), or "existing" for
  *                only those it already holds (the adoption); the default is both.
@@ -147,6 +150,7 @@ export default defineEventHandler(async (event) => {
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
   const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
   const testExtraFields = body?.extraFields === true // a test run only: write the extra values (country, companies, ...) even while the switch is off
+  const testAdoptByFilm = body?.adoptByFilm === true // a test run only: adopt the same-name person a shared film confirms even while the NUXT_SYNC_ADOPT_BY_FILM switch is off
   const testFionaPersonIds = Array.isArray(body?.testFionaPersonIds) ? body.testFionaPersonIds.map(String) : [] // a test run only: handle just these Fiona person ids
   const mergePairs = Array.isArray(body?.pairs) ? body.pairs.map(pair => ({ keep: Number(pair?.keep), remove: Number(pair?.remove), mainUser: Number(pair?.mainUser) || null })) : [] // merge mode: [{ keep, remove }] Strapi person ids
   const mergeRetire = body?.retire === 'delete' ? 'delete' : 'hide' // merge mode: what happens to the record that is merged into the other
@@ -163,7 +167,7 @@ export default defineEventHandler(async (event) => {
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
 
   return { ok: true, stats }
 })

@@ -50,18 +50,19 @@ function personIdsIn (value) {
   return Number.isFinite(id) && id > 0 ? [id] : []
 }
 
-/** Walk an entry and collect the wanted person ids found under the given keys (not looking inside a person itself). */
+/** Walk an entry and collect the wanted person ids (every person when `wanted` is null) found under the given keys (not looking inside a person itself). */
 function collectPersonIds (value, keys, wanted, found) {
   if (Array.isArray(value)) { for (const item of value) collectPersonIds(item, keys, wanted, found); return }
   if (!value || typeof value !== 'object') return
   for (const [key, inner] of Object.entries(value)) {
-    if (keys.includes(key)) { for (const id of personIdsIn(inner)) if (wanted.has(id)) found.add(id) } else collectPersonIds(inner, keys, wanted, found)
+    if (keys.includes(key)) { for (const id of personIdsIn(inner)) if (!wanted || wanted.has(id)) found.add(id) } else collectPersonIds(inner, keys, wanted, found)
   }
 }
 
 export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFionaGuestbooks, log = console }) {
   if (typeof fetch !== 'function') throw new Error('createStrapiGateway: fetch is required')
   const base = config.strapiUrl
+  let filmCreditIndex = null // the films of every credited person, read on first use (getFilmCreditIndex)
 
   async function request (method, path, body) {
     const token = await getAdminToken()
@@ -212,6 +213,31 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
         }
       }
       return { refs, covered, failed }
+    },
+
+    /**
+     * The films each person is credited in: Map(person id → [{ id, remoteId, title_et, title_en, title_ru, titleOriginal }]).
+     * One pass over all films, kept for the life of this gateway (one sync run); a failed read is not kept.
+     */
+    getFilmCreditIndex () {
+      filmCreditIndex ||= (async () => {
+        const index = new Map()
+        for (let page = 0; page < 500; page++) {
+          const entries = asList(await get(`/films?_start=${page * REFERENCE_PAGE}&_limit=${REFERENCE_PAGE}&_sort=id:asc`))
+          for (const entry of entries) {
+            const found = new Set()
+            collectPersonIds(entry.credentials, PERSON_KEYS, null, found)
+            const film = { id: entry.id, remoteId: entry.remoteId ?? null, title_et: entry.title_et ?? null, title_en: entry.title_en ?? null, title_ru: entry.title_ru ?? null, titleOriginal: entry.titleOriginal ?? null }
+            for (const personId of found) {
+              if (!index.has(personId)) index.set(personId, [])
+              index.get(personId).push(film)
+            }
+          }
+          if (entries.length < REFERENCE_PAGE) break
+        }
+        return index
+      })().catch((err) => { filmCreditIndex = null; throw err })
+      return filmCreditIndex
     },
 
     /** An entry that names a person (a film, a team, ...), as its own REST route returns it; null when it does not exist. */

@@ -153,6 +153,56 @@ describe('createStrapiGateway', () => {
     })
   })
 
+  describe('getFilmCreditIndex: which films a person is credited in', () => {
+    const film = (id, over = {}) => ({ id, remoteId: `guid-${id}`, title_en: `Film ${id}`, title_et: null, title_ru: null, titleOriginal: null, slug_en: 'ignored', credentials: { id: 1, rolePerson: [] }, ...over })
+
+    it('pages through all films once and maps every credited person to the films with the fields needed to match them', async () => {
+      const urls = []
+      const fetch = (url) => {
+        urls.push(url.replace(STRAPI, ''))
+        return url.includes('_start=0')
+          ? Array.from({ length: 100 }, (_, i) => film(i + 1, i === 0 ? { credentials: { id: 1, rolePerson: [{ id: 5, person: { id: 20, firstName: 'Mari' } }, { id: 6, person: 21 }] } } : {}))
+          : [film(101, { credentials: { id: 2, rolePerson: [{ id: 7, person: { id: 20 } }] } })]
+      }
+      const index = await createStrapiGateway({ fetch, ...deps() }).getFilmCreditIndex()
+
+      expect(urls).toEqual(['/films?_start=0&_limit=100&_sort=id:asc', '/films?_start=100&_limit=100&_sort=id:asc'])
+      expect(index.get(20)).toEqual([
+        { id: 1, remoteId: 'guid-1', title_et: null, title_en: 'Film 1', title_ru: null, titleOriginal: null },
+        { id: 101, remoteId: 'guid-101', title_et: null, title_en: 'Film 101', title_ru: null, titleOriginal: null }
+      ])
+      expect(index.get(21).map(item => item.id)).toEqual([1])
+      expect(index.get(99)).toBeUndefined()
+    })
+
+    it('lists a film once for a person credited in it several times', async () => {
+      const fetch = () => [film(1, { credentials: { id: 1, rolePerson: [{ id: 5, person: 20 }, { id: 6, person: { id: 20 } }] } })]
+      const index = await createStrapiGateway({ fetch, ...deps() }).getFilmCreditIndex()
+
+      expect(index.get(20)).toHaveLength(1)
+    })
+
+    it('reads the films only once per gateway', async () => {
+      const { fetch, calls } = fakeFetch({ 'GET /films': [film(1, { credentials: { id: 1, rolePerson: [{ id: 5, person: 20 }] } })] })
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      const first = await gateway.getFilmCreditIndex()
+      const second = await gateway.getFilmCreditIndex()
+
+      expect(second).toBe(first)
+      expect(calls).toHaveLength(1)
+    })
+
+    it('tries again after a failed read instead of keeping the failure', async () => {
+      let attempts = 0
+      const fetch = () => { attempts++; if (attempts === 1) throw new Error('HTTP 502'); return [film(1, { credentials: { id: 1, rolePerson: [{ id: 5, person: 20 }] } })] }
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      await expect(gateway.getFilmCreditIndex()).rejects.toThrow(/502/)
+      expect((await gateway.getFilmCreditIndex()).get(20)).toHaveLength(1)
+    })
+  })
+
   describe('credit entries (films, course events, projects, teams, ... that name a person)', () => {
     it('reads an entry through the route of its source and writes the changed fields back to the same route', async () => {
       const { fetch, calls } = fakeFetch({ 'GET /films/9213': { id: 9213, credentials: { id: 77 } }, 'PUT /films/9213': { id: 9213 } })
