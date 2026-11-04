@@ -2266,6 +2266,147 @@ describe('runSync', () => {
       expect(touches()).toHaveLength(1)
       expect(stats.warnings.join('\n')).toMatch(/full build/i)
     })
+
+    describe('no person is left without a page: decision and test runs, and a run that stops half way', () => {
+      const names = [['fp2', 'acc2', 'A', 20], ['fp7', 'acc7', 'B', 21], ['fp8', 'acc8', 'C', 22]]
+      const adoptThree = () => {
+        three()
+        for (const [, , letter, id] of names) {
+          strapi.state.people.set(id, { id, firstName: letter, lastName: letter, firstNameLastName: `${letter} ${letter}`, eMail: null, festival_editions: [] })
+        }
+        return { decisions: names.map(([fionaPersonId, , , personId]) => ({ fionaPersonId, action: 'adopt', personId })) }
+      }
+      const queueWrites = () => strapi.state.writes.filter(w => w.op === 'saveSyncJob')
+      const queuedIds = () => (strapi.state.syncJob.build_queue || []).map(entry => entry.personId).sort((a, b) => a - b)
+
+      beforeEach(() => {
+        strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 1 })]
+        strapi.state.syncJob = job()
+      })
+
+      it('a decision run builds the limit amount and puts the rest of ITS persons on the waiting list', async () => {
+        const stats = await runSync({ only: adoptThree() }, deps)
+
+        expect(touches()).toHaveLength(1)
+        expect(stats.build).toMatchObject({ triggered: true, queued: 2 })
+        expect(queuedIds()).toEqual([20, 21, 22].filter(id => !stats.build.ids.includes(id)))
+      })
+
+      it('a decision run adds to the waiting list and keeps what was waiting before', async () => {
+        strapi.state.syncJob.build_queue = [{ personId: 999, ruleIds: [2] }]
+
+        await runSync({ only: adoptThree() }, deps)
+
+        expect(queuedIds()).toHaveLength(3)
+        expect(queuedIds()).toContain(999)
+      })
+
+      it('a decision run saves nothing but the waiting list in the job entry', async () => {
+        await runSync({ only: adoptThree() }, deps)
+
+        for (const write of queueWrites()) expect(Object.keys(write.payload)).toEqual(['build_queue'])
+        expect(strapi.state.syncJob.last_stats).toBeNull()
+        expect(strapi.state.syncJob.last_full_run_at).toBeNull()
+        expect(strapi.state.syncJob.mutation_cursor).toBeNull()
+      })
+
+      it('the ordinary runs after it build the waiting persons, a limit amount each time', async () => {
+        await runSync({ only: adoptThree() }, deps)
+
+        await runSync({}, deps)
+        await runSync({}, deps)
+
+        expect(touches()).toHaveLength(3)
+        expect(queuedIds()).toEqual([])
+      })
+
+      it('when every person of a decision run got its build, the waiting list ends up exactly as it was', async () => {
+        strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 5 })]
+        strapi.state.syncJob.build_queue = [{ personId: 999, ruleIds: [2] }]
+
+        const stats = await runSync({ only: adoptThree() }, deps)
+
+        expect(touches()).toHaveLength(3)
+        expect(stats.build.queued).toBe(0)
+        expect(strapi.state.syncJob.build_queue).toEqual([{ personId: 999, ruleIds: [2] }])
+        for (const write of queueWrites()) expect(Object.keys(write.payload)).toEqual(['build_queue'])
+      })
+
+      it('a decision run with nothing to build does not touch the job entry', async () => {
+        const stats = await runSync({ only: { decisions: [{ fionaPersonId: 'unknown', action: 'create' }] } }, deps)
+
+        expect(stats.build.candidates).toBe(0)
+        expect(queueWrites()).toEqual([])
+      })
+
+      it('a test run keeps its leftover persons on the waiting list too, without touching the rest of the job entry', async () => {
+        three()
+
+        await runSync({ only: { ruleIds: [2], maxPersons: 3 } }, deps)
+
+        expect(touches()).toHaveLength(1)
+        expect(queuedIds()).toHaveLength(2)
+        expect(strapi.state.syncJob.last_stats).toBeNull()
+        expect(strapi.state.syncJob.last_full_run_at).toBeNull()
+      })
+
+      it('a dry run decision changes nothing in the job entry', async () => {
+        await runSync({ dryRun: true, only: adoptThree() }, deps)
+
+        expect(queueWrites()).toEqual([])
+      })
+
+      it('a decision run without a build_queue field in the job entry says a full build is needed', async () => {
+        const { build_queue: notThereYet, ...withoutField } = job()
+        strapi.state.syncJob = withoutField
+
+        const stats = await runSync({ only: adoptThree() }, deps)
+
+        expect(stats.warnings.join('\n')).toMatch(/full build/i)
+        expect(queueWrites()).toEqual([])
+      })
+
+      it('the persons to build are on the waiting list BEFORE the first build starts, so a run that stops during the builds loses none', async () => {
+        await runSync({}, deps) // nothing to do yet, so the writes below are this run only
+        strapi.state.writes.length = 0
+        three()
+
+        await runSync({}, deps)
+
+        const ops = strapi.state.writes
+        const firstQueue = ops.findIndex(w => w.op === 'saveSyncJob' && Array.isArray(w.payload.build_queue) && w.payload.build_queue.length === 3)
+        const firstBuild = ops.findIndex(w => w.op === 'updatePerson' && w.payload.skipbuild !== true)
+        expect(firstQueue).toBeGreaterThanOrEqual(0)
+        expect(firstQueue).toBeLessThan(firstBuild)
+      })
+
+      it('while the persons are written, the waiting list is kept up to date every 5 persons, so a run that stops half way loses at most 4', async () => {
+        strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 20 })]
+        const letters = 'ABCDEFGH'.split('')
+        fiona.state.guestbooks.set(GB, guestbookWith(...letters.map((letter, i) => accreditation(`acc${i}`, `fp${i}`, BADGE_PRO, 'Paid'))))
+        letters.forEach((letter, i) => fiona.state.persons.set(`fp${i}`, { firstName: letter, lastName: letter, email: `${letter.toLowerCase()}@a.ee` }))
+
+        await runSync({}, deps)
+
+        const ops = strapi.state.writes
+        const creates = ops.map((w, i) => [w, i]).filter(([w]) => w.op === 'createPerson').map(([, i]) => i)
+        const queueSaves = ops.map((w, i) => [w, i]).filter(([w]) => w.op === 'saveSyncJob' && Array.isArray(w.payload.build_queue) && w.payload.build_queue.length === 5).map(([, i]) => i)
+        expect(creates).toHaveLength(8)
+        expect(queueSaves.length).toBeGreaterThan(0)
+        expect(queueSaves[0]).toBeGreaterThan(creates[4]) // after the 5th person was written
+        expect(queueSaves[0]).toBeLessThan(creates[5]) // before the 6th
+      })
+
+      it('the final waiting list replaces the early ones: persons that were built are not waiting any more', async () => {
+        strapi.state.rules = [TEAM_RULE, buildRule({ target_builds_limit_per_run: 20 })]
+        three()
+
+        await runSync({}, deps)
+
+        expect(touches()).toHaveLength(3)
+        expect(strapi.state.syncJob.build_queue).toEqual([])
+      })
+    })
   })
 
   describe('run modes and job state', () => {
