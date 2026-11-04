@@ -34,6 +34,7 @@ import { assessSameName, collectFionaFilms } from './filmEvidence.js'
 export const JOB_KEY = 'accreditations'
 const MAX_LISTED_HOLDS = 1000 // the held-back Fiona persons the result lists (the count is always complete)
 const MAX_LISTED_MATCHES = 20 // the shared films the result lists per held-back person
+const BUILD_QUEUE_SAVE_EVERY = 5 // while persons are written, the waiting list in the job entry is brought up to date after this many persons that need a build
 const RELEVANT_ENTITIES = new Set(['Accreditation', 'AccreditationBadge', 'Person'])
 const MUTATION_OVERLAP_MS = 5 * 60 * 1000
 const JOB_TIME_ZONE = 'Europe/Tallinn'
@@ -241,9 +242,9 @@ export function decideAutoMode (job, nowDate) {
 }
 
 /**
- * @param {object} [options.only]  a TEST run: { ruleIds, maxPersons, scope, decisions }. With `decisions` ([{ fionaPersonId, action: 'adopt', personId } | { fionaPersonId, action: 'create' }]) it is a DECISION run: only those Fiona persons are handled (rules are not needed), nothing is removed and no waiting build is touched. Only persons that one of these rules matches are
- *   handled (scope 'new' = only persons Strapi does not hold yet, 'existing' = only those it already holds), at most maxPersons are written, and no state is saved in the job entry (a test can neither start, delay
- *   nor shorten the real import). Everything else (users, roles, editions, photos, emails, builds) is the real thing.
+ * @param {object} [options.only]  a TEST run: { ruleIds, maxPersons, scope, decisions }. With `decisions` ([{ fionaPersonId, action: 'adopt', personId } | { fionaPersonId, action: 'create' }]) it is a DECISION run: only those Fiona persons are handled (rules are not needed), nothing is removed and the waiting builds already on the list are left as they are. Only persons that one of these rules matches are
+ *   handled (scope 'new' = only persons Strapi does not hold yet, 'existing' = only those it already holds), at most maxPersons are written, and no state is saved in the job entry except the waiting list of persons whose page is still to be built (a test can neither start, delay
+ *   nor shorten the real import, but no person it writes is left without a page). Everything else (users, roles, editions, photos, emails, builds) is the real thing.
  */
 export async function runSync ({ dryRun = false, force = false, mode = 'full', backlog = false, only = null } = {}, deps) {
   // what a person decided about a Fiona person the sync held back: 'adopt' = it is this Strapi person, 'create' = it is a new person
@@ -665,6 +666,27 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   const buildCandidates = []
   const removedIds = []
 
+  // The persons whose page still has to be built wait in the job entry's build_queue. Every run that writes persons keeps that
+  // list up to date AS IT GOES (every few persons, and once more before the first build), so a run that stops half way (an
+  // app restart, a crash) loses no page. A test or decision run saves nothing else in the job entry, but the persons it wrote
+  // and could not build yet go on the list too; the ordinary runs build them, a limit amount each time.
+  const canKeepBuildQueue = () => Boolean(job && 'build_queue' in job && typeof strapi.saveSyncJob === 'function')
+  const queueBefore = normalizeBuildQueue(job?.build_queue)
+  let queuedCandidates = 0 // how many of buildCandidates the saved list already holds
+  const keepBuildQueue = async (queue) => {
+    if (dryRun || !canKeepBuildQueue()) return
+    try {
+      await strapi.saveSyncJob(job.id, { build_queue: queue })
+    } catch (err) {
+      fail('could not keep the persons to build on the waiting list', err)
+    }
+  }
+  const keepBuildCandidates = async () => {
+    if (buildCandidates.length === queuedCandidates) return
+    queuedCandidates = buildCandidates.length
+    await keepBuildQueue(mergeBuildQueue(queueBefore, buildCandidates, buildRules))
+  }
+
   // per rule: how many persons it matches and how many of them get the full profile (what a run would do, before it does it)
   stats.rules.detail = rules.map(rule => ({
     id: rule.id,
@@ -1071,7 +1093,10 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       if (detach.length) removedIds.push(Number(person.id))
       if (want.level === 2 && personChanged && !onlyPublicChanged) {
         const ruleIds = [...want.fullRuleIds].filter(id => buildRules.has(id))
-        if (ruleIds.length) buildCandidates.push({ personId: Number(person.id), ruleIds })
+        if (ruleIds.length) {
+          buildCandidates.push({ personId: Number(person.id), ruleIds })
+          if (buildCandidates.length % BUILD_QUEUE_SAVE_EVERY === 0) await keepBuildCandidates()
+        }
       }
     } catch (err) {
       fail(`person ${fionaPersonId}`, err)
@@ -1139,6 +1164,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
     stats.build.queued = mergeBuildQueue(waitingBefore, [], buildRules).length
   } else {
     stats.build.candidates = buildCandidates.length
+    await keepBuildCandidates() // before the first build: from here on a run that stops loses no page
     const allowance = new Map([...buildRules].map(([id, rule]) => [id, rule.targetBuildsLimitPerRun ?? maxBuildsPerRun]))
     const waiting = []
     const built = []
@@ -1163,8 +1189,14 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
     stats.build.queued = waiting.length
     // the waiting list lives in the job entry's build_queue field; an entry without that field (not created yet)
     // cannot keep it, and writing an unknown field must not break saving the rest of the job state
-    if (job && 'build_queue' in job && typeof strapi.saveSyncJob === 'function') {
-      buildQueue = waiting
+    if (canKeepBuildQueue()) {
+      if (only) {
+        // a test or decision run leaves what was waiting as it was and adds its own persons that got no build now
+        const own = new Set(buildCandidates.map(candidate => candidate.personId))
+        if (own.size) await keepBuildQueue(mergeBuildQueue(queueBefore, waiting.filter(entry => own.has(entry.personId)), buildRules))
+      } else {
+        buildQueue = waiting
+      }
       if (waiting.length) log.info(`${built.length} persons built now, ${waiting.length} wait for the next runs`)
     } else if (waiting.length) {
       warn(`${waiting.length} persons are not built yet and the fiona-sync-job entry has no build_queue field to keep them waiting — run a full build + publish from the Strapi admin`)

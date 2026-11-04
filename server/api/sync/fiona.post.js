@@ -89,7 +89,8 @@
  *                — what to do with Fiona persons the sync held back ("needsDecision" in the stats: a person with this name or
  *                e-mail may already be in Strapi). "adopt" gives the Fiona person to that Strapi person (the Fiona ids are
  *                written there), "create" makes a new person. Only those Fiona persons are handled, nothing is removed, no
- *                job state is saved. ALWAYS a dry run unless dryRun is explicitly false.
+ *                job state is saved except the waiting list of persons whose page is still to be built: a run builds 20 pages at
+ *                most, the rest wait there for the ordinary runs, which build 20 per run. ALWAYS a dry run unless dryRun is explicitly false.
  *                { "mode": "badges" } or { "mode": "badges", "guestbookIds": [..] } — read-only: the badge types of the
  *                active (or the given) guestbooks with their ids, straight from the XAPI (the id is what a rule's
  *                badge_type_id matches on).
