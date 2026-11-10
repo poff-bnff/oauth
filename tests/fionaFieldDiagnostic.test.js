@@ -82,6 +82,28 @@ describe('outlineFields', () => {
     expect(find(fields, 'travel[].transport').values).toEqual(['plane'])
   })
 
+  it('shows which meeting programmes, schedules and roles an accreditation holds, but never the booked appointments', () => {
+    const fields = outlineFields({
+      meetingProgramParticipations: [
+        {
+          hideForMeetingRequests: false,
+          meetingProgram: { id: 'prog-1', description: 'Industry Meetings 2026', schedule: { id: 'sch-1', description: 'Tuesday afternoon' } },
+          role: { key: 'industry-representative', translations: [{ language: 'en', text: 'Industry representative', abbreviation: 'IR' }] }
+        }
+      ],
+      appointments: [{ id: 'appt-1', counterpart: { name: 'Some Other Person' }, note: 'private note' }]
+    })
+
+    expect(find(fields, 'meetingProgramParticipations[]').count).toBe(1)
+    expect(find(fields, 'meetingProgramParticipations[].meetingProgram.description').values).toEqual(['Industry Meetings 2026'])
+    expect(find(fields, 'meetingProgramParticipations[].meetingProgram.schedule.description').values).toEqual(['Tuesday afternoon'])
+    expect(find(fields, 'meetingProgramParticipations[].role.key').values).toEqual(['industry-representative'])
+    expect(find(fields, 'meetingProgramParticipations[].role.translations[].text').values).toEqual(['Industry representative'])
+    expect(find(fields, 'appointments[]').count).toBe(1)
+    expect(find(fields, 'appointments[].counterpart.name').values).toBeUndefined()
+    expect(find(fields, 'appointments[].note').values).toBeUndefined()
+  })
+
   it('shortens long values and keeps at most five distinct examples', () => {
     const many = Array.from({ length: 9 }, (_, i) => ({ category: `Category ${i % 7}` }))
     const fields = outlineFields({ items: many, programme: 'x'.repeat(300) })

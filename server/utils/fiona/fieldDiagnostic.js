@@ -15,7 +15,9 @@ const MAX_EXAMPLES = 5
 const MAX_VALUE_LENGTH = 80
 
 // field names whose values are what we are looking for; their values are not personal contact data
-const LOOKED_FOR = /countr|compan|organi[sz]|employer|categor|programme|occupation|profession|position|job|arriv|depart|trip|travel|flight|transport/i
+// (meetingProgram = the meeting programmes, schedules and roles an accreditation takes part in; the booked
+// `appointments` are NOT in the list: they name other people)
+const LOOKED_FOR = /countr|compan|organi[sz]|employer|categor|programme|meetingprogram|occupation|profession|position|job|arriv|depart|trip|travel|flight|transport/i
 
 const splitIds = value => String(value ?? '').split(',').map(id => id.trim()).filter(Boolean)
 
