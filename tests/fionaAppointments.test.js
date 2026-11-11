@@ -116,6 +116,24 @@ describe('normalizeAppointments', () => {
     ])
   })
 
+  it('has no role for a member whose role is "not set" (Fiona shows it as "-"), in an appointment and in a programme', () => {
+    const notSet = { key: 'not-set', translations: tr('-', '-', '-') }
+    const raw = card({
+      appointments: [blackCarpet({
+        members: [
+          { id: 'a', personId: 'fp-1', accreditationId: 'acc-1', personFullName: 'Anna', role: notSet },
+          { id: 'b', personId: 'fp-2', accreditationId: 'acc-2', personFullName: 'Bob', role: { key: 'host', translations: tr('Host', 'Saatejuht') } }
+        ]
+      })],
+      meetingProgramParticipations: [{ meetingProgram: { id: 'p', description: 'Film Market', schedule: { description: 'One-on-one meetings 2026' } }, role: notSet }]
+    })
+
+    const { appointments, programmes } = normalizeAppointments(raw)
+
+    expect(appointments[0].members.map(m => [m.name, m.role])).toEqual([['Anna', null], ['Bob', { key: 'host', text: 'Host' }]])
+    expect(programmes[0].role).toBeNull()
+  })
+
   it('is online when the appointment or its location is', () => {
     const raw = card({
       appointments: [
