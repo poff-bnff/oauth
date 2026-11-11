@@ -35,6 +35,7 @@ import { mergeBatch, repairSlugsBatch, purgeArchivedBatch } from './fiona/person
 import { explainPersons } from './fiona/explainPerson.js'
 import { lostEditionsReport } from './fiona/lostEditions.js'
 import { listBadgeTypes } from './fiona/badgeTypes.js'
+import { appointmentsReport } from './fiona/myAppointments.js'
 
 const config = useRuntimeConfig()
 
@@ -93,7 +94,18 @@ function buildFionaClient () {
   throw new Error(`NUXT_FIONA_CLIENT=${client} is not supported — use 'xapi' or 'publication'`)
 }
 
-function buildStrapiGateway () {
+/** The Fiona Publication API client alone (the appointments of the festival site read its raw cards). */
+export function buildPublicationClient () {
+  if (!config.fionaPublicationApiKey) throw new Error('NUXT_FIONA_PUBLICATION_API_KEY is not configured')
+  return createPublicationClient({
+    fetch: $fetch,
+    apiKey: config.fionaPublicationApiKey,
+    ...(config.fionaPublicationApiUrl ? { baseUrl: config.fionaPublicationApiUrl } : {}),
+    log
+  })
+}
+
+export function buildStrapiGateway () {
   return createStrapiGateway({
     fetch: $fetch,
     config,
@@ -209,6 +221,8 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
   if (mode === 'purge') return await purgeArchivedBatch({ pairs: mergePairs, strapi: buildStrapiGateway(), dryRun, log })
   // read-only: persons the sync created that have a same-name person it does not manage (duplicates), in tiers
   if (mode === 'twins') return await buildTwinReport({ strapi: buildStrapiGateway(), log })
+  // read-only: what the festival site shows a person on /my-events (appointments and meeting programmes), read from Fiona now
+  if (mode === 'appointments') return { mode, ...(await appointmentsReport({ personIds, strapi: buildStrapiGateway(), publication: buildPublicationClient(), log })) }
   // read-only: the raw field structure of a few persons from both Fiona APIs (where is a value kept?)
   if (mode === 'fields') {
     if (!config.fionaPublicationApiKey) throw new Error('fields needs NUXT_FIONA_PUBLICATION_API_KEY')

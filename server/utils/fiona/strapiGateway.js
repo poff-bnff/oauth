@@ -142,6 +142,17 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return first(await get(`/people?fiona_person_id=${encodeURIComponent(fionaPersonId)}&_limit=1`))
     },
 
+    /** The persons of several Fiona person ids, at most 40 ids per request (the profile links of a person's appointments). */
+    async findPeopleByFionaIds (fionaPersonIds) {
+      const ids = [...new Set((Array.isArray(fionaPersonIds) ? fionaPersonIds : []).map(id => String(id ?? '').trim()).filter(Boolean))]
+      const found = []
+      for (let start = 0; start < ids.length; start += 40) {
+        const filter = ids.slice(start, start + 40).map(id => `fiona_person_id_in=${encodeURIComponent(id)}`).join('&')
+        found.push(...asList(await get(`/people?${filter}&_limit=-1`)))
+      }
+      return found
+    },
+
     /**
      * Every person whose e-mail is this address, whatever the case of the letters, lowest id first. Strapi's own filter
      * is a case-insensitive "contains", so the hits are narrowed to the exact address here.

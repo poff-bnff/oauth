@@ -26,6 +26,9 @@
  *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
  *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
  *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
+ *                { "mode": "appointments", "personIds": [..] } — read-only, at most 5 persons (Strapi ids): exactly what the festival site's
+ *                GET /api/my/appointments shows that person (booked appointments with the people in them, meeting programmes), read from
+ *                the Fiona Publication API now (no cache). Includes the names of the other people; the endpoint is secret-protected.
  *                { "mode": "explain", "personIds": [..] } — read-only, at most 10 persons (Strapi ids): why does a person have or lack a
  *                festival edition or role? Shows the sync's fields on the person, the badges of each accreditation with their status,
  *                which rules match them (full profile, basic only, status not listed) and the editions and roles those give, what the
@@ -137,7 +140,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
