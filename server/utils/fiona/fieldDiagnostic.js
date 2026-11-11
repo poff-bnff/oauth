@@ -15,9 +15,10 @@ const MAX_EXAMPLES = 5
 const MAX_VALUE_LENGTH = 80
 
 // field names whose values are what we are looking for; their values are not personal contact data
-// (meetingProgram = the meeting programmes, schedules and roles an accreditation takes part in; the booked
-// `appointments` are NOT in the list: they name other people)
+// (meetingProgram = the meeting programmes, schedules and roles an accreditation takes part in)
 const LOOKED_FOR = /countr|compan|organi[sz]|employer|categor|programme|meetingprogram|occupation|profession|position|job|arriv|depart|trip|travel|flight|transport/i
+// what, when and where a booked appointment is; NOT the people in it (members[].personFullName / personId are never shown)
+const APPOINTMENT_DETAILS = /^appointments\[\]\.(?:startsOn|endsOn|subject|isOnline|showId|filmId|table|publicationNotes|appointmentType\.|location\.)/
 
 const splitIds = value => String(value ?? '').split(',').map(id => id.trim()).filter(Boolean)
 
@@ -47,7 +48,7 @@ export function outlineFields (root) {
     if (example !== undefined && entry.values.size < MAX_EXAMPLES) entry.values.add(shorten(example))
   }
 
-  const showsValue = path => LOOKED_FOR.test(path) || /(?:^|\.)key$/.test(path)
+  const showsValue = path => LOOKED_FOR.test(path) || APPOINTMENT_DETAILS.test(path) || /(?:^|\.)key$/.test(path)
 
   function walk (value, path) {
     if (Array.isArray(value)) {

@@ -104,6 +104,38 @@ describe('outlineFields', () => {
     expect(find(fields, 'appointments[].note').values).toBeUndefined()
   })
 
+  it('shows what, when and where a booked appointment is, but never the names of the people in it', () => {
+    const fields = outlineFields({
+      appointments: [{
+        id: 'appt-1',
+        appointmentType: { key: 'black-carpet', translations: [{ language: 'en', text: 'Black carpet', abbreviation: 'BC' }] },
+        startsOn: '2026-11-14T16:30:00Z',
+        endsOn: '2026-11-14T17:00:00Z',
+        subject: 'Some Film - black carpet',
+        isOnline: false,
+        location: { id: 'loc-1', description: 'Solaris', isOnline: false, abbreviation: null },
+        showId: 'show-1',
+        filmId: null,
+        table: null,
+        publicationNotes: null,
+        members: [{ personFullName: 'Some Other Person', personId: 'p-1', accreditationId: 'a-1', role: { key: 'film-maker', translations: [] } }]
+      }]
+    })
+
+    expect(find(fields, 'appointments[].appointmentType.key').values).toEqual(['black-carpet'])
+    expect(find(fields, 'appointments[].startsOn').values).toEqual(['2026-11-14T16:30:00Z'])
+    expect(find(fields, 'appointments[].endsOn').values).toEqual(['2026-11-14T17:00:00Z'])
+    expect(find(fields, 'appointments[].subject').values).toEqual(['Some Film - black carpet'])
+    expect(find(fields, 'appointments[].isOnline').values).toEqual(['false'])
+    expect(find(fields, 'appointments[].location.description').values).toEqual(['Solaris'])
+    expect(find(fields, 'appointments[].showId').values).toEqual(['show-1'])
+    expect(find(fields, 'appointments[].members[]').count).toBe(1)
+    expect(find(fields, 'appointments[].members[].role.key').values).toEqual(['film-maker'])
+    expect(find(fields, 'appointments[].members[].personFullName').values).toBeUndefined()
+    expect(find(fields, 'appointments[].members[].personId').values).toBeUndefined()
+    expect(find(fields, 'appointments[].id').values).toBeUndefined()
+  })
+
   it('shortens long values and keeps at most five distinct examples', () => {
     const many = Array.from({ length: 9 }, (_, i) => ({ category: `Category ${i % 7}` }))
     const fields = outlineFields({ items: many, programme: 'x'.repeat(300) })
