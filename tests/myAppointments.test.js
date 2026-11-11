@@ -291,6 +291,22 @@ describe('appointmentsReport', () => {
     expect(publication.getRaw).toHaveBeenCalledTimes(1)
   })
 
+  it('adds a short summary of the card for an accreditation id: whose it is, when it was published, which badge, and whether it exists at all', async () => {
+    const strapi = strapiOf({})
+    const publication = publicationWith({
+      'acc-1': { nameOnBadge: 'Jaan Leppik', publishedOn: '2026-11-03T10:00:00Z', status: { description: 'Approved' }, guestbook: { description: 'PÖFF 30' }, badges: [{ guestbookBadge: { description: 'Staff' } }, { guestbookBadge: {} }], appointments: [], email: 'must@not.leak' },
+      'acc-404': httpError(404),
+      'acc-500': httpError(500)
+    })
+
+    const report = await appointmentsReport({ accreditationIds: ['acc-1', 'acc-404', 'acc-500'], strapi, publication, log: silent })
+    const card = Object.fromEntries(report.persons.map(p => [p.accreditationIds[0], p.card]))
+
+    expect(card['acc-1']).toEqual({ found: true, nameOnBadge: 'Jaan Leppik', publishedOn: '2026-11-03T10:00:00Z', status: 'Approved', guestbook: 'PÖFF 30', badges: ['Staff'] })
+    expect(card['acc-404']).toEqual({ found: false })
+    expect(card['acc-500']).toEqual({ found: null })
+  })
+
   it('takes Strapi persons and accreditation ids together, at most 5 in all', async () => {
     const strapi = strapiOf({ 77: { id: 77, firstNameLastName: 'A', fiona_person_id: 'fp-me', fiona_accreditation_id: 'acc-1' } })
     const publication = publicationWith({ 'acc-1': { appointments: [] }, 'acc-2': { appointments: [] } })
