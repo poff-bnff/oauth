@@ -27,10 +27,11 @@ function pickTranslation (translations, lang) {
   return list.find(item => item.language === lang) ?? list.find(item => item.language === 'en') ?? list[0] ?? null
 }
 
-/** { key, text } of a lookup with translations (a role), or null when there is nothing to show. */
+/** { key, text } of a lookup with translations (a role), or null when there is nothing to show ("not set" is shown as "-" in Fiona). */
 function lookup (raw, lang) {
   if (!isRecord(raw)) return null
   const key = text(raw.key)
+  if (key === NOT_SET) return null
   const label = text(pickTranslation(raw.translations, lang)?.text)
   if (!key && !label) return null
   return { key, text: label }
