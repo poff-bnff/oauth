@@ -87,6 +87,33 @@ describe('createStrapiGateway', () => {
     expect(calls[1].url).toBe(`${STRAPI}/people/9`)
   })
 
+  describe('findPeopleByFionaIds', () => {
+    it('reads the persons of several Fiona ids in one request and asks for nothing when the list is empty', async () => {
+      const { fetch, calls } = fakeFetch({ 'GET /people?fiona_person_id_in=': [{ id: 1, fiona_person_id: 'a' }] })
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+
+      expect(await gateway.findPeopleByFionaIds(['a', 'b c'])).toEqual([{ id: 1, fiona_person_id: 'a' }])
+      expect(calls[0].url).toBe(`${STRAPI}/people?fiona_person_id_in=a&fiona_person_id_in=b%20c&_limit=-1`)
+      expect(calls[0].headers.Authorization).toBe('Bearer ADMIN')
+
+      expect(await gateway.findPeopleByFionaIds([])).toEqual([])
+      expect(await gateway.findPeopleByFionaIds(['', null, undefined])).toEqual([])
+      expect(calls).toHaveLength(1)
+    })
+
+    it('asks for 40 ids at most per request and joins the answers', async () => {
+      const { fetch, calls } = fakeFetch({ 'GET /people?fiona_person_id_in=': () => [{ id: calls.length }] })
+      const gateway = createStrapiGateway({ fetch, ...deps() })
+      const ids = Array.from({ length: 85 }, (_, i) => `id-${i}`)
+
+      const found = await gateway.findPeopleByFionaIds([...ids, 'id-0']) // a repeated id is asked once
+
+      expect(calls).toHaveLength(3)
+      expect(calls.map(call => (call.url.match(/fiona_person_id_in=/g) || []).length)).toEqual([40, 40, 5])
+      expect(found).toHaveLength(3)
+    })
+  })
+
   describe('findPeopleByEmail', () => {
     it('asks Strapi for a case-insensitive match and keeps only the persons whose e-mail is exactly this one, lowest id first', async () => {
       const urls = []
