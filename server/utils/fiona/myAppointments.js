@@ -141,6 +141,22 @@ export async function appointmentsForPerson ({ person, publication, strapi, lang
   return response
 }
 
+/** Who a card belongs to and how old it is, for the check mode: no contact details, only what is printed on a badge. */
+function cardSummary (read) {
+  if (!read) return { found: null }
+  const raw = read.value
+  if (!raw || typeof raw !== 'object') return { found: false }
+  const text = value => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '')
+  return {
+    found: true,
+    nameOnBadge: text(raw.nameOnBadge),
+    publishedOn: text(raw.publishedOn),
+    status: text(raw.status?.description) || text(raw.status?.key),
+    guestbook: text(raw.guestbook?.description),
+    badges: asList(raw.badges).map(badge => text(badge?.guestbookBadge?.description)).filter(Boolean)
+  }
+}
+
 const REPORT_MAX_PERSONS = 5
 const ACCREDITATION_ID = /^[A-Za-z0-9-]{3,64}$/
 
@@ -186,8 +202,10 @@ export async function appointmentsReport ({ personIds = [], accreditationIds = [
   for (const accreditationId of accreditations) {
     if (!ACCREDITATION_ID.test(accreditationId)) { result.skipped.push({ accreditationId, reason: 'is not a Fiona accreditation id' }); continue }
     // no Strapi person: the user is recognised among the members by the accreditation id alone
-    const appointments = await appointmentsForPerson({ person: { fiona_person_id: null, fiona_accreditation_id: accreditationId }, publication, strapi, lang, ...fresh(), log })
-    result.persons.push({ personId: null, name: `Fiona accreditation ${accreditationId}`, accreditationIds: [accreditationId], ...appointments })
+    const caches = fresh()
+    const appointments = await appointmentsForPerson({ person: { fiona_person_id: null, fiona_accreditation_id: accreditationId }, publication, strapi, lang, ...caches, log })
+    const read = caches.cards.fresh(accreditationId) // the card appointmentsForPerson has just read: null = not published, none = Fiona could not be read
+    result.persons.push({ personId: null, name: `Fiona accreditation ${accreditationId}`, accreditationIds: [accreditationId], card: cardSummary(read), ...appointments })
   }
   return result
 }
