@@ -277,6 +277,31 @@ describe('appointmentsReport', () => {
     expect(report).toEqual({ persons: [], skipped: [{ personId: 1, reason: 'could not be read: strapi down' }] })
   })
 
+  it('reads a card by its Fiona accreditation id when there is no Strapi person for it, and marks the user among the members by that id', async () => {
+    const strapi = strapiOf({}, [listed('fp-2', 'anna-counterpart')])
+    const publication = publicationWith({ 'acc-1': { appointments: [appointment('a', '2026-11-09T10:30:00.000Z')] } })
+
+    const report = await appointmentsReport({ accreditationIds: ['acc-1', ' acc-1 ', 'not an id!'], strapi, publication, log: silent })
+
+    expect(report.persons).toHaveLength(1)
+    expect(report.persons[0]).toMatchObject({ personId: null, name: 'Fiona accreditation acc-1', accreditationIds: ['acc-1'], ok: true })
+    expect(report.persons[0].appointments[0].members.map(m => [m.name, m.isMe, m.slug])).toEqual([['Me', true, null], ['Anna Counterpart', false, 'anna-counterpart']])
+    expect(report.skipped).toEqual([{ accreditationId: 'not an id!', reason: 'is not a Fiona accreditation id' }])
+    expect(strapi.findPersonById).not.toHaveBeenCalled()
+    expect(publication.getRaw).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes Strapi persons and accreditation ids together, at most 5 in all', async () => {
+    const strapi = strapiOf({ 77: { id: 77, firstNameLastName: 'A', fiona_person_id: 'fp-me', fiona_accreditation_id: 'acc-1' } })
+    const publication = publicationWith({ 'acc-1': { appointments: [] }, 'acc-2': { appointments: [] } })
+
+    const report = await appointmentsReport({ personIds: [77], accreditationIds: ['acc-2'], strapi, publication, log: silent })
+    expect(report.persons.map(p => p.name)).toEqual(['A', 'Fiona accreditation acc-2'])
+
+    await expect(appointmentsReport({ personIds: [1, 2, 3], accreditationIds: ['acc-aaaa1', 'acc-aaaa2', 'acc-aaaa3'], strapi, publication })).rejects.toThrow(/at most 5/)
+    await expect(appointmentsReport({ personIds: [], accreditationIds: [], strapi, publication })).rejects.toThrow(/personIds.*or accreditationIds/)
+  })
+
   it('refuses an empty list and more than 5 persons', async () => {
     const strapi = strapiOf({})
 
