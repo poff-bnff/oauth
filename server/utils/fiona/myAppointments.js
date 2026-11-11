@@ -142,19 +142,27 @@ export async function appointmentsForPerson ({ person, publication, strapi, lang
 }
 
 const REPORT_MAX_PERSONS = 5
+const ACCREDITATION_ID = /^[A-Za-z0-9-]{3,64}$/
 
 /**
- * Read-only check (mode `appointments` of the sync endpoint): for a few Strapi persons, exactly what the festival
- * site would show them, read from Fiona now (fresh caches, so nothing old is shown). Names of the people in the
- * appointments are included: the endpoint is secret-protected.
- * @param {{ personIds: number[], lang?: string, strapi: object, publication: object, log?: object }} options
- * @returns {Promise<{ persons: object[], skipped: { personId: number, reason: string }[] }>}
+ * Read-only check (mode `appointments` of the sync endpoint): for a few Strapi persons - or Fiona accreditation ids,
+ * for someone the sync does not manage - exactly what the festival site would show them, read from Fiona now (fresh
+ * caches, so nothing old is shown). Names of the people in the appointments are included: the endpoint is
+ * secret-protected.
+ * @param {{ personIds?: number[], accreditationIds?: string[], lang?: string, strapi: object, publication: object, log?: object }} options
+ *   personIds + accreditationIds together: at most 5
+ * @returns {Promise<{ persons: object[], skipped: object[] }>}
  */
-export async function appointmentsReport ({ personIds = [], lang = 'en', strapi, publication, log = console } = {}) {
+export async function appointmentsReport ({ personIds = [], accreditationIds = [], lang = 'en', strapi, publication, log = console } = {}) {
   const ids = [...new Set((Array.isArray(personIds) ? personIds : []).map(Number).filter(id => Number.isInteger(id) && id > 0))]
-  if (!ids.length) throw new Error('appointmentsReport needs personIds (Strapi person ids)')
-  if (ids.length > REPORT_MAX_PERSONS) throw new Error(`appointmentsReport handles at most ${REPORT_MAX_PERSONS} persons per call`)
+  const accreditations = [...new Set((Array.isArray(accreditationIds) ? accreditationIds : []).map(id => String(id ?? '').trim()).filter(Boolean))]
+  if (!ids.length && !accreditations.length) throw new Error('appointmentsReport needs personIds (Strapi person ids) or accreditationIds')
+  if (ids.length + accreditations.length > REPORT_MAX_PERSONS) throw new Error(`appointmentsReport handles at most ${REPORT_MAX_PERSONS} persons and accreditations per call`)
 
+  const fresh = () => ({
+    cards: createCache({ ttlMs: CARD_TTL_MS, staleMs: CARD_STALE_MS }),
+    profiles: createCache({ ttlMs: PROFILE_TTL_MS })
+  })
   const result = { persons: [], skipped: [] }
   for (const id of ids) {
     let person
@@ -167,21 +175,19 @@ export async function appointmentsReport ({ personIds = [], lang = 'en', strapi,
     if (!person) { result.skipped.push({ personId: id, reason: 'not found' }); continue }
     if (!person.fiona_person_id) { result.skipped.push({ personId: id, reason: 'is not managed by the Fiona sync (no Fiona person id)' }); continue }
 
-    const appointments = await appointmentsForPerson({
-      person,
-      publication,
-      strapi,
-      lang,
-      cards: createCache({ ttlMs: CARD_TTL_MS, staleMs: CARD_STALE_MS }),
-      profiles: createCache({ ttlMs: PROFILE_TTL_MS }),
-      log
-    })
+    const appointments = await appointmentsForPerson({ person, publication, strapi, lang, ...fresh(), log })
     result.persons.push({
       personId: id,
       name: person.firstNameLastName || [person.firstName, person.lastName].filter(Boolean).join(' '),
       accreditationIds: splitIds(person.fiona_accreditation_id),
       ...appointments
     })
+  }
+  for (const accreditationId of accreditations) {
+    if (!ACCREDITATION_ID.test(accreditationId)) { result.skipped.push({ accreditationId, reason: 'is not a Fiona accreditation id' }); continue }
+    // no Strapi person: the user is recognised among the members by the accreditation id alone
+    const appointments = await appointmentsForPerson({ person: { fiona_person_id: null, fiona_accreditation_id: accreditationId }, publication, strapi, lang, ...fresh(), log })
+    result.persons.push({ personId: null, name: `Fiona accreditation ${accreditationId}`, accreditationIds: [accreditationId], ...appointments })
   }
   return result
 }
