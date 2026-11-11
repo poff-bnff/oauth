@@ -26,7 +26,8 @@
  *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
  *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
  *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
- *                { "mode": "appointments", "personIds": [..] } — read-only, at most 5 persons (Strapi ids): exactly what the festival site's
+ *                { "mode": "appointments", "personIds": [..], "accreditationIds": [..] } — read-only, at most 5 persons (Strapi ids) and
+ *                Fiona accreditation ids together (the latter for people the sync does not manage, who have no Fiona ids in Strapi): exactly what the festival site's
  *                GET /api/my/appointments shows that person (booked appointments with the people in them, meeting programmes), read from
  *                the Fiona Publication API now (no cache). Includes the names of the other people; the endpoint is secret-protected.
  *                { "mode": "explain", "personIds": [..] } — read-only, at most 10 persons (Strapi ids): why does a person have or lack a
@@ -152,6 +153,7 @@ export default defineEventHandler(async (event) => {
   const testMaxPersons = Number(body?.testMaxPersons) > 0 ? Number(body.testMaxPersons) : 0
   const testScope = ['new', 'existing'].includes(body?.testScope) ? body.testScope : 'all'
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
+  const accreditationIds = Array.isArray(body?.accreditationIds) ? body.accreditationIds.map(String) : [] // appointments mode: Fiona accreditation ids of people the sync does not manage
   const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
   const testExtraFields = body?.extraFields === true // a test run only: write the extra values (country, companies, ...) even while the switch is off
   const testAdoptByFilm = body?.adoptByFilm === true // a test run only: adopt the same-name person a shared film confirms even while the NUXT_SYNC_ADOPT_BY_FILM switch is off
@@ -171,7 +173,7 @@ export default defineEventHandler(async (event) => {
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
 
   return { ok: true, stats }
 })
