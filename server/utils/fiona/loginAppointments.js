@@ -249,6 +249,23 @@ export async function appointmentsForUser ({ user, loadPerson, publication, xapi
   return answerFor(resolved, { publication, strapi, lang, cards, profiles, log })
 }
 
+/** appointmentsForUser with caches of its own: a probe reads the published card from Fiona every time instead of sharing hunt's live caches. */
+export function appointmentsForUserFresh ({ user, loadPerson, publication, xapi, strapi, lang = 'en', log = console } = {}) {
+  return appointmentsForUser({
+    user,
+    loadPerson,
+    publication,
+    xapi,
+    strapi,
+    lang,
+    log,
+    cards: createCache({ ttlMs: CARD_TTL_MS, staleMs: CARD_STALE_MS }),
+    profiles: createCache({ ttlMs: PROFILE_TTL_MS }),
+    index: createCache({ ttlMs: INDEX_TTL_MS, staleMs: INDEX_STALE_MS, maxEntries: 4 }),
+    found: createCache({ ttlMs: LOOKUP_TTL_MS, maxEntries: 50 })
+  })
+}
+
 /**
  * Read-only check (mode `appointments` with `userIds` of the sync endpoint): for a few Strapi users - any account of a
  * login, the main account is used - how the Fiona accreditation is found and what the festival site would show,
