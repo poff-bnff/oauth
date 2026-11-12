@@ -62,7 +62,7 @@ describe('liveAppointmentsReport', () => {
       userId: 5,
       accounts: 2,
       guestbooks: 1,
-      live: { ok: true, found: true, accreditations: 1, appointments: 2, programmes: [], errors: [], ms: 25 },
+      live: { ok: true, found: true, accreditations: 1, appointments: 2, programmes: [], errors: [], unknownAccounts: 1, ms: 25 },
       published: { ok: true, appointments: 3, programmes: [], ms: 25 },
       comparison: { live: 2, published: 3, same: 1, onlyInLive: [], onlyInPublished: ['gone'], different: [{ id: 'b', fields: ['subject'] }] }
     }])

@@ -5,9 +5,10 @@
  * Strapi user and its aliases, the ids Fiona knows as MyPoff accounts) and every active guestbook, the appointments
  * (with the people in them) and the meeting programme participations, merged. See xapiAppointments.js for the shapes.
  *
- * A 404 only means "Fiona has no account under that id" (an alias, or a login that never got an accreditation). Any other
- * failure makes the answer `ok: false`, so the caller can fall back to the published card instead of showing a half
- * answer as complete.
+ * A 404 or a 400 only means "Fiona has no account under that id" (an alias, or a login that never got an accreditation:
+ * Fiona answers 400 for an unknown external id, measured 2026-11-12); `unknownAccounts` counts such ids so that a systematic
+ * problem cannot hide. Any other failure makes the answer `ok: false`, so the caller can fall back to the published card
+ * instead of showing a half answer as complete.
  */
 import { normalizeXapiAppointments, normalizeXapiProgrammes } from './xapiAppointments.js'
 import { compareByTime } from './appointments.js'
@@ -17,7 +18,8 @@ const PROVIDER = 'MyPoff'
 const asList = value => (Array.isArray(value) ? value : [])
 const unique = list => [...new Set(list)]
 
-const isNotFound = err => err?.statusCode === 404 || err?.status === 404 || err?.response?.status === 404
+const NO_ACCOUNT_STATUSES = new Set([400, 404])
+const isNoAccount = err => NO_ACCOUNT_STATUSES.has(err?.statusCode ?? err?.status ?? err?.response?.status)
 
 const usable = value => value !== null && value !== undefined && String(value).trim() !== '' && Number(value) !== 0
 
@@ -28,7 +30,7 @@ const usable = value => value !== null && value !== undefined && String(value).t
  * @param {string[]} options.guestbookIds               the active guestbooks
  * @param {string} [options.lang]
  * @param {object[]} [options.publishedProgrammes]       programmes of the published card, for the role in each
- * @returns {Promise<{ ok: boolean, found: boolean, accreditationIds: string[], appointments: object[], programmes: object[], errors: Array<{ what: string, error: string }> }>}
+ * @returns {Promise<{ ok: boolean, found: boolean, accreditationIds: string[], appointments: object[], programmes: object[], errors: Array<{ what: string, error: string }>, unknownAccounts: number }>}
  */
 export async function readLiveAppointments ({ xapi, userIds = [], guestbookIds = [], lang = 'en', publishedProgrammes = [] } = {}) {
   const ids = unique(asList(userIds).filter(usable).map(id => String(id).trim()))
@@ -38,16 +40,16 @@ export async function readLiveAppointments ({ xapi, userIds = [], guestbookIds =
   for (const guestbook of guestbooks) {
     for (const id of ids) {
       const base = `/account/${PROVIDER}/${encodeURIComponent(id)}/guestbook/${encodeURIComponent(guestbook)}`
-      attempts.push({ what: 'appointments', path: `${base}/appointments?includeAttendees=true` })
-      attempts.push({ what: 'meetingprogramparticipations', path: `${base}/meetingprogramparticipations` })
+      attempts.push({ what: 'appointments', id, path: `${base}/appointments?includeAttendees=true` })
+      attempts.push({ what: 'meetingprogramparticipations', id, path: `${base}/meetingprogramparticipations` })
     }
   }
 
-  const outcomes = await Promise.all(attempts.map(async ({ what, path }) => {
+  const outcomes = await Promise.all(attempts.map(async ({ what, id, path }) => {
     try {
-      return { what, raw: await xapi.getRaw(path) }
+      return { what, id, raw: await xapi.getRaw(path) }
     } catch (err) {
-      return isNotFound(err) ? { what, notFound: true } : { what, error: String(err?.message || err) }
+      return isNoAccount(err) ? { what, id, noAccount: true } : { what, id, error: String(err?.message || err) }
     }
   }))
 
@@ -80,12 +82,19 @@ export async function readLiveAppointments ({ xapi, userIds = [], guestbookIds =
     }
   }
 
+  // ids for which every read said "no account" (an id whose reads partly failed for another reason is not "unknown")
+  const unknownAccounts = ids.filter((id) => {
+    const reads = outcomes.filter(outcome => outcome.id === id)
+    return reads.length > 0 && reads.every(outcome => outcome.noAccount === true)
+  }).length
+
   return {
     ok: errors.length === 0,
     found,
     accreditationIds,
     appointments: [...appointmentsById.values(), ...loose].sort(compareByTime),
     programmes,
-    errors
+    errors,
+    unknownAccounts
   }
 }
