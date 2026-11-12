@@ -36,6 +36,7 @@ import { explainPersons } from './fiona/explainPerson.js'
 import { lostEditionsReport } from './fiona/lostEditions.js'
 import { listBadgeTypes } from './fiona/badgeTypes.js'
 import { appointmentsReport } from './fiona/myAppointments.js'
+import { programmeReport } from './fiona/programmeReport.js'
 
 const config = useRuntimeConfig()
 
@@ -159,7 +160,7 @@ async function compareFionaSources () {
   return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
 }
 
-export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], testExtraFields = false, testAdoptByFilm = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [] } = {}) {
+export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], editionId = 0, testExtraFields = false, testAdoptByFilm = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [] } = {}) {
   if (mode === 'status') return statusReport()
   if (syncRunning) {
     log.warn('Sync already running — skipping this invocation')
@@ -167,17 +168,17 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
   }
   if (background) {
     // answer at once and let the run go on; its progress and result are asked for with mode "status"
-    runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions }).catch(err => log.error(`background run failed: ${err?.message || err}`))
+    runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions }).catch(err => log.error(`background run failed: ${err?.message || err}`))
     return { started: true, mode, dryRun, hint: 'ask {"mode":"status"} for its progress and result' }
   }
-  return await runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+  return await runTracked({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
 }
 
-async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions }) {
+async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions }) {
   syncRunning = true
   currentRun = { mode, dryRun, startedAt: new Date().toISOString(), stats: null }
   try {
-    const result = await runInner({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+    const result = await runInner({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
     lastRun = { mode, dryRun, startedAt: currentRun.startedAt, finishedAt: new Date().toISOString(), stats: result }
     return result
   } catch (err) {
@@ -189,7 +190,7 @@ async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbo
   }
 }
 
-async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions }) {
+async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions }) {
   if (mode === 'compare') return await compareFionaSources()
   // One-off tools for persons the sync made (Strapi person ids): send the Creative Gate "created" email again,
   // and list what Fiona holds as photos (read-only, XAPI).
@@ -223,6 +224,8 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
   if (mode === 'twins') return await buildTwinReport({ strapi: buildStrapiGateway(), log })
   // read-only: what the festival site shows a person on /my-events (appointments and meeting programmes), read from Fiona now
   if (mode === 'appointments') return { mode, ...(await appointmentsReport({ personIds, accreditationIds, strapi: buildStrapiGateway(), publication: buildPublicationClient(), log })) }
+  // read-only: the Programme/category chips of the Fiona card of everyone who holds a festival edition (default Industry@Tallinn 2026 = 114)
+  if (mode === 'programmes') return { mode, ...(await programmeReport({ strapi: buildStrapiGateway(), publication: buildPublicationClient(), editionId: editionId || 114, log })) }
   // read-only: the raw field structure of a few persons from both Fiona APIs (where is a value kept?)
   if (mode === 'fields') {
     if (!config.fionaPublicationApiKey) throw new Error('fields needs NUXT_FIONA_PUBLICATION_API_KEY')

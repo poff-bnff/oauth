@@ -17,6 +17,7 @@ const relationId = value => (value && typeof value === 'object') ? value.id : va
 // Everything that can point at a person, for the duplicate persons report and the merge: where to read it, and the
 // field names that hold a person there (credits sit inside components, so the whole entry is searched for them).
 const REFERENCE_PAGE = 100
+const PEOPLE_PAGE = 100
 const PERSON_KEYS = ['person', 'person_of_role']
 const REFERENCE_SOURCES = [
   { source: 'awarding', route: '/awardings', keys: ['person'] },
@@ -136,6 +137,37 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
     async findManagedPeople () {
       const people = await get('/people?fiona_person_id_null=false&_limit=-1')
       return Array.isArray(people) ? people : []
+    },
+
+    /**
+     * Every person who carries a festival edition, lowest id first, read in pages of 100 (read only). Strapi 3 filters a
+     * relation by id, but not every way of writing it is honoured: each one is tried on the cheap count first, and one that
+     * does not narrow the list (the count of everyone) is skipped, so the whole table is never read by mistake.
+     */
+    async findPeopleByEdition (editionId) {
+      const id = Number(editionId)
+      if (!Number.isInteger(id) || id <= 0 || String(editionId).trim() !== String(id)) throw new Error('findPeopleByEdition: the edition id must be a whole number')
+      const total = Number(await get('/people/count'))
+      let filter = null
+      for (const candidate of [`festival_editions=${id}`, `festival_editions.id=${id}`, `festival_editions_in=${id}`]) {
+        const count = Number(await get(`/people/count?${candidate}`))
+        if (Number.isFinite(count) && count > 0 && count < total) { filter = candidate; break }
+      }
+      if (!filter) throw new Error(`findPeopleByEdition: no way to filter the people of edition ${id} narrows the list`)
+
+      const seen = new Set()
+      const people = []
+      for (let start = 0; ; start += PEOPLE_PAGE) {
+        const page = asList(await get(`/people?${filter}&_sort=id:asc&_start=${start}&_limit=${PEOPLE_PAGE}`))
+        for (const person of page) {
+          const carries = asList(person?.festival_editions).some(edition => Number((edition && typeof edition === 'object') ? edition.id : edition) === id)
+          if (!carries || seen.has(person.id)) continue
+          seen.add(person.id)
+          people.push(person)
+        }
+        if (page.length < PEOPLE_PAGE) break
+      }
+      return people
     },
 
     async findPersonByFionaId (fionaPersonId) {

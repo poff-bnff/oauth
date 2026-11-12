@@ -636,3 +636,72 @@ describe('createStrapiGateway calls for merging persons', () => {
     ])
   })
 })
+
+describe('createStrapiGateway: findPeopleByEdition (read only)', () => {
+  const deps = () => ({
+    config: { strapiUrl: STRAPI },
+    getAdminToken: () => 'ADMIN',
+    getActiveFionaGuestbooks: () => [],
+    authenticateStrapiUser: () => null,
+    log: { warn () {}, info () {}, error () {} }
+  })
+  const withEdition = id => ({ id, festival_editions: [{ id: 59 }, { id: 114 }] })
+
+  /** A Strapi that knows `matching` persons of edition 114 out of `total`; `ignoredFilters` are filters it does not narrow by. */
+  function fakeStrapi ({ total = 40000, matching = 250, ignoredFilters = [], extra = [] } = {}) {
+    const urls = []
+    const everyone = Array.from({ length: matching }, (_, index) => withEdition(index + 1)).concat(extra)
+    const fetch = (url) => {
+      const path = url.replace(STRAPI, '')
+      urls.push(path)
+      if (path === '/people/count') return total
+      const countMatch = path.match(/^\/people\/count\?(.+)$/)
+      if (countMatch) return ignoredFilters.includes(countMatch[1]) ? total : (/festival_editions/.test(countMatch[1]) ? everyone.length : 0)
+      const listMatch = path.match(/^\/people\?(.+?)&_sort=id:asc&_start=(\d+)&_limit=(\d+)$/)
+      if (listMatch) return everyone.slice(Number(listMatch[2]), Number(listMatch[2]) + Number(listMatch[3]))
+      return []
+    }
+    return { fetch, urls }
+  }
+
+  it('reads the persons of the edition in pages of 100, lowest id first', async () => {
+    const { fetch, urls } = fakeStrapi({ matching: 250 })
+    const people = await createStrapiGateway({ fetch, ...deps() }).findPeopleByEdition(114)
+
+    expect(people).toHaveLength(250)
+    expect(people[0].id).toBe(1)
+    expect(urls.filter(path => path.startsWith('/people?'))).toEqual([
+      '/people?festival_editions=114&_sort=id:asc&_start=0&_limit=100',
+      '/people?festival_editions=114&_sort=id:asc&_start=100&_limit=100',
+      '/people?festival_editions=114&_sort=id:asc&_start=200&_limit=100'
+    ])
+  })
+
+  it('tries the next way of filtering when Strapi ignores one (its count is the count of everyone)', async () => {
+    const { fetch, urls } = fakeStrapi({ matching: 5, ignoredFilters: ['festival_editions=114'] })
+    const people = await createStrapiGateway({ fetch, ...deps() }).findPeopleByEdition(114)
+
+    expect(people).toHaveLength(5)
+    expect(urls.find(path => path.startsWith('/people?'))).toBe('/people?festival_editions.id=114&_sort=id:asc&_start=0&_limit=100')
+  })
+
+  it('refuses to read everyone when no way of filtering narrows the list', async () => {
+    const { fetch, urls } = fakeStrapi({ matching: 5, ignoredFilters: ['festival_editions=114', 'festival_editions.id=114', 'festival_editions_in=114'] })
+
+    await expect(createStrapiGateway({ fetch, ...deps() }).findPeopleByEdition(114)).rejects.toThrow(/no way to filter/i)
+    expect(urls.some(path => path.startsWith('/people?'))).toBe(false)
+  })
+
+  it('keeps only persons that really carry the edition, and each person once', async () => {
+    const { fetch } = fakeStrapi({ matching: 3, extra: [{ id: 99, festival_editions: [{ id: 59 }] }, withEdition(2)] })
+    const people = await createStrapiGateway({ fetch, ...deps() }).findPeopleByEdition(114)
+
+    expect(people.map(person => person.id)).toEqual([1, 2, 3])
+  })
+
+  it('takes a whole number only as the edition id', async () => {
+    const { fetch, urls } = fakeStrapi()
+    await expect(createStrapiGateway({ fetch, ...deps() }).findPeopleByEdition('114; drop')).rejects.toThrow(/edition id/i)
+    expect(urls).toEqual([])
+  })
+})
