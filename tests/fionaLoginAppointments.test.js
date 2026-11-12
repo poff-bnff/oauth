@@ -166,7 +166,7 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
 
     const result = await lookup(env)
 
-    expect(result).toEqual({ ok: true, fionaPersonId: 'fp-jaan', accreditationIds: ['acc-now'] })
+    expect(result).toMatchObject({ ok: true, fionaPersonId: 'fp-jaan', accreditationIds: ['acc-now'] })
   })
 
   it('accepts it when Fiona has the MyPoff user id of the login instead (the e-mail differs)', async () => {
@@ -180,7 +180,7 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
 
     const result = await lookup(env)
 
-    expect(result).toEqual({ ok: true, fionaPersonId: null, accreditationIds: [] })
+    expect(result).toMatchObject({ ok: true, fionaPersonId: null, accreditationIds: [] })
     expect(env.publication.getRaw).not.toHaveBeenCalledWith('/persons/fp-jaan')
   })
 
@@ -206,7 +206,7 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
 
     const result = await lookup(env, { identity: identityOf({ names: [] }) })
 
-    expect(result).toEqual({ ok: true, fionaPersonId: null, accreditationIds: [] })
+    expect(result).toMatchObject({ ok: true, fionaPersonId: null, accreditationIds: [] })
     expect(env.publication.getRaw).not.toHaveBeenCalled()
     expect(env.xapi.getPerson).not.toHaveBeenCalled()
   })
@@ -264,6 +264,40 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
     await lookup(env)
 
     expect(env.strapi.getActiveGuestbookIds).not.toHaveBeenCalled()
+  })
+
+  describe('trace: how the search went, without names or e-mails', () => {
+    it('says how each candidate fared: a namesake whose e-mail differs and that has no MyPoff id', async () => {
+      const env = setup({ fionaPersons: [fionaJaan({ email: 'namesake@example.com' })] })
+
+      const result = await lookup(env)
+
+      expect(result.trace).toEqual({ names: 1, candidates: [{ email: 'differs', myPoff: 'none' }] })
+    })
+
+    it('says "match" for the proof that settled it, and that the MyPoff id was not asked then', async () => {
+      const env = setup({ fionaPersons: [fionaJaan()] })
+
+      expect((await lookup(env)).trace.candidates).toEqual([{ email: 'match', myPoff: 'not-asked' }])
+    })
+
+    it('says "differs" for a MyPoff id that is not the login\'s, and "none" for a person without an e-mail', async () => {
+      const env = setup({ fionaPersons: [fionaJaan({ email: null, myPoffId: '99999' })] })
+
+      expect((await lookup(env)).trace.candidates).toEqual([{ email: 'none', myPoff: 'differs' }])
+    })
+
+    it('has no candidates when no person of Fiona has the name', async () => {
+      const env = setup({ fionaPersons: [fionaJaan({ fullName: 'Someone Else' })] })
+
+      expect((await lookup(env)).trace).toEqual({ names: 1, candidates: [] })
+    })
+
+    it('has no trace of a search that was not made (no names)', async () => {
+      const env = setup({ fionaPersons: [fionaJaan()] })
+
+      expect((await lookup(env, { identity: identityOf({ names: [] }) })).trace).toEqual({ names: 0, candidates: [] })
+    })
   })
 
   describe('caches', () => {
@@ -440,6 +474,15 @@ describe('loginAppointmentsReport: what a login would see, and how its accredita
     expect(result.persons[0]).toMatchObject({ userId: 22135, source: 'login', fionaPersonId: 'fp-jaan', accreditationIds: ['acc-now'], ok: true })
     expect(result.persons[0].appointments).toHaveLength(1)
     expect(result.persons[0].identity).toEqual({ accounts: 2, emails: 2, names: 1 })
+  })
+
+  it('adds how the search went (counts and match / differs only) to the report', async () => {
+    const env = setup({ fionaPersons: [fionaJaan({ email: 'namesake@example.com' })] })
+
+    const result = await report(env, [22135])
+
+    expect(result.persons[0].search).toEqual({ names: 1, candidates: [{ email: 'differs', myPoff: 'none' }] })
+    expect(JSON.stringify(result)).not.toContain('namesake@example.com')
   })
 
   it('does not put the e-mails or names of the login into the report', async () => {
