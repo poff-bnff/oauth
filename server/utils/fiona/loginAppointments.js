@@ -69,7 +69,7 @@ export async function loginIdentity (user, { loadPerson } = {}) {
   }
 }
 
-const NOT_FOUND = () => ({ ok: true, fionaPersonId: null, accreditationIds: [] })
+const NOT_FOUND = trace => ({ ok: true, fionaPersonId: null, accreditationIds: [], trace })
 
 /** normalized name → Fiona person ids, from the Publication list of persons (cached; the old copy serves when Fiona fails). */
 async function personIndex (publication, persons, log) {
@@ -90,24 +90,39 @@ async function personIndex (publication, persons, log) {
   }
 }
 
-/** 'yes' when Fiona says the person is the login; 'error' when Fiona could not be asked and nothing proved it. */
+/**
+ * Is a Fiona person this login? outcome 'yes' when Fiona's own record says so, 'error' when Fiona could not be asked and
+ * nothing proved it, else 'no'. `detail` says how each proof fared, without any value: email / myPoff is 'match',
+ * 'differs', 'none' (Fiona has no value), 'error' or (myPoff) 'not-asked' (the e-mail settled it).
+ */
 async function verify (fionaPersonId, { emails, userIds, xapi, log }) {
+  const detail = { email: 'none', myPoff: 'not-asked' }
   let errored = false
   try {
     const person = await xapi.getPerson(fionaPersonId)
     const email = lower(person?.email)
-    if (email && emails.has(email)) return 'yes'
+    if (email && emails.has(email)) {
+      detail.email = 'match'
+      return { outcome: 'yes', detail }
+    }
+    detail.email = email ? 'differs' : 'none'
   } catch (err) {
     errored = true
+    detail.email = 'error'
     log.warn?.(`[fiona appointments] person ${fionaPersonId} could not be checked: ${err?.message || err}`)
   }
   try {
     const myPoffId = await xapi.getMyPoffUserId(fionaPersonId)
-    if (myPoffId && userIds.has(String(myPoffId))) return 'yes'
+    if (myPoffId && userIds.has(String(myPoffId))) {
+      detail.myPoff = 'match'
+      return { outcome: 'yes', detail }
+    }
+    detail.myPoff = myPoffId ? 'differs' : 'none'
   } catch (err) {
     errored = true
+    detail.myPoff = 'error'
   }
-  return errored ? 'error' : 'no'
+  return { outcome: errored ? 'error' : 'no', detail }
 }
 
 /**
@@ -116,12 +131,12 @@ async function verify (fionaPersonId, { emails, userIds, xapi, log }) {
  * @param {{ getRaw: Function }} options.publication   Publication API client (list of persons, one person)
  * @param {{ getPerson: Function, getMyPoffUserId: Function }} options.xapi   XAPI client (the proof)
  * @param {{ getActiveGuestbookIds: Function }} options.strapi
- * @returns {Promise<{ ok: true, fionaPersonId: string|null, accreditationIds: string[] } | { ok: false }>}
+ * @returns {Promise<{ ok: true, fionaPersonId: string|null, accreditationIds: string[], trace: { names: number, candidates: object[] } } | { ok: false }>}
  *   ok false = Fiona could not be read well enough to tell (nothing is remembered then)
  */
 export async function findAccreditationsForLogin ({ identity, publication, xapi, strapi, persons = defaultPersons, found = defaultFound, log = console } = {}) {
   const names = asList(identity?.names)
-  if (!names.length) return NOT_FOUND()
+  if (!names.length) return NOT_FOUND({ names: 0, candidates: [] })
 
   const key = `login:${unique(asList(identity.userIds)).sort((a, b) => a - b).join(',') || asList(identity.emails).join(',')}`
   const known = found.fresh(key)
@@ -133,14 +148,16 @@ export async function findAccreditationsForLogin ({ identity, publication, xapi,
   const candidates = unique(names.flatMap(name => index.get(name) || [])).slice(0, MAX_CANDIDATES)
   const proof = { emails: new Set(asList(identity.emails).map(lower).filter(Boolean)), userIds: new Set(asList(identity.userIds).map(String)), xapi, log }
   const verified = []
+  const trace = { names: names.length, candidates: [] }
   let errored = false
   for (const id of candidates) {
-    const outcome = await verify(id, proof)
+    const { outcome, detail } = await verify(id, proof)
+    trace.candidates.push(detail)
     if (outcome === 'yes') verified.push(id)
     else if (outcome === 'error') errored = true
   }
 
-  let result = NOT_FOUND()
+  let result = NOT_FOUND(trace)
   if (verified.length) {
     let activeGuestbooks
     try {
@@ -163,7 +180,7 @@ export async function findAccreditationsForLogin ({ identity, publication, xapi,
       }
     }
     if (!accreditationIds.length && errored) return { ok: false }
-    result = { ok: true, fionaPersonId, accreditationIds: unique(accreditationIds) }
+    result = { ok: true, fionaPersonId, accreditationIds: unique(accreditationIds), trace }
   } else if (errored) {
     return { ok: false }
   }
@@ -200,7 +217,8 @@ async function resolveAccreditations ({ user, loadPerson, publication, xapi, str
     person: null,
     fionaPersonId: result.ok ? result.fionaPersonId : null,
     accreditationIds: result.ok ? result.accreditationIds : [],
-    identity
+    identity,
+    search: result.ok ? result.trace : null
   }
 }
 
@@ -260,6 +278,7 @@ export async function loginAppointmentsReport ({ userIds = [], lang = 'en', load
       source: resolved.source,
       fionaPersonId: resolved.fionaPersonId,
       accreditationIds: resolved.accreditationIds,
+      ...(resolved.search ? { search: resolved.search } : {}),
       ...(resolved.identity ? { identity: { accounts: resolved.identity.userIds.length, emails: resolved.identity.emails.length, names: resolved.identity.names.length } } : {}),
       ...appointments
     })
