@@ -31,6 +31,7 @@ import { renotifyPersons } from './fiona/renotify.js'
 import { describePhotos } from './fiona/photoDiagnostic.js'
 import { describeFionaFields } from './fiona/fieldDiagnostic.js'
 import { rolesReadReport } from './fiona/rolesReadReport.js'
+import { createRunBackoff } from './fiona/runBackoff.js'
 import { buildTwinReport } from './fiona/twinReport.js'
 import { mergeBatch, repairSlugsBatch, purgeArchivedBatch } from './fiona/personMerge.js'
 import { explainPersons } from './fiona/explainPerson.js'
@@ -54,6 +55,8 @@ let syncRunning = false
 // that lasts more than about ten minutes is cut by the platform while the run itself goes on.
 let currentRun = null
 let lastRun = null
+// The cron calls "auto" every minute; after a failed run the next try waits (15, 30, then 60 minutes) so a struggling Strapi is not hit again at once.
+const autoBackoff = createRunBackoff()
 
 const slimStats = stats => (stats ? { ...stats, dryRunActions: undefined, guestbookBadges: undefined, badgeStatuses: undefined } : null)
 
@@ -62,7 +65,8 @@ function statusReport () {
     mode: 'status',
     running: Boolean(currentRun),
     current: currentRun ? { mode: currentRun.mode, dryRun: currentRun.dryRun, startedAt: currentRun.startedAt, stats: slimStats(currentRun.stats) } : null,
-    last: lastRun
+    last: lastRun,
+    backoff: autoBackoff.state()
   }
 }
 
@@ -170,6 +174,13 @@ async function compareFionaSources () {
 
 export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], userIds = [], editionId = 0, testExtraFields = false, testAdoptByFilm = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [] } = {}) {
   if (mode === 'status') return statusReport()
+  if (mode === 'auto') {
+    const waiting = autoBackoff.check()
+    if (waiting) {
+      log.warn(`Auto run skipped: ${waiting.reason}`)
+      return { dryRun, mode, skipped: true, reason: waiting.reason }
+    }
+  }
   if (syncRunning) {
     log.warn('Sync already running — skipping this invocation')
     return { dryRun, mode, skipped: true, reason: 'already running' }
@@ -188,9 +199,11 @@ async function runTracked ({ dryRun, force, mode, personIds, all, probe, guestbo
   try {
     const result = await runInner({ dryRun, force, mode, personIds, all, probe, guestbookIds, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
     lastRun = { mode, dryRun, startedAt: currentRun.startedAt, finishedAt: new Date().toISOString(), stats: result }
+    if (mode === 'auto' && !result?.skipped) autoBackoff.succeeded() // a run that was only "not due" proves nothing
     return result
   } catch (err) {
     lastRun = { mode, dryRun, startedAt: currentRun.startedAt, finishedAt: new Date().toISOString(), error: err?.message || String(err) }
+    if (mode === 'auto') autoBackoff.failed()
     throw err
   } finally {
     currentRun = null
