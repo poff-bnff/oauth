@@ -20,7 +20,7 @@
  * server/api/sync/fiona.post.js (POST /api/sync/fiona, bearer NUXT_SYNC_SECRET).
  */
 
-import { getStrapiAdminToken, getActiveFionaGuestbooks, getStrapiUser, getStrapiPerson } from './strapi.js'
+import { getStrapiAdminToken, getActiveFionaGuestbooks, getStrapiUser, getStrapiPerson, fetchStrapiUserRolesGraphql, fetchStrapiUserRolesRest } from './strapi.js'
 import { createXapiClient } from './fiona/xapiClient.js'
 import { createPublicationClient } from './fiona/publicationClient.js'
 import { createHybridClient } from './fiona/hybridClient.js'
@@ -30,6 +30,7 @@ import { compareSources } from './fiona/compare.js'
 import { renotifyPersons } from './fiona/renotify.js'
 import { describePhotos } from './fiona/photoDiagnostic.js'
 import { describeFionaFields } from './fiona/fieldDiagnostic.js'
+import { rolesReadReport } from './fiona/rolesReadReport.js'
 import { buildTwinReport } from './fiona/twinReport.js'
 import { mergeBatch, repairSlugsBatch, purgeArchivedBatch } from './fiona/personMerge.js'
 import { explainPersons } from './fiona/explainPerson.js'
@@ -238,6 +239,9 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
     if (!userIds.length || personIds.length || accreditationIds.length) reports.push(await appointmentsReport({ personIds, accreditationIds, strapi, publication, log }))
     return { mode, persons: reports.flatMap(report => report.persons), skipped: reports.flatMap(report => report.skipped) }
   }
+  // read-only: can the user-roles be read without their users? "roles" times the GraphQL read (id + badge rules only); "rolesCompare"
+  // also does ONE heavy REST read (every role with every user, about 17 MB) and says whether the two agree
+  if (mode === 'roles' || mode === 'rolesCompare') return { mode, ...(await rolesReadReport({ graphql: fetchStrapiUserRolesGraphql, rest: mode === 'rolesCompare' ? fetchStrapiUserRolesRest : null })) }
   // read-only: the Programme/category chips of the Fiona card of everyone who holds a festival edition (default Industry@Tallinn 2026 = 114)
   if (mode === 'programmes') return { mode, ...(await programmeReport({ strapi: buildStrapiGateway(), publication: buildPublicationClient(), editionId: editionId || 114, log })) }
   // read-only: the raw field structure of a few persons from both Fiona APIs (where is a value kept?)

@@ -117,13 +117,34 @@ const ROLES_STALE_MS = 60 * 60_000
 let _rolesCache = null // { value, fetchedAt }
 let _rolesInFlight = null
 
+/** The heavy REST read: every role with every user of it. No cache; only the cached getStrapiUserRoles and the one-off probe call it. */
+export async function fetchStrapiUserRolesRest () {
+  const token = await getStrapiAdminToken()
+  return await $fetch(`${config.strapiUrl}/user-roles?_limit=-1`, { headers: { Authorization: `Bearer ${token}` } })
+}
+
+/**
+ * The same roles read through GraphQL, asking only for what login needs: each role's id and badge rules. GraphQL loads just
+ * the fields that are asked for, so none of the users of a role are read. Not used by login yet (see the `roles` probe mode).
+ */
+export async function fetchStrapiUserRolesGraphql () {
+  const token = await getStrapiAdminToken()
+  const answer = await $fetch(`${config.strapiUrl}/graphql`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: { query: '{ userRoles { id user_badges { badgeName badgeStatuses } } }' }
+  })
+  if (Array.isArray(answer?.errors) && answer.errors.length) throw new Error(`graphql: ${answer.errors.map(error => error?.message).join('; ')}`)
+  if (!Array.isArray(answer?.data?.userRoles)) throw new Error('graphql: no userRoles in the answer')
+  return answer.data.userRoles
+}
+
 export async function getStrapiUserRoles () {
   if (_rolesCache && Date.now() - _rolesCache.fetchedAt < ROLES_TTL_MS) return _rolesCache.value
 
   if (!_rolesInFlight) {
     _rolesInFlight = (async () => {
-      const token = await getStrapiAdminToken()
-      const value = await $fetch(`${config.strapiUrl}/user-roles?_limit=-1`, { headers: { Authorization: `Bearer ${token}` } })
+      const value = await fetchStrapiUserRolesRest()
       if (Array.isArray(value) && value.length) _rolesCache = { value, fetchedAt: Date.now() }
       return value
     })().finally(() => { _rolesInFlight = null })
