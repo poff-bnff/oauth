@@ -9,6 +9,7 @@ import { readLiveAppointments } from '../server/utils/fiona/liveAppointments.js'
 
 const GB = 'gb-1'
 const notFound = () => Object.assign(new Error('[GET] "…": 404 Not Found'), { statusCode: 404 })
+const badRequest = () => Object.assign(new Error('[GET] "…": 400 Bad Request'), { statusCode: 400 })
 
 const accountAnswer = (accreditationId, name, appointments) => ({
   Accreditation: { Id: accreditationId, Description: name },
@@ -59,7 +60,7 @@ describe('readLiveAppointments', () => {
 
     const result = await readLiveAppointments({ xapi, userIds: [5, 6, 7], guestbookIds: [GB] })
 
-    expect(result).toMatchObject({ ok: true, found: true, accreditationIds: ['acc-1'] })
+    expect(result).toMatchObject({ ok: true, found: true, accreditationIds: ['acc-1'], unknownAccounts: 1 })
     expect(result.appointments.map(item => item.id)).toEqual(['a', 'shared', 'c'])
     expect(result.programmes).toHaveLength(1)
   })
@@ -67,7 +68,7 @@ describe('readLiveAppointments', () => {
   it('says "not found", but still "ok", when Fiona has no account under any of the ids', async () => {
     const result = await readLiveAppointments({ xapi: fakeXapi({}), userIds: [5, 6], guestbookIds: [GB] })
 
-    expect(result).toEqual({ ok: true, found: false, accreditationIds: [], appointments: [], programmes: [], errors: [] })
+    expect(result).toEqual({ ok: true, found: false, accreditationIds: [], appointments: [], programmes: [], errors: [], unknownAccounts: 2 })
   })
 
   it('is not ok when a read fails for another reason, and keeps what the other reads gave', async () => {
@@ -122,5 +123,29 @@ describe('readLiveAppointments', () => {
     await readLiveAppointments({ xapi, userIds: ['a/b'], guestbookIds: ['g b'] })
 
     expect(xapi.asked).toContain('/account/MyPoff/a%2Fb/guestbook/g%20b/appointments?includeAttendees=true')
+  })
+
+  it('treats a 400 like a 404: Fiona answers 400 for an id it has no account under', async () => {
+    const xapi = {
+      asked: [],
+      getRaw (path) {
+        this.asked.push(path)
+        if (path === apptPath(7)) return Promise.resolve(accountAnswer('acc-1', 'Jaan Leppik', [appt('a', '2026-11-12T06:00:00Z')]))
+        return Promise.reject(path.includes('/account/MyPoff/7/') ? notFound() : badRequest())
+      }
+    }
+
+    const result = await readLiveAppointments({ xapi, userIds: [5, 6, 7], guestbookIds: [GB] })
+
+    expect(result).toMatchObject({ ok: true, found: true, errors: [], unknownAccounts: 2 })
+    expect(result.appointments.map(item => item.id)).toEqual(['a'])
+  })
+
+  it('does not call an account unknown when one of its reads failed for another reason', async () => {
+    const xapi = fakeXapi({ [apptPath(5)]: Object.assign(new Error('500 Internal'), { statusCode: 500 }) })
+
+    const result = await readLiveAppointments({ xapi, userIds: [5], guestbookIds: [GB] })
+
+    expect(result).toMatchObject({ ok: false, unknownAccounts: 0 })
   })
 })
