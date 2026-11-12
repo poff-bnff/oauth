@@ -4,25 +4,27 @@
  * The appointments of a logged-in user whose Strapi person carries no Fiona accreditation id (staff, organisers and
  * others the sync does not manage). Fiona has no search by e-mail, so the accreditation is found in two steps:
  *
- *   1. candidates: the persons of the Publication API list (`GET /persons`: id + fullName, cached for an hour) whose
- *      name is the name of a person of the login (the main account and its aliases);
- *   2. proof: a candidate is accepted ONLY when Fiona's own record says it is this login: the e-mail of the Fiona
- *      person is one of the login's e-mails, or the MyPoff user id Fiona keeps for the person is one of the login's
- *      user ids. A namesake never passes, so nobody sees the appointments of somebody else.
+ *   1. candidates: the published accreditations of the active guestbooks (Publication API
+ *      `GET /guestbooks/{id}/accreditations`: accreditation id + person id + full name, cached ten minutes) whose person has
+ *      the name of a person of the login (the main account and its aliases). This list is current; the published person
+ *      record (`GET /persons/{id}`) is a snapshot that can lack a new accreditation, so it is not used;
+ *   2. proof: a person is accepted ONLY when Fiona's own record says it is this login: the e-mail of the Fiona person is one
+ *      of the login's e-mails, or the MyPoff user id Fiona keeps for the person is one of the login's user ids. A namesake
+ *      never passes, so nobody sees the appointments of somebody else.
  *
- * The accreditations of an accepted person in an active guestbook (this festival) are then read like those of a synced
+ * The accreditations of an accepted person in the active guestbooks (this festival) are then read like those of a synced
  * person (fiona/myAppointments.js). Nothing is written anywhere; names and e-mails are never logged.
  */
 
 import { createCache, appointmentsForPerson, CARD_TTL_MS, CARD_STALE_MS, PROFILE_TTL_MS } from './myAppointments.js'
 import { splitIds } from './desiredState.js'
 
-export const PERSONS_TTL_MS = 60 * 60 * 1000
-export const PERSONS_STALE_MS = 24 * 60 * 60 * 1000
+export const INDEX_TTL_MS = 10 * 60 * 1000
+export const INDEX_STALE_MS = 60 * 60 * 1000
 export const LOOKUP_TTL_MS = 5 * 60 * 1000
 const MAX_CANDIDATES = 5
 
-const defaultPersons = createCache({ ttlMs: PERSONS_TTL_MS, staleMs: PERSONS_STALE_MS, maxEntries: 2 })
+const defaultIndex = createCache({ ttlMs: INDEX_TTL_MS, staleMs: INDEX_STALE_MS, maxEntries: 4 })
 const defaultFound = createCache({ ttlMs: LOOKUP_TTL_MS, maxEntries: 2000 })
 
 const asList = value => (Array.isArray(value) ? value : [])
@@ -71,22 +73,32 @@ export async function loginIdentity (user, { loadPerson } = {}) {
 
 const NOT_FOUND = trace => ({ ok: true, fionaPersonId: null, accreditationIds: [], trace })
 
-/** normalized name → Fiona person ids, from the Publication list of persons (cached; the old copy serves when Fiona fails). */
-async function personIndex (publication, persons, log) {
-  const fresh = persons.fresh('index')
+/**
+ * The published accreditations of the active guestbooks, by the normalized name of their person:
+ * { byName: Map(name → [{ personId, accreditationId }]), listed: number }. Cached; the old copy serves when Fiona fails;
+ * null when there is none.
+ */
+async function accreditationIndex (publication, guestbookIds, cache, log) {
+  const key = `index:${[...guestbookIds].sort().join(',')}`
+  const fresh = cache.fresh(key)
   if (fresh) return fresh.value
   try {
-    const index = new Map()
-    for (const item of asList(await publication.getRaw('/persons'))) {
-      const name = normalizeName(item?.fullName)
-      if (!name || !item?.id) continue
-      index.set(name, [...(index.get(name) || []), String(item.id)])
+    const byName = new Map()
+    let listed = 0
+    for (const guestbookId of guestbookIds) {
+      for (const item of asList(await publication.getRaw(`/guestbooks/${encodeURIComponent(guestbookId)}/accreditations`))) {
+        const name = normalizeName(item?.person?.fullName)
+        if (!name || !item?.id || !item?.person?.id) continue
+        byName.set(name, [...(byName.get(name) || []), { personId: String(item.person.id), accreditationId: String(item.id) }])
+        listed++
+      }
     }
-    persons.set('index', index)
-    return index
+    const built = { byName, listed }
+    cache.set(key, built)
+    return built
   } catch (err) {
-    log.warn?.(`[fiona appointments] list of persons could not be read: ${err?.message || err}`)
-    return persons.stale('index')?.value ?? null
+    log.warn?.(`[fiona appointments] list of accreditations could not be read: ${err?.message || err}`)
+    return cache.stale(key)?.value ?? null
   }
 }
 
@@ -128,13 +140,13 @@ async function verify (fionaPersonId, { emails, userIds, xapi, log }) {
 /**
  * @param {object} options
  * @param {{ userIds: number[], emails: string[], names: string[] }} options.identity   from loginIdentity
- * @param {{ getRaw: Function }} options.publication   Publication API client (list of persons, one person)
+ * @param {{ getRaw: Function }} options.publication   Publication API client (the accreditation list of a guestbook)
  * @param {{ getPerson: Function, getMyPoffUserId: Function }} options.xapi   XAPI client (the proof)
  * @param {{ getActiveGuestbookIds: Function }} options.strapi
- * @returns {Promise<{ ok: true, fionaPersonId: string|null, accreditationIds: string[], trace: { names: number, candidates: object[] } } | { ok: false }>}
+ * @returns {Promise<{ ok: true, fionaPersonId: string|null, accreditationIds: string[], trace: object } | { ok: false }>}
  *   ok false = Fiona could not be read well enough to tell (nothing is remembered then)
  */
-export async function findAccreditationsForLogin ({ identity, publication, xapi, strapi, persons = defaultPersons, found = defaultFound, log = console } = {}) {
+export async function findAccreditationsForLogin ({ identity, publication, xapi, strapi, index = defaultIndex, found = defaultFound, log = console } = {}) {
   const names = asList(identity?.names)
   if (!names.length) return NOT_FOUND({ names: 0, candidates: [] })
 
@@ -142,13 +154,31 @@ export async function findAccreditationsForLogin ({ identity, publication, xapi,
   const known = found.fresh(key)
   if (known) return known.value
 
-  const index = await personIndex(publication, persons, log)
-  if (!index) return { ok: false }
+  let guestbookIds
+  try {
+    guestbookIds = unique(asList(await strapi.getActiveGuestbookIds()).map(String))
+  } catch (err) {
+    log.warn?.(`[fiona appointments] active guestbooks could not be read: ${err?.message || err}`)
+    return { ok: false }
+  }
+  if (!guestbookIds.length) return NOT_FOUND({ names: names.length, candidates: [], listed: 0, accreditations: 0 })
 
-  const candidates = unique(names.flatMap(name => index.get(name) || [])).slice(0, MAX_CANDIDATES)
+  const listing = await accreditationIndex(publication, guestbookIds, index, log)
+  if (!listing) return { ok: false }
+
+  const accreditationsOf = new Map() // Fiona person id → accreditation ids
+  for (const name of names) {
+    for (const entry of listing.byName.get(name) || []) {
+      const have = accreditationsOf.get(entry.personId) || []
+      if (!have.includes(entry.accreditationId)) have.push(entry.accreditationId)
+      accreditationsOf.set(entry.personId, have)
+    }
+  }
+  const candidates = [...accreditationsOf.keys()].slice(0, MAX_CANDIDATES)
+
   const proof = { emails: new Set(asList(identity.emails).map(lower).filter(Boolean)), userIds: new Set(asList(identity.userIds).map(String)), xapi, log }
+  const trace = { names: names.length, candidates: [], listed: listing.listed, accreditations: 0 }
   const verified = []
-  const trace = { names: names.length, candidates: [] }
   let errored = false
   for (const id of candidates) {
     const { outcome, detail } = await verify(id, proof)
@@ -156,39 +186,11 @@ export async function findAccreditationsForLogin ({ identity, publication, xapi,
     if (outcome === 'yes') verified.push(id)
     else if (outcome === 'error') errored = true
   }
+  if (!verified.length && errored) return { ok: false }
 
-  let result = NOT_FOUND(trace)
-  if (verified.length) {
-    let activeGuestbooks
-    try {
-      activeGuestbooks = new Set(asList(await strapi.getActiveGuestbookIds()).map(String))
-    } catch (err) {
-      log.warn?.(`[fiona appointments] active guestbooks could not be read: ${err?.message || err}`)
-      return { ok: false }
-    }
-    trace.activeGuestbooks = activeGuestbooks.size
-    const accreditationIds = []
-    let fionaPersonId = null
-    for (const id of verified) {
-      try {
-        const detail = await publication.getRaw(`/persons/${encodeURIComponent(id)}`)
-        const listed = asList(detail?.accreditations).filter(item => item?.id)
-        trace.verified = trace.verified || []
-        trace.verified.push({ accreditations: listed.map(item => ({ id: String(item.id), guestbook: String(item.guestbook?.id ?? ''), active: activeGuestbooks.has(String(item.guestbook?.id)) })) })
-        const ids = listed.filter(item => activeGuestbooks.has(String(item.guestbook?.id))).map(item => String(item.id))
-        if (ids.length && !fionaPersonId) fionaPersonId = id
-        accreditationIds.push(...ids)
-      } catch (err) {
-        errored = true
-        log.warn?.(`[fiona appointments] person ${id} could not be read: ${err?.message || err}`)
-      }
-    }
-    if (!accreditationIds.length && errored) return { ok: false }
-    result = { ok: true, fionaPersonId, accreditationIds: unique(accreditationIds), trace }
-  } else if (errored) {
-    return { ok: false }
-  }
-
+  const accreditationIds = unique(verified.flatMap(id => accreditationsOf.get(id) || []))
+  trace.accreditations = accreditationIds.length
+  const result = { ok: true, fionaPersonId: verified[0] ?? null, accreditationIds, trace }
   found.set(key, result)
   return result
 }
@@ -202,7 +204,7 @@ const MAX_REPORT_USERS = 5
  * synced persons), else the ones the login search finds (findAccreditationsForLogin).
  * @returns {Promise<{ ok: boolean, source: 'person'|'login', person: object|null, fionaPersonId: string|null, accreditationIds: string[], identity?: object }>}
  */
-async function resolveAccreditations ({ user, loadPerson, publication, xapi, strapi, persons, found, log }) {
+async function resolveAccreditations ({ user, loadPerson, publication, xapi, strapi, index, found, log }) {
   const loaded = new Map()
   const load = (id) => {
     if (!loaded.has(id)) loaded.set(id, Promise.resolve(loadPerson(id)))
@@ -214,7 +216,7 @@ async function resolveAccreditations ({ user, loadPerson, publication, xapi, str
   if (own.length) return { ok: true, source: 'person', person, fionaPersonId: person.fiona_person_id ?? null, accreditationIds: own }
 
   const identity = await loginIdentity(user, { loadPerson: load })
-  const result = await findAccreditationsForLogin({ identity, publication, xapi, strapi, persons, found, log })
+  const result = await findAccreditationsForLogin({ identity, publication, xapi, strapi, index, found, log })
   return {
     ok: result.ok,
     source: 'login',
@@ -242,8 +244,8 @@ function answerFor (resolved, shared) {
  * @param {Function} options.loadPerson   id → the full Strapi person
  * @returns {Promise<object>} the answer of appointmentsForPerson
  */
-export async function appointmentsForUser ({ user, loadPerson, publication, xapi, strapi, lang = 'en', cards, profiles, persons, found, log = console } = {}) {
-  const resolved = await resolveAccreditations({ user, loadPerson, publication, xapi, strapi, persons, found, log })
+export async function appointmentsForUser ({ user, loadPerson, publication, xapi, strapi, lang = 'en', cards, profiles, index, found, log = console } = {}) {
+  const resolved = await resolveAccreditations({ user, loadPerson, publication, xapi, strapi, index, found, log })
   return answerFor(resolved, { publication, strapi, lang, cards, profiles, log })
 }
 
@@ -261,7 +263,7 @@ export async function loginAppointmentsReport ({ userIds = [], lang = 'en', load
   const caches = {
     cards: createCache({ ttlMs: CARD_TTL_MS, staleMs: CARD_STALE_MS }),
     profiles: createCache({ ttlMs: PROFILE_TTL_MS }),
-    persons: createCache({ ttlMs: PERSONS_TTL_MS, staleMs: PERSONS_STALE_MS, maxEntries: 2 }),
+    index: createCache({ ttlMs: INDEX_TTL_MS, staleMs: INDEX_STALE_MS, maxEntries: 4 }),
     found: createCache({ ttlMs: LOOKUP_TTL_MS, maxEntries: 50 })
   }
   const result = { persons: [], skipped: [] }
@@ -275,7 +277,7 @@ export async function loginAppointmentsReport ({ userIds = [], lang = 'en', load
     }
     if (!user) { result.skipped.push({ userId, reason: 'not found' }); continue }
 
-    const resolved = await resolveAccreditations({ user, loadPerson, publication, xapi, strapi, persons: caches.persons, found: caches.found, log })
+    const resolved = await resolveAccreditations({ user, loadPerson, publication, xapi, strapi, index: caches.index, found: caches.found, log })
     const appointments = await answerFor(resolved, { publication, strapi, lang, cards: caches.cards, profiles: caches.profiles, log })
     result.persons.push({
       userId,
