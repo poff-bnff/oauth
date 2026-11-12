@@ -12,8 +12,18 @@ import { appointmentsForUser } from '../../utils/fiona/loginAppointments.js'
 
 const MAX_REQUESTS_PER_MINUTE = 30
 
+// Switched OFF unless MY_APPOINTMENTS_ENABLED is exactly "true" (2026-11-12: Strapi was overloaded and this route's uncached
+// Strapi reads - the full user, the full person, people by Fiona id, the active guestbooks - were a suspect). While it is off
+// the route answers an empty list without calling Strapi or Fiona, and the my-events page simply hides the section.
+const isEnabled = () => process.env.MY_APPOINTMENTS_ENABLED === 'true'
+
 export default defineEventHandler(async (event) => {
   const userId = getUserIdFromEvent(event)
+
+  if (!isEnabled()) {
+    setHeader(event, 'Cache-Control', 'no-store')
+    return { ok: true, programmes: [], appointments: [] }
+  }
 
   const limit = hitLimit(`appointments:${userId}`, MAX_REQUESTS_PER_MINUTE, 60 * 1000)
   if (limit.exceeded) {
