@@ -132,6 +132,7 @@ function buildDeps () {
       unpublishedPhotos: String(config.syncUnpublishedPhotos).toLowerCase() === 'true',
       unpublishedBios: String(config.syncUnpublishedBios).toLowerCase() === 'true',
       extraFields: String(config.syncExtraFields).toLowerCase() === 'true',
+      participationEditionId: numberOr(config.syncParticipationEditionId, 114), // the edition whose participation history entry gets the matched categories (0 = off)
       adoptByFilm: String(config.syncAdoptByFilm).toLowerCase() === 'true'
     }
   }

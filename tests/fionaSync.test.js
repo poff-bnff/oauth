@@ -116,6 +116,7 @@ function fakeStrapi () {
     filmCredits: new Map(), // personId → the Strapi films the person is credited in: { id, remoteId, title_en, ... }
     filmIndexCalls: 0,
     failFilmIndex: false,
+    failParticipationWrite: false,
     publisherRoleIds: new Set([ROLE_CG]), // roles with publish_cg_person
     countries: [], // { id, name_en }
     industryCategories: [], // { id, name }
@@ -126,11 +127,38 @@ function fakeStrapi () {
   }
   const nextId = () => state.nextId++
   const clone = v => JSON.parse(JSON.stringify(v))
+  // Strapi 3 component rules: an entry sent with its id is updated in place (what is not sent stays), one without an id is new,
+  // an existing entry missing from the array is deleted
+  const applyParticipation = (person, payload) => {
+    if (!('participationHistory' in payload)) return
+    if (state.failParticipationWrite) throw new Error('HTTP 400 participationHistory')
+    const stored = person.participationHistory || []
+    person.participationHistory = payload.participationHistory.map((row) => {
+      if (row.id === undefined) return { id: nextId(), festival_edition: null, industry_categories: [], industry_person_types: [], ...clone(row) }
+      const old = stored.find(entry => entry.id === row.id)
+      if (!old) throw new Error('Some of the provided components in participationHistory are not related to the entity')
+      return { ...old, ...clone(row) }
+    })
+  }
   const populated = p => ({
     ...clone(p),
     festival_editions: (p.festival_editions || []).map(id => ({ id })),
     ...(p.organisations ? { organisations: p.organisations.map(id => ({ id })) } : {}),
     ...(p.industry_categories ? { industry_categories: p.industry_categories.map(id => ({ id })) } : {}),
+    // person.participation-history entries: stored with plain ids, answered with the edition and the lists expanded (an
+    // entry flagged `unreadable` is answered without its lists, as Strapi would if the relations of a component were not expanded)
+    ...(p.participationHistory
+      ? {
+          participationHistory: p.participationHistory.map(row => (row.unreadable
+            ? { id: row.id, festival_edition: row.festival_edition == null ? null : { id: row.festival_edition } }
+            : {
+                id: row.id,
+                festival_edition: row.festival_edition == null ? null : { id: row.festival_edition },
+                industry_categories: (row.industry_categories || []).map(id => ({ id })),
+                industry_person_types: (row.industry_person_types || []).map(id => ({ id }))
+              }))
+        }
+      : {}),
     ...(state.addresses.has(p.id) ? { addr_coll: { id: state.addresses.get(p.id).id, country: state.addresses.get(p.id).country ? { id: state.addresses.get(p.id).country } : null } } : {})
   })
   // Strapi's Creative Gate hooks (web2021 creative_gate_email_notification.js): a person is "ready" when it holds the
@@ -209,7 +237,9 @@ function fakeStrapi () {
       state.writes.push({ op: 'setUserRoles', id: Number(userId), payload: { user_roles: [...roleIds] } })
     },
     createPerson (payload) {
-      const p = { id: nextId(), ...clone(payload) }
+      const { participationHistory: _unused, ...plain } = payload
+      const p = { id: nextId(), ...clone(plain) }
+      applyParticipation(p, payload)
       state.people.set(p.id, p)
       state.writes.push({ op: 'createPerson', id: p.id, payload: clone(payload) })
       notifyWhenReady(p)
@@ -218,7 +248,9 @@ function fakeStrapi () {
     updatePerson (id, payload) {
       const p = state.people.get(Number(id))
       const before = clone(p)
-      Object.assign(p, clone(payload))
+      const { participationHistory: _unused, ...plain } = payload
+      Object.assign(p, clone(plain))
+      applyParticipation(p, payload)
       state.writes.push({ op: 'updatePerson', id: Number(id), payload: clone(payload) })
       if (['festival_editions', 'firstName', 'lastName', 'user'].some(field => payload[field] !== undefined)) notifyWhenReady(p, before)
       return populated(p)
@@ -2855,5 +2887,127 @@ describe('runSync: the extra values from Fiona (country, companies, Programme/ca
 
     expect(strapi.state.addresses.size).toBe(0)
     expect(stats.extras.country).toMatchObject({ set: 0, unmatched: { 'Czech Republic': 1 } })
+  })
+})
+
+describe('runSync: the 2026 Fiona chips also go into the participation history of the person (Person.participationHistory)', () => {
+  let fiona, strapi, deps
+
+  const proAccreditation = (id, personId, categories = ['Discovery Campus', 'Brand New Programme']) => accreditation(id, personId, BADGE_PRO, 'Paid', { occupation: null, categories, companies: [] })
+  const proPerson = { firstName: 'Alicja', lastName: 'Osiej', email: 'alicja@example.com', country: null, companies: [] }
+  const existingPerson = (extra = {}) => ({ id: 500, fiona_person_id: 'fp1', eMail: 'alicja@example.com', firstName: 'Alicja', lastName: 'Osiej', public: true, festival_editions: [CG, IND], ...extra })
+  const participationWrites = () => strapi.state.writes.filter(w => w.op === 'updatePerson' && w.payload.participationHistory)
+
+  beforeEach(() => {
+    fiona = fakeFiona()
+    strapi = fakeStrapi()
+    deps = { fiona, strapi, log: silentLog(), config: { maxRemovals: 50, maxBuildsPerRun: 20, extraFields: true, participationEditionId: IND }, now: () => new Date('2026-09-13T10:00:00.000Z') }
+    strapi.state.rules = [TEAM_RULE, PRO_RULE]
+    strapi.state.industryCategories = [{ id: 1, name: 'Discovery Campus' }, { id: 2, name: 'Black Nights Stars' }]
+    fiona.state.guestbooks.set(GB, guestbookWith(proAccreditation('acc1', 'fp1')))
+    fiona.state.persons.set('fp1', proPerson)
+  })
+
+  it('a new person gets the entry of the edition with the matched categories, next to the flat list; a label without a Strapi category is left out', async () => {
+    const stats = await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    expect(person.industry_categories).toEqual([1])
+    expect(person.participationHistory).toEqual([{ id: expect.any(Number), festival_edition: IND, industry_categories: [1], industry_person_types: [] }])
+    expect(stats.extras.participation).toMatchObject({ entriesCreated: 1, entriesUpdated: 0, links: 1 })
+  })
+
+  it('writes it in a save of its own, silent, so a refused entry cannot cost the person the other values', async () => {
+    await runSync({}, deps)
+
+    const [write] = participationWrites()
+    expect(write.payload).toEqual({ participationHistory: [{ festival_edition: IND, industry_categories: [1] }], skipbuild: true })
+  })
+
+  it('adds to the entry the person already has: the whole list, and the other entries and the person types stay', async () => {
+    strapi.state.people.set(500, existingPerson({
+      participationHistory: [
+        { id: 801, festival_edition: IND, industry_categories: [2], industry_person_types: [9] },
+        { id: 802, festival_edition: 80, industry_categories: [3], industry_person_types: [] }
+      ]
+    }))
+
+    const stats = await runSync({}, deps)
+
+    const person = strapi.state.people.get(500)
+    expect(participationWrites()[0].payload.participationHistory).toEqual([{ id: 801, industry_categories: [2, 1] }, { id: 802 }])
+    expect(person.participationHistory).toEqual([
+      { id: 801, festival_edition: IND, industry_categories: [2, 1], industry_person_types: [9] },
+      { id: 802, festival_edition: 80, industry_categories: [3], industry_person_types: [] }
+    ])
+    expect(stats.extras.participation).toMatchObject({ entriesCreated: 0, entriesUpdated: 1, links: 1 })
+  })
+
+  it('writes nothing when the entry holds the categories already, and a second run writes nothing either', async () => {
+    strapi.state.people.set(500, existingPerson({ participationHistory: [{ id: 801, festival_edition: IND, industry_categories: [1, 2], industry_person_types: [] }], industry_categories: [1] }))
+
+    await runSync({}, deps)
+    await runSync({}, deps)
+
+    expect(participationWrites()).toEqual([])
+  })
+
+  it('does not write the history of an edition the person does not hold through the rules (next year\'s chips never land in this year\'s entry)', async () => {
+    deps.config.participationEditionId = 91
+
+    await runSync({}, deps)
+
+    const person = [...strapi.state.people.values()][0]
+    expect(person.participationHistory).toBeUndefined()
+    expect(person.industry_categories).toEqual([1]) // the flat list is written as before
+  })
+
+  it('is off without an edition id', async () => {
+    deps.config.participationEditionId = 0
+
+    await runSync({}, deps)
+
+    expect([...strapi.state.people.values()][0].participationHistory).toBeUndefined()
+  })
+
+  it('is off with the extra-values switch off, like the rest of the extra values', async () => {
+    deps.config.extraFields = false
+
+    await runSync({}, deps)
+
+    expect([...strapi.state.people.values()][0].participationHistory).toBeUndefined()
+  })
+
+  it('leaves an entry it cannot read alone, counts it, and still writes the flat categories', async () => {
+    strapi.state.people.set(500, existingPerson({ participationHistory: [{ id: 801, festival_edition: IND, unreadable: true, industry_categories: [2], industry_person_types: [9] }] }))
+
+    const stats = await runSync({}, deps)
+
+    expect(participationWrites()).toEqual([])
+    expect(stats.extras.participation.skipped).toBe(1)
+    expect(strapi.state.people.get(500).industry_categories).toEqual([1])
+    expect(strapi.state.people.get(500).participationHistory[0].industry_categories).toEqual([2])
+  })
+
+  it('a refused write of the entry is counted and does not stop the run or the other values', async () => {
+    strapi.state.failParticipationWrite = true
+
+    const stats = await runSync({}, deps)
+
+    expect(stats.extras.errors).toBe(1)
+    expect([...strapi.state.people.values()][0].industry_categories).toEqual([1])
+    expect(stats.extras.participation.entriesCreated).toBe(0)
+  })
+
+  it('a dry run shows what would be written and writes nothing', async () => {
+    strapi.state.people.set(500, existingPerson({ participationHistory: [{ id: 801, festival_edition: IND, industry_categories: [2], industry_person_types: [] }] }))
+
+    const stats = await runSync({ dryRun: true }, deps)
+
+    expect(participationWrites()).toEqual([])
+    expect(stats.extras.participation).toMatchObject({ entriesUpdated: 1, links: 1 })
+    const update = stats.dryRunActions.find(action => action.action === 'UPDATE')
+    expect(update.changed).toContain('participationHistory')
+    expect(update.participation).toEqual([{ id: 801, industry_categories: [2, 1] }])
   })
 })
