@@ -166,12 +166,16 @@ export async function findAccreditationsForLogin ({ identity, publication, xapi,
       log.warn?.(`[fiona appointments] active guestbooks could not be read: ${err?.message || err}`)
       return { ok: false }
     }
+    trace.activeGuestbooks = activeGuestbooks.size
     const accreditationIds = []
     let fionaPersonId = null
     for (const id of verified) {
       try {
         const detail = await publication.getRaw(`/persons/${encodeURIComponent(id)}`)
-        const ids = asList(detail?.accreditations).filter(item => item?.id && activeGuestbooks.has(String(item.guestbook?.id))).map(item => String(item.id))
+        const listed = asList(detail?.accreditations).filter(item => item?.id)
+        trace.verified = trace.verified || []
+        trace.verified.push({ accreditations: listed.map(item => ({ id: String(item.id), guestbook: String(item.guestbook?.id ?? ''), active: activeGuestbooks.has(String(item.guestbook?.id)) })) })
+        const ids = listed.filter(item => activeGuestbooks.has(String(item.guestbook?.id))).map(item => String(item.id))
         if (ids.length && !fionaPersonId) fionaPersonId = id
         accreditationIds.push(...ids)
       } catch (err) {
