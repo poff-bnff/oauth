@@ -26,6 +26,9 @@
  *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
  *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
  *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
+ *                { "mode": "xapiAccount", "userIds": [..], "probe": true } — read-only, at most 3 Strapi user ids: the untouched XAPI record
+ *                /account/details/MyPoff/{userId}/ (name, contact details, companies, ...) for the owner of the account to see what Fiona
+ *                holds about them. PERSONAL DATA: refused without "probe": true; use it for your own account only.
  *                { "mode": "liveAppointments", "userIds": [..] } — read-only, at most 5 Strapi user ids (any account of a login): what Fiona holds NOW
  *                (the XAPI account routes, no publish step) against what the published accreditation card says, appointment by appointment
  *                (counts, ids, which fields differ), plus how long each read took. Add "probe": true to see the two values of a differing
@@ -159,7 +162,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'xapiAccount', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
