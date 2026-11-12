@@ -108,11 +108,33 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 // --- STRAPI ROLE UTILITY ---
 
-export async function getStrapiUserRoles () {
-  const token = await getStrapiAdminToken()
+// Strapi answers /user-roles with every role and what hangs on it (about 17 MB on 2026-11-12, when 16 logins in 15 minutes
+// each read it and helped keep Strapi at 100 % CPU). The roles hardly ever change, so the list is kept for ten minutes,
+// simultaneous logins share one running read, and an old copy (up to an hour) is served when Strapi fails. A failed read, or
+// an empty or malformed answer, is never remembered. A role or badge rule edited in Strapi reaches logins within ten minutes.
+const ROLES_TTL_MS = 10 * 60_000
+const ROLES_STALE_MS = 60 * 60_000
+let _rolesCache = null // { value, fetchedAt }
+let _rolesInFlight = null
 
-  // NOTE: This call only needs to happen once per run
-  return await $fetch(`${config.strapiUrl}/user-roles?_limit=-1`, { headers: { Authorization: `Bearer ${token}` } })
+export async function getStrapiUserRoles () {
+  if (_rolesCache && Date.now() - _rolesCache.fetchedAt < ROLES_TTL_MS) return _rolesCache.value
+
+  if (!_rolesInFlight) {
+    _rolesInFlight = (async () => {
+      const token = await getStrapiAdminToken()
+      const value = await $fetch(`${config.strapiUrl}/user-roles?_limit=-1`, { headers: { Authorization: `Bearer ${token}` } })
+      if (Array.isArray(value) && value.length) _rolesCache = { value, fetchedAt: Date.now() }
+      return value
+    })().finally(() => { _rolesInFlight = null })
+  }
+
+  try {
+    return await _rolesInFlight
+  } catch (err) {
+    if (_rolesCache && Date.now() - _rolesCache.fetchedAt < ROLES_STALE_MS) return _rolesCache.value
+    throw err
+  }
 }
 
 export async function setStrapiUserRoles (userId, roleIds) {
@@ -2079,6 +2101,8 @@ export function __clearCheckoutCaches () {
   _categoryCache.clear()
   _lastReservationRefresh.clear()
   _paymentMethodsCache = null
+  _rolesCache = null
+  _rolesInFlight = null
 }
 
 async function getProductCategoryByAnyId (categoryId, codePrefix) {
