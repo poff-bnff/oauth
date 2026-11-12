@@ -8,6 +8,9 @@
  * Rules (decided with Jaan):
  *  - single values (e-mail, phone, bio, picture, ...): the most recently updated record's value wins, the other fills gaps
  *  - lists and relations (organisations, editions, roles, categories, images, ...): both added together, nothing taken away
+ *  - the participation history (Person.participationHistory: the categories and person types per festival edition) is combined per
+ *    edition (see participation.js): the kept record's entries stay, the other record's lists are added to the entry of the same
+ *    edition, an edition the kept record has no entry for gets a new entry; when the entries cannot be read the pair is refused
  *  - names and the kept record's URLs stay; a missing slug is taken from the other record; but the survivor never keeps an
  *    indexed slug ("name-1") while the other record has the plain one ("name"): the two swap (see planSlugs)
  *  - Fiona ids come from the sync-managed record; the login user and the address move to the kept record
@@ -27,6 +30,7 @@
 
 import { normalizeName } from './extraFields.js'
 import { creditsPatch, creditCount, CREDIT_SOURCES } from './personCredits.js'
+import { mergeParticipation, participationHolds } from './participation.js'
 
 const MAX_PAIRS = 100
 const SILENT = { cgFormSave: true, skipbuild: true }
@@ -153,6 +157,11 @@ export function planMerge ({ keep, remove, removeRefs = [], mainUserId = null, i
     if (isEmpty(componentContent(keep[field])) && !isEmpty(content)) patch[field] = content
   }
 
+  // the participation history: combined per edition, the kept entries stay (by id)
+  const participation = mergeParticipation(keep.participationHistory, remove.participationHistory)
+  if (participation?.problem) return { ok: false, reason: `participationHistory: ${participation.problem} (#${keep.id} / #${remove.id})` }
+  if (participation?.rows) patch.participationHistory = participation.rows
+
   // the ordered roles: the kept record's rows stay (with their ids), the roles it lacks are added at the end
   const keepRows = asList(keep.orderedRaF)
   const haveRoles = new Set(keepRows.map(roleOf).filter(id => id !== null))
@@ -199,6 +208,7 @@ export function planMerge ({ keep, remove, removeRefs = [], mainUserId = null, i
 }
 
 function sameInPerson (key, expected, actual) {
+  if (key === 'participationHistory') return participationHolds(actual, expected)
   if (key === 'orderedRaF') return expected.every(row => asList(actual).some(have => roleOf(have) === roleOf(row)))
   if (SINGLE_COMPONENTS.includes(key)) return !isEmpty(componentContent(actual))
   if (Array.isArray(expected)) return expected.every(id => idsOf(actual).includes(Number(id)))
