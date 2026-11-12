@@ -13,10 +13,10 @@ import { userCache, personCache, guestbookCache } from '../../utils/fiona/appoin
 
 const MAX_REQUESTS_PER_MINUTE = 30
 
-// Switched OFF unless MY_APPOINTMENTS_ENABLED is exactly "true" (2026-11-12: Strapi was overloaded and this route's uncached
-// Strapi reads - the full user, the full person, people by Fiona id, the active guestbooks - were a suspect). While it is off
-// the route answers an empty list without calling Strapi or Fiona, and the my-events page simply hides the section.
-const isEnabled = () => process.env.MY_APPOINTMENTS_ENABLED === 'true'
+// The off switch (2026-11-12: Strapi was overloaded and this route's uncached Strapi reads were a suspect; the reads are cached
+// now and the route is back on): set MY_APPOINTMENTS_ENABLED to "false" and the route answers an empty list without calling
+// Strapi or Fiona (login is still checked); the my-events page then simply hides the section. Anything else keeps it on.
+const isEnabled = () => String(process.env.MY_APPOINTMENTS_ENABLED ?? '').trim().toLowerCase() !== 'false'
 
 export default defineEventHandler(async (event) => {
   const userId = getUserIdFromEvent(event)

@@ -25,7 +25,7 @@ describe('GET /api/my/appointments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearAppointmentsCaches()
-    process.env.MY_APPOINTMENTS_ENABLED = 'true'
+    delete process.env.MY_APPOINTMENTS_ENABLED
     getUserIdFromEvent.mockReturnValue(5)
     getStrapiUser.mockResolvedValue({ id: 5, person: { id: 77 }, aliasUsers: [] })
     getQuery.mockReturnValue({})
@@ -168,10 +168,17 @@ describe('GET /api/my/appointments', () => {
     })
   })
 
-  describe('while it is switched off (MY_APPOINTMENTS_ENABLED is not "true")', () => {
-    it.each([undefined, '', 'false', '1', 'TRUE '])('answers an empty list without touching Strapi or Fiona (value %j)', async (value) => {
+  describe('the switch', () => {
+    it.each([undefined, '', 'true', '1', 'yes'])('is on when MY_APPOINTMENTS_ENABLED is %j', async (value) => {
       if (value === undefined) delete process.env.MY_APPOINTMENTS_ENABLED
       else process.env.MY_APPOINTMENTS_ENABLED = value
+
+      expect(await handler(event)).toEqual({ ...EMPTY, appointments: [{ id: 'a' }] })
+      expect(appointmentsForUser).toHaveBeenCalledTimes(1)
+    })
+
+    it.each(['false', 'FALSE', ' false '])('is off when MY_APPOINTMENTS_ENABLED is %j: an empty list, without touching Strapi or Fiona', async (value) => {
+      process.env.MY_APPOINTMENTS_ENABLED = value
 
       const result = await handler(event)
 
@@ -185,8 +192,8 @@ describe('GET /api/my/appointments', () => {
       expect(setHeader).toHaveBeenCalledWith(event, 'Cache-Control', 'no-store')
     })
 
-    it('still refuses a request without a valid login', async () => {
-      delete process.env.MY_APPOINTMENTS_ENABLED
+    it('still refuses a request without a valid login while it is off', async () => {
+      process.env.MY_APPOINTMENTS_ENABLED = 'false'
       getUserIdFromEvent.mockImplementation(() => { throw Object.assign(new Error('Unauthorized'), { statusCode: 401 }) })
 
       await expect(handler(event)).rejects.toMatchObject({ statusCode: 401 })
