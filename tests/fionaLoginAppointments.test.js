@@ -6,8 +6,8 @@ import {
   findAccreditationsForLogin,
   appointmentsForUser,
   loginAppointmentsReport,
-  PERSONS_TTL_MS,
-  PERSONS_STALE_MS,
+  INDEX_TTL_MS,
+  INDEX_STALE_MS,
   LOOKUP_TTL_MS
 } from '../server/utils/fiona/loginAppointments.js'
 
@@ -33,7 +33,7 @@ const httpError = (statusCode, message = `HTTP ${statusCode}`) => Object.assign(
 
 /**
  * The world as Fiona and Strapi show it:
- *   fionaPersons  [{ id, fullName, email, myPoffId, accreditations: [{ id, guestbook }] }]
+ *   fionaPersons  [{ id, fullName, email, myPoffId, accreditations: [{ id, guestbook }] }]  (the guestbook lists of published accreditations are made from them)
  *   cards         accreditation id → raw card
  */
 function setup ({ fionaPersons = [], cards = {}, activeGuestbooks = ['gb-now'], now = { value: 1_000_000 } } = {}) {
@@ -41,13 +41,11 @@ function setup ({ fionaPersons = [], cards = {}, activeGuestbooks = ['gb-now'], 
   const state = { listFails: false, xapiFails: new Set() }
   const publication = {
     getRaw: vi.fn((path) => {
-      if (path === '/persons') {
-        return state.listFails ? Promise.reject(httpError(503)) : Promise.resolve(fionaPersons.map(p => ({ id: p.id, fullName: p.fullName })))
-      }
-      const detail = path.match(/^\/persons\/(.+)$/)
-      if (detail) {
-        const found = fionaPersons.find(p => p.id === decodeURIComponent(detail[1]))
-        return found ? Promise.resolve({ id: found.id, fullName: found.fullName, accreditations: found.accreditations.map(a => ({ id: a.id, guestbook: { id: a.guestbook, description: a.guestbook } })) }) : Promise.reject(httpError(404))
+      const list = path.match(/^\/guestbooks\/(.+)\/accreditations$/)
+      if (list) {
+        if (state.listFails) return Promise.reject(httpError(503))
+        const guestbook = decodeURIComponent(list[1])
+        return Promise.resolve(fionaPersons.flatMap(p => p.accreditations.filter(a => a.guestbook === guestbook).map(a => ({ id: a.id, company: null, person: { id: p.id, fullName: p.fullName, sortedFullName: p.fullName } }))))
       }
       const id = decodeURIComponent(path.replace('/accreditations/', ''))
       return cards[id] ? Promise.resolve(cards[id]) : Promise.reject(httpError(404))
@@ -73,7 +71,7 @@ function setup ({ fionaPersons = [], cards = {}, activeGuestbooks = ['gb-now'], 
     strapi,
     cards: createCache({ ttlMs: CARD_TTL_MS, staleMs: CARD_STALE_MS, now: clock }),
     profiles: createCache({ ttlMs: PROFILE_TTL_MS, staleMs: PROFILE_TTL_MS, now: clock }),
-    persons: createCache({ ttlMs: PERSONS_TTL_MS, staleMs: PERSONS_STALE_MS, maxEntries: 5, now: clock }),
+    index: createCache({ ttlMs: INDEX_TTL_MS, staleMs: INDEX_STALE_MS, maxEntries: 5, now: clock }),
     found: createCache({ ttlMs: LOOKUP_TTL_MS, maxEntries: 50, now: clock }),
     log: silent
   }
@@ -88,7 +86,7 @@ const lookup = (env, overrides = {}) => findAccreditationsForLogin({
   publication: env.publication,
   xapi: env.xapi,
   strapi: env.strapi,
-  persons: env.persons,
+  index: env.index,
   found: env.found,
   log: env.log,
   ...overrides
@@ -181,7 +179,6 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
     const result = await lookup(env)
 
     expect(result).toMatchObject({ ok: true, fionaPersonId: null, accreditationIds: [] })
-    expect(env.publication.getRaw).not.toHaveBeenCalledWith('/persons/fp-jaan')
   })
 
   it('picks the verified one among several persons of the same name', async () => {
@@ -199,6 +196,13 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
     const env = setup({ fionaPersons: [fionaJaan({ accreditations: [{ id: 'acc-old', guestbook: 'gb-2019' }, { id: 'acc-now', guestbook: 'gb-now' }] })] })
 
     expect((await lookup(env)).accreditationIds).toEqual(['acc-now'])
+    expect(env.publication.getRaw).not.toHaveBeenCalledWith('/guestbooks/gb-2019/accreditations')
+  })
+
+  it('finds every accreditation the verified person has in the active guestbooks', async () => {
+    const env = setup({ activeGuestbooks: ['gb-a', 'gb-b'], fionaPersons: [fionaJaan({ accreditations: [{ id: 'acc-a', guestbook: 'gb-a' }, { id: 'acc-b', guestbook: 'gb-b' }] })] })
+
+    expect((await lookup(env)).accreditationIds.sort()).toEqual(['acc-a', 'acc-b'])
   })
 
   it('finds nothing when the login has no name, and asks Fiona nothing', async () => {
@@ -241,7 +245,7 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
     expect((await lookup(env, { identity: identityOf({ emails: [''] }) })).accreditationIds).toEqual([])
   })
 
-  it('says it could not tell when Fiona cannot be read: the list of persons, or the check of every candidate', async () => {
+  it('says it could not tell when Fiona cannot be read: the list of accreditations, or the check of every candidate', async () => {
     const down = setup({ fionaPersons: [fionaJaan()] })
     down.state.listFails = true
     expect(await lookup(down)).toEqual({ ok: false })
@@ -258,12 +262,19 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
     expect((await lookup(env)).accreditationIds).toEqual(['acc-now'])
   })
 
-  it('does not ask Strapi for the active guestbooks when there is nothing to filter', async () => {
-    const env = setup({ fionaPersons: [fionaJaan({ email: 'namesake@example.com' })] })
+  it('says it could not tell when the active guestbooks cannot be read', async () => {
+    const env = setup({ fionaPersons: [fionaJaan()] })
+    env.strapi.getActiveGuestbookIds.mockRejectedValue(new Error('strapi down'))
 
-    await lookup(env)
+    expect(await lookup(env)).toEqual({ ok: false })
+  })
 
-    expect(env.strapi.getActiveGuestbookIds).not.toHaveBeenCalled()
+  it('finds nothing, and asks no one, when there is no active guestbook', async () => {
+    const env = setup({ fionaPersons: [fionaJaan()], activeGuestbooks: [] })
+
+    expect(await lookup(env)).toMatchObject({ ok: true, accreditationIds: [] })
+    expect(env.publication.getRaw).not.toHaveBeenCalled()
+    expect(env.xapi.getPerson).not.toHaveBeenCalled()
   })
 
   describe('trace: how the search went, without names or e-mails', () => {
@@ -272,7 +283,7 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
 
       const result = await lookup(env)
 
-      expect(result.trace).toEqual({ names: 1, candidates: [{ email: 'differs', myPoff: 'none' }] })
+      expect(result.trace).toMatchObject({ names: 1, candidates: [{ email: 'differs', myPoff: 'none' }] })
     })
 
     it('says "match" for the proof that settled it, and that the MyPoff id was not asked then', async () => {
@@ -287,28 +298,18 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
       expect((await lookup(env)).trace.candidates).toEqual([{ email: 'none', myPoff: 'differs' }])
     })
 
-    it('lists, for the verified person, its accreditations and whether each is in an active guestbook (ids only)', async () => {
-      const env = setup({ fionaPersons: [fionaJaan({ accreditations: [{ id: 'acc-old', guestbook: 'gb-2019' }, { id: 'acc-now', guestbook: 'gb-now' }] })] })
+    it('says how many published accreditations the active guestbooks list and how many are the verified person\'s', async () => {
+      const env = setup({ fionaPersons: [fionaJaan(), fionaJaan({ id: 'fp-other', fullName: 'Someone Else', email: 'else@example.com', accreditations: [{ id: 'acc-x', guestbook: 'gb-now' }, { id: 'acc-y', guestbook: 'gb-now' }] })] })
 
       const result = await lookup(env)
 
-      expect(result.trace.verified).toEqual([{ accreditations: [{ id: 'acc-old', guestbook: 'gb-2019', active: false }, { id: 'acc-now', guestbook: 'gb-now', active: true }] }])
-      expect(result.trace.activeGuestbooks).toBe(1)
-    })
-
-    it('shows a verified person that has no accreditation at all as an empty list', async () => {
-      const env = setup({ fionaPersons: [fionaJaan({ accreditations: [] })] })
-
-      const result = await lookup(env)
-
-      expect(result.accreditationIds).toEqual([])
-      expect(result.trace.verified).toEqual([{ accreditations: [] }])
+      expect(result.trace).toMatchObject({ listed: 3, accreditations: 1 })
     })
 
     it('has no candidates when no person of Fiona has the name', async () => {
       const env = setup({ fionaPersons: [fionaJaan({ fullName: 'Someone Else' })] })
 
-      expect((await lookup(env)).trace).toEqual({ names: 1, candidates: [] })
+      expect((await lookup(env)).trace).toMatchObject({ names: 1, candidates: [], accreditations: 0 })
     })
 
     it('has no trace of a search that was not made (no names)', async () => {
@@ -319,29 +320,32 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
   })
 
   describe('caches', () => {
-    it('reads the list of persons once an hour, for every login', async () => {
+    it('reads the list of a guestbook once per ten minutes, for every login', async () => {
       const env = setup({ fionaPersons: [fionaJaan()] })
+      const reads = () => env.publication.getRaw.mock.calls.filter(([path]) => path === '/guestbooks/gb-now/accreditations').length
 
       await lookup(env)
       await lookup(env, { identity: identityOf({ userIds: [1], emails: ['x@example.com'], names: ['jaan leppik'] }) })
 
-      expect(env.publication.getRaw.mock.calls.filter(([path]) => path === '/persons')).toHaveLength(1)
+      expect(reads()).toBe(1)
 
-      env.now.value += PERSONS_TTL_MS + 1
+      env.now.value += INDEX_TTL_MS + 1
       await lookup(env, { identity: identityOf({ userIds: [2], emails: ['y@example.com'], names: ['jaan leppik'] }) })
 
-      expect(env.publication.getRaw.mock.calls.filter(([path]) => path === '/persons')).toHaveLength(2)
+      expect(reads()).toBe(2)
     })
 
-    it('uses the old list (up to a day) when Fiona fails to give a new one', async () => {
+    it('uses the old list (up to an hour) when Fiona fails to give a new one, and not an older one', async () => {
       const env = setup({ fionaPersons: [fionaJaan()] })
       await lookup(env)
 
-      env.now.value += PERSONS_TTL_MS + 1
+      env.now.value += INDEX_TTL_MS + 1
       env.state.listFails = true
       const result = await lookup(env, { identity: identityOf({ userIds: [3], emails: ['jaan@example.com'], names: ['jaan leppik'] }) })
-
       expect(result.accreditationIds).toEqual(['acc-now'])
+
+      env.now.value += INDEX_STALE_MS
+      expect(await lookup(env, { identity: identityOf({ userIds: [4], emails: ['jaan@example.com'], names: ['jaan leppik'] }) })).toEqual({ ok: false })
     })
 
     it('remembers the answer for a login for five minutes, found or not', async () => {
@@ -388,7 +392,7 @@ describe('appointmentsForUser: appointments of a logged-in user, by the Strapi p
     strapi: env.strapi,
     cards: env.cards,
     profiles: env.profiles,
-    persons: env.persons,
+    index: env.index,
     found: env.found,
     log: env.log,
     ...overrides
@@ -401,7 +405,7 @@ describe('appointmentsForUser: appointments of a logged-in user, by the Strapi p
     const result = await run(env, userOf({ person: { id: 77 } }), { loadPerson })
 
     expect(result.appointments).toHaveLength(1)
-    expect(env.publication.getRaw).not.toHaveBeenCalledWith('/persons')
+    expect(env.publication.getRaw.mock.calls.every(([path]) => path.startsWith('/accreditations/'))).toBe(true)
     expect(env.xapi.getPerson).not.toHaveBeenCalled()
   })
 
@@ -499,7 +503,7 @@ describe('loginAppointmentsReport: what a login would see, and how its accredita
 
     const result = await report(env, [22135])
 
-    expect(result.persons[0].search).toEqual({ names: 1, candidates: [{ email: 'differs', myPoff: 'none' }] })
+    expect(result.persons[0].search).toMatchObject({ names: 1, candidates: [{ email: 'differs', myPoff: 'none' }] })
     expect(JSON.stringify(result)).not.toContain('namesake@example.com')
   })
 
@@ -528,7 +532,7 @@ describe('loginAppointmentsReport: what a login would see, and how its accredita
     await report(env, [22135])
     await report(env, [22135])
 
-    expect(env.publication.getRaw.mock.calls.filter(([path]) => path === '/persons')).toHaveLength(2)
+    expect(env.publication.getRaw.mock.calls.filter(([path]) => path === '/guestbooks/gb-now/accreditations')).toHaveLength(2)
   })
 
   it('says why a login could not be read and carries on', async () => {
