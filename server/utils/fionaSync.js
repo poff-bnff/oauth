@@ -40,6 +40,7 @@ import { listBadgeTypes } from './fiona/badgeTypes.js'
 import { appointmentsReport } from './fiona/myAppointments.js'
 import { loginAppointmentsReport, appointmentsForUserFresh } from './fiona/loginAppointments.js'
 import { liveAppointmentsReport } from './fiona/liveAppointmentsReport.js'
+import { xapiAccountReport } from './fiona/xapiAccountReport.js'
 import { programmeReport } from './fiona/programmeReport.js'
 
 const config = useRuntimeConfig()
@@ -256,6 +257,14 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
   // read-only: can the user-roles be read without their users? "roles" times the GraphQL read (id + badge rules only); "rolesCompare"
   // also does ONE heavy REST read (every role with every user, about 17 MB) and says whether the two agree
   if (mode === 'roles' || mode === 'rolesCompare') return { mode, ...(await rolesReadReport({ graphql: fetchStrapiUserRolesGraphql, rest: mode === 'rolesCompare' ? fetchStrapiUserRolesRest : null })) }
+  // read-only: the untouched XAPI record /account/details/MyPoff/{userId}/ of up to 3 accounts (personal data: for the owner; needs "probe": true)
+  if (mode === 'xapiAccount') {
+    const xapi = buildXapiClient()
+    if (!xapi) throw new Error('xapiAccount needs NUXT_FIONA_API_KEY')
+    if (!userIds.length) throw new Error('xapiAccount needs userIds (Strapi user ids)')
+    if (probe !== true) throw new Error('xapiAccount prints personal data: send "probe": true to confirm')
+    return { mode, ...(await xapiAccountReport({ userIds, xapi })) }
+  }
   // read-only: what Fiona holds NOW for a login (XAPI, no publish step) against what the published card says, with the time of each read
   // ("probe": true also shows the two values of a differing field)
   if (mode === 'liveAppointments') {
