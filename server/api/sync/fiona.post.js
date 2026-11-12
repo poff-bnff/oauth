@@ -26,6 +26,10 @@
  *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
  *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
  *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
+ *                { "mode": "liveAppointments", "userIds": [..] } — read-only, at most 5 Strapi user ids (any account of a login): what Fiona holds NOW
+ *                (the XAPI account routes, no publish step) against what the published accreditation card says, appointment by appointment
+ *                (counts, ids, which fields differ), plus how long each read took. Add "probe": true to see the two values of a differing
+ *                field (names of the people in the meeting included: use it for your own account). No e-mails or names of the login.
  *                { "mode": "roles" } — read-only: times a GraphQL read of the user-roles that asks only for each role's id and badge rules
  *                (no users). { "mode": "rolesCompare" } also does ONE heavy REST read (every role with every user, ~17 MB, several seconds
  *                of Strapi CPU: use it once, on purpose) and says whether the two agree. Ids, counts, timings and badge rules only.
@@ -155,7 +159,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
