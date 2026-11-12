@@ -7,6 +7,7 @@ vi.mock('../server/utils/fiona/loginAppointments.js', () => ({ appointmentsForUs
 const { hitLimit } = await import('../server/utils/rateLimiter.js')
 const { buildPublicationClient, buildXapiClient, buildStrapiGateway } = await import('../server/utils/fionaSync.js')
 const { appointmentsForUser } = await import('../server/utils/fiona/loginAppointments.js')
+const { clearAppointmentsCaches } = await import('../server/utils/fiona/appointmentsCaches.js')
 
 // Nitro auto-imports of server/utils/strapi.js and h3, stubbed as globals
 globalThis.defineEventHandler = handler => handler
@@ -23,6 +24,7 @@ const EMPTY = { ok: true, programmes: [], appointments: [] }
 describe('GET /api/my/appointments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clearAppointmentsCaches()
     process.env.MY_APPOINTMENTS_ENABLED = 'true'
     getUserIdFromEvent.mockReturnValue(5)
     getStrapiUser.mockResolvedValue({ id: 5, person: { id: 77 }, aliasUsers: [] })
@@ -65,10 +67,10 @@ describe('GET /api/my/appointments', () => {
     expect(result).toEqual({ ...EMPTY, appointments: [{ id: 'a' }] })
     expect(appointmentsForUser).toHaveBeenCalledWith({
       user: { id: 5, person: { id: 77 }, aliasUsers: [] },
-      loadPerson: getStrapiPerson,
+      loadPerson: expect.any(Function),
       publication: { publication: true },
       xapi: { xapi: true },
-      strapi: { gateway: true },
+      strapi: expect.objectContaining({ gateway: true, getActiveGuestbookIds: expect.any(Function) }),
       lang: 'en'
     })
     expect(setHeader).toHaveBeenCalledWith(event, 'Cache-Control', 'no-store')
@@ -98,6 +100,72 @@ describe('GET /api/my/appointments', () => {
     buildPublicationClient.mockReturnValue({})
     appointmentsForUser.mockRejectedValue(new Error('boom'))
     expect(await handler(event)).toEqual({ ok: false, error: 'unavailable', programmes: [], appointments: [] })
+  })
+
+  describe('keeps the Strapi reads that every page view repeated', () => {
+    it('reads the user from Strapi once and still asks the appointments code on every request', async () => {
+      await handler(event)
+      await handler(event)
+      await handler(event)
+
+      expect(getStrapiUser).toHaveBeenCalledTimes(1)
+      expect(appointmentsForUser).toHaveBeenCalledTimes(3)
+    })
+
+    it('keeps the users apart', async () => {
+      getStrapiUser.mockImplementation(id => Promise.resolve({ id, person: null, aliasUsers: [] }))
+
+      getUserIdFromEvent.mockReturnValue(5)
+      await handler(event)
+      getUserIdFromEvent.mockReturnValue(6)
+      await handler(event)
+      getUserIdFromEvent.mockReturnValue(5)
+      await handler(event)
+
+      expect(getStrapiUser.mock.calls.map(([id]) => id)).toEqual([5, 6])
+      expect(appointmentsForUser.mock.calls[1][0].user.id).toBe(6)
+    })
+
+    it('does not remember a user that was not found, or a read that failed', async () => {
+      getStrapiUser.mockResolvedValueOnce(null)
+      await expect(handler(event)).rejects.toMatchObject({ statusCode: 404 })
+
+      getStrapiUser.mockRejectedValueOnce(new Error('504 Gateway Time-out'))
+      await expect(handler(event)).rejects.toThrow('504')
+
+      expect(await handler(event)).toEqual({ ...EMPTY, appointments: [{ id: 'a' }] })
+      expect(getStrapiUser).toHaveBeenCalledTimes(3)
+    })
+
+    it('gives the appointments code a person loader that reads each person from Strapi once, across requests', async () => {
+      getStrapiPerson.mockImplementation(id => Promise.resolve({ id }))
+      await handler(event)
+      await handler(event)
+      const { loadPerson } = appointmentsForUser.mock.calls[0][0]
+      const { loadPerson: second } = appointmentsForUser.mock.calls[1][0]
+
+      expect(await loadPerson(77)).toEqual({ id: 77 })
+      expect(await second(77)).toEqual({ id: 77 })
+      expect(await second('77')).toEqual({ id: 77 })
+      expect(await loadPerson(78)).toEqual({ id: 78 })
+
+      expect(getStrapiPerson.mock.calls.map(([id]) => String(id))).toEqual(['77', '78'])
+    })
+
+    it('gives the appointments code a gateway whose active-guestbooks read goes to Strapi once, and leaves its other methods alone', async () => {
+      const gateway = { getActiveGuestbookIds: vi.fn().mockResolvedValue(['gb-1']), findPeopleByFionaIds: vi.fn() }
+      buildStrapiGateway.mockReturnValue(gateway)
+      await handler(event)
+      await handler(event)
+      const first = appointmentsForUser.mock.calls[0][0].strapi
+      const second = appointmentsForUser.mock.calls[1][0].strapi
+
+      expect(await first.getActiveGuestbookIds()).toEqual(['gb-1'])
+      expect(await second.getActiveGuestbookIds()).toEqual(['gb-1'])
+
+      expect(gateway.getActiveGuestbookIds).toHaveBeenCalledTimes(1)
+      expect(first.findPeopleByFionaIds).toBe(gateway.findPeopleByFionaIds)
+    })
   })
 
   describe('while it is switched off (MY_APPOINTMENTS_ENABLED is not "true")', () => {
