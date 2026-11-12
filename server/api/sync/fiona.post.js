@@ -30,6 +30,14 @@
  *                Fiona accreditation ids together (the latter for people the sync does not manage, who have no Fiona ids in Strapi): exactly what the festival site's
  *                GET /api/my/appointments shows that person (booked appointments with the people in them, meeting programmes), read from
  *                the Fiona Publication API now (no cache). Includes the names of the other people; the endpoint is secret-protected.
+ *                { "mode": "programmes", "editionId": 114, "background": true } — read-only: one row per person in Strapi who holds the festival
+ *                edition (default 114 = Industry@Tallinn & Baltic Event 2026) with the Programme/category chips (the English labels) of
+ *                the Fiona card of that person's accreditation(s), the Strapi industry categories those labels match (the sync's own name
+ *                matching), the labels that match nothing, and the card's guestbook / edition. Only cards of an active guestbook count as
+ *                this year's; other cards are listed apart. Persons without a Fiona link get a row and a status. The summary lists every
+ *                distinct label with its persons and Strapi match, every chip field of the cards, and the labels that look like "stars".
+ *                About 1,400 persons take a few minutes: start it with "background": true and read the result with {"mode":"status"}
+ *                (under "last"); other runs are refused while it goes on. Writes nothing.
  *                { "mode": "explain", "personIds": [..] } — read-only, at most 10 persons (Strapi ids): why does a person have or lack a
  *                festival edition or role? Shows the sync's fields on the person, the badges of each accreditation with their status,
  *                which rules match them (full profile, basic only, status not listed) and the editions and roles those give, what the
@@ -141,7 +149,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
@@ -154,6 +162,7 @@ export default defineEventHandler(async (event) => {
   const testScope = ['new', 'existing'].includes(body?.testScope) ? body.testScope : 'all'
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
   const accreditationIds = Array.isArray(body?.accreditationIds) ? body.accreditationIds.map(String) : [] // appointments mode: Fiona accreditation ids of people the sync does not manage
+  const editionId = Number.isInteger(Number(body?.editionId)) && Number(body.editionId) > 0 ? Number(body.editionId) : 0 // programmes mode: the festival edition whose holders are listed (default 114)
   const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
   const testExtraFields = body?.extraFields === true // a test run only: write the extra values (country, companies, ...) even while the switch is off
   const testAdoptByFilm = body?.adoptByFilm === true // a test run only: adopt the same-name person a shared film confirms even while the NUXT_SYNC_ADOPT_BY_FILM switch is off
@@ -173,7 +182,7 @@ export default defineEventHandler(async (event) => {
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
 
   return { ok: true, stats }
 })
