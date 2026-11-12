@@ -287,6 +287,24 @@ describe('findAccreditationsForLogin: the Fiona accreditations of a login whose 
       expect((await lookup(env)).trace.candidates).toEqual([{ email: 'none', myPoff: 'differs' }])
     })
 
+    it('lists, for the verified person, its accreditations and whether each is in an active guestbook (ids only)', async () => {
+      const env = setup({ fionaPersons: [fionaJaan({ accreditations: [{ id: 'acc-old', guestbook: 'gb-2019' }, { id: 'acc-now', guestbook: 'gb-now' }] })] })
+
+      const result = await lookup(env)
+
+      expect(result.trace.verified).toEqual([{ accreditations: [{ id: 'acc-old', guestbook: 'gb-2019', active: false }, { id: 'acc-now', guestbook: 'gb-now', active: true }] }])
+      expect(result.trace.activeGuestbooks).toBe(1)
+    })
+
+    it('shows a verified person that has no accreditation at all as an empty list', async () => {
+      const env = setup({ fionaPersons: [fionaJaan({ accreditations: [] })] })
+
+      const result = await lookup(env)
+
+      expect(result.accreditationIds).toEqual([])
+      expect(result.trace.verified).toEqual([{ accreditations: [] }])
+    })
+
     it('has no candidates when no person of Fiona has the name', async () => {
       const env = setup({ fionaPersons: [fionaJaan({ fullName: 'Someone Else' })] })
 
