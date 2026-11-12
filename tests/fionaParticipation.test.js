@@ -82,6 +82,11 @@ describe('mergeParticipation: the entries of the person that is merged away go t
     expect(result.problem).toMatch(/cannot be read/i)
   })
 
+  it('refuses when the kept person has no participationHistory field at all in the answer but entries are to be carried', () => {
+    expect(mergeParticipation(undefined, [entry(9, 114, [8])]).problem).toMatch(/cannot be read/i)
+    expect(mergeParticipation([], [entry(9, 114, [8])]).rows).toEqual([{ festival_edition: 114, industry_categories: [8], industry_person_types: [] }])
+  })
+
   it('refuses when an entry comes without its edition field at all', () => {
     const noEdition = { id: 1, industry_categories: [], industry_person_types: [] }
 
@@ -138,6 +143,13 @@ describe('addCategoriesToParticipation: the categories the sync matched go into 
   it('refuses when an entry comes without its edition field at all: a duplicate entry would be made for an edition it may hold', () => {
     const noEdition = { id: 2, industry_categories: [], industry_person_types: [] }
     const result = addCategoriesToParticipation([noEdition], { editionId: 114, categoryIds: [8] })
+
+    expect(result.rows).toBeNull()
+    expect(result.problem).toMatch(/cannot be read/i)
+  })
+
+  it('refuses when the person has no participationHistory field at all in the answer (an empty list is [], a missing field means Strapi did not send it)', () => {
+    const result = addCategoriesToParticipation(undefined, { editionId: 114, categoryIds: [8] })
 
     expect(result.rows).toBeNull()
     expect(result.problem).toMatch(/cannot be read/i)

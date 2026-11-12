@@ -729,7 +729,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       // the same chips into the entry of the edition in the participation history (add only), written in a save of its own
       if (participationEditionId && uniqueNumbers(editionIds || []).includes(participationEditionId)) {
         const matched = planCategories({ labels: wanted.categories, strapiCategories: await strapi.listIndustryCategories(), existingIds: [] }).ids || []
-        const entry = addCategoriesToParticipation(existing?.participationHistory, { editionId: participationEditionId, categoryIds: matched })
+        const entry = addCategoriesToParticipation(existing ? existing.participationHistory : [], { editionId: participationEditionId, categoryIds: matched })
         if (entry?.problem) {
           if (++stats.extras.participation.skipped === 1) warn(`participation history not written: ${entry.problem}`)
         } else if (entry?.rows) {

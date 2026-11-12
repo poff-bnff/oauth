@@ -58,7 +58,7 @@ export function mergeParticipation (keepRows, removeRows) {
     carried.set(edition, have)
   }
   if (!carried.size) return null
-  if (!keep.every(editionReadable)) return { rows: null, entriesAdded: 0, entriesUpdated: 0, links: 0, problem: CANNOT_READ }
+  if (!Array.isArray(keepRows) || !keep.every(editionReadable)) return { rows: null, entriesAdded: 0, entriesUpdated: 0, links: 0, problem: CANNOT_READ }
 
   const changes = new Map() // index of a kept entry → the lists that grew
   const created = []
@@ -103,7 +103,7 @@ export function addCategoriesToParticipation (rows, { editionId, categoryIds } =
   if (!Number.isFinite(edition) || edition <= 0 || !wanted.length) return null
 
   const keep = asList(rows)
-  if (!keep.every(editionReadable)) return { rows: null, created: false, links: 0, problem: CANNOT_READ }
+  if (!Array.isArray(rows) || !keep.every(editionReadable)) return { rows: null, created: false, links: 0, problem: CANNOT_READ }
   const index = keep.findIndex(row => editionOf(row) === edition)
   if (index < 0) {
     return { rows: [...keep.map(asSent), { festival_edition: edition, industry_categories: wanted }], created: true, links: wanted.length, problem: null }

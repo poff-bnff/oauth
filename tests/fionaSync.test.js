@@ -147,18 +147,14 @@ function fakeStrapi () {
     ...(p.industry_categories ? { industry_categories: p.industry_categories.map(id => ({ id })) } : {}),
     // person.participation-history entries: stored with plain ids, answered with the edition and the lists expanded (an
     // entry flagged `unreadable` is answered without its lists, as Strapi would if the relations of a component were not expanded)
-    ...(p.participationHistory
-      ? {
-          participationHistory: p.participationHistory.map(row => (row.unreadable
-            ? { id: row.id, festival_edition: row.festival_edition == null ? null : { id: row.festival_edition } }
-            : {
-                id: row.id,
-                festival_edition: row.festival_edition == null ? null : { id: row.festival_edition },
-                industry_categories: (row.industry_categories || []).map(id => ({ id })),
-                industry_person_types: (row.industry_person_types || []).map(id => ({ id }))
-              }))
-        }
-      : {}),
+    participationHistory: (p.participationHistory || []).map(row => (row.unreadable
+      ? { id: row.id, festival_edition: row.festival_edition == null ? null : { id: row.festival_edition } }
+      : {
+          id: row.id,
+          festival_edition: row.festival_edition == null ? null : { id: row.festival_edition },
+          industry_categories: (row.industry_categories || []).map(id => ({ id })),
+          industry_person_types: (row.industry_person_types || []).map(id => ({ id }))
+        })),
     ...(state.addresses.has(p.id) ? { addr_coll: { id: state.addresses.get(p.id).id, country: state.addresses.get(p.id).country ? { id: state.addresses.get(p.id).country } : null } } : {})
   })
   // Strapi's Creative Gate hooks (web2021 creative_gate_email_notification.js): a person is "ready" when it holds the
