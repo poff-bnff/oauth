@@ -26,6 +26,9 @@
  *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
  *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
  *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
+ *                { "mode": "appointments", "userIds": [..] } — read-only, at most 5 Strapi user ids (any account of a login; the main account is
+ *                used): how the login's Fiona accreditation is found (the Strapi person's, or the login search by name + proof by e-mail /
+ *                MyPoff id) and what the festival site would show that login. No e-mails or names of the login in the answer.
  *                { "mode": "appointments", "personIds": [..], "accreditationIds": [..] } — read-only, at most 5 persons (Strapi ids) and
  *                Fiona accreditation ids together (the latter for people the sync does not manage, who have no Fiona ids in Strapi): exactly what the festival site's
  *                GET /api/my/appointments shows that person (booked appointments with the people in them, meeting programmes), read from
@@ -162,6 +165,7 @@ export default defineEventHandler(async (event) => {
   const testScope = ['new', 'existing'].includes(body?.testScope) ? body.testScope : 'all'
   const background = body?.background === true // start the run and answer at once; watch it with mode "status"
   const accreditationIds = Array.isArray(body?.accreditationIds) ? body.accreditationIds.map(String) : [] // appointments mode: Fiona accreditation ids of people the sync does not manage
+  const userIds = Array.isArray(body?.userIds) ? body.userIds.map(Number) : [] // appointments mode: Strapi user ids (any account of a login): what the login search finds for them
   const editionId = Number.isInteger(Number(body?.editionId)) && Number(body.editionId) > 0 ? Number(body.editionId) : 0 // programmes mode: the festival edition whose holders are listed (default 114)
   const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
   const testExtraFields = body?.extraFields === true // a test run only: write the extra values (country, companies, ...) even while the switch is off
@@ -182,7 +186,7 @@ export default defineEventHandler(async (event) => {
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
 
   return { ok: true, stats }
 })
