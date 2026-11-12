@@ -23,6 +23,7 @@ const EMPTY = { ok: true, programmes: [], appointments: [] }
 describe('GET /api/my/appointments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    process.env.MY_APPOINTMENTS_ENABLED = 'true'
     getUserIdFromEvent.mockReturnValue(5)
     getStrapiUser.mockResolvedValue({ id: 5, person: { id: 77 }, aliasUsers: [] })
     getQuery.mockReturnValue({})
@@ -97,5 +98,30 @@ describe('GET /api/my/appointments', () => {
     buildPublicationClient.mockReturnValue({})
     appointmentsForUser.mockRejectedValue(new Error('boom'))
     expect(await handler(event)).toEqual({ ok: false, error: 'unavailable', programmes: [], appointments: [] })
+  })
+
+  describe('while it is switched off (MY_APPOINTMENTS_ENABLED is not "true")', () => {
+    it.each([undefined, '', 'false', '1', 'TRUE '])('answers an empty list without touching Strapi or Fiona (value %j)', async (value) => {
+      if (value === undefined) delete process.env.MY_APPOINTMENTS_ENABLED
+      else process.env.MY_APPOINTMENTS_ENABLED = value
+
+      const result = await handler(event)
+
+      expect(result).toEqual(EMPTY)
+      expect(getStrapiUser).not.toHaveBeenCalled()
+      expect(getStrapiPerson).not.toHaveBeenCalled()
+      expect(appointmentsForUser).not.toHaveBeenCalled()
+      expect(buildPublicationClient).not.toHaveBeenCalled()
+      expect(buildXapiClient).not.toHaveBeenCalled()
+      expect(buildStrapiGateway).not.toHaveBeenCalled()
+      expect(setHeader).toHaveBeenCalledWith(event, 'Cache-Control', 'no-store')
+    })
+
+    it('still refuses a request without a valid login', async () => {
+      delete process.env.MY_APPOINTMENTS_ENABLED
+      getUserIdFromEvent.mockImplementation(() => { throw Object.assign(new Error('Unauthorized'), { statusCode: 401 }) })
+
+      await expect(handler(event)).rejects.toMatchObject({ statusCode: 401 })
+    })
   })
 })
