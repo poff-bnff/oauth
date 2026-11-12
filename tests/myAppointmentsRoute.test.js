@@ -3,10 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('../server/utils/rateLimiter.js', () => ({ hitLimit: vi.fn() }))
 vi.mock('../server/utils/fionaSync.js', () => ({ buildPublicationClient: vi.fn(), buildXapiClient: vi.fn(), buildStrapiGateway: vi.fn() }))
 vi.mock('../server/utils/fiona/loginAppointments.js', () => ({ appointmentsForUser: vi.fn() }))
+vi.mock('../server/utils/fiona/loginLiveAppointments.js', () => ({ appointmentsForLogin: vi.fn() }))
+vi.mock('../server/utils/fiona/myAppointments.js', () => ({ appointmentsForPerson: vi.fn() }))
 
 const { hitLimit } = await import('../server/utils/rateLimiter.js')
 const { buildPublicationClient, buildXapiClient, buildStrapiGateway } = await import('../server/utils/fionaSync.js')
 const { appointmentsForUser } = await import('../server/utils/fiona/loginAppointments.js')
+const { appointmentsForLogin } = await import('../server/utils/fiona/loginLiveAppointments.js')
+const { appointmentsForPerson } = await import('../server/utils/fiona/myAppointments.js')
 const { clearAppointmentsCaches } = await import('../server/utils/fiona/appointmentsCaches.js')
 
 // Nitro auto-imports of server/utils/strapi.js and h3, stubbed as globals
@@ -34,6 +38,8 @@ describe('GET /api/my/appointments', () => {
     buildXapiClient.mockReturnValue({ xapi: true })
     buildStrapiGateway.mockReturnValue({ gateway: true })
     appointmentsForUser.mockResolvedValue({ ...EMPTY, appointments: [{ id: 'a' }] })
+    appointmentsForLogin.mockImplementation(({ fallback }) => fallback())
+    delete process.env.MY_APPOINTMENTS_LIVE
   })
 
   it('refuses a request without a valid login before it does anything else', async () => {
@@ -165,6 +171,78 @@ describe('GET /api/my/appointments', () => {
 
       expect(gateway.getActiveGuestbookIds).toHaveBeenCalledTimes(1)
       expect(first.findPeopleByFionaIds).toBe(gateway.findPeopleByFionaIds)
+    })
+  })
+
+  describe('reads Fiona live first', () => {
+    it('hands the user, the XAPI client, the language and the cached Strapi gateway to appointmentsForLogin, and answers what it answers', async () => {
+      appointmentsForLogin.mockResolvedValue({ ok: true, source: 'live', programmes: [], appointments: [{ id: 'live-1' }] })
+
+      const result = await handler(event)
+
+      expect(result).toEqual({ ok: true, source: 'live', programmes: [], appointments: [{ id: 'live-1' }] })
+      expect(appointmentsForLogin).toHaveBeenCalledWith({
+        user: { id: 5, person: { id: 77 }, aliasUsers: [] },
+        xapi: { xapi: true },
+        strapi: expect.objectContaining({ gateway: true, getActiveGuestbookIds: expect.any(Function) }),
+        lang: 'en',
+        readCardProgrammes: expect.any(Function),
+        fallback: expect.any(Function)
+      })
+      expect(appointmentsForUser).not.toHaveBeenCalled()
+    })
+
+    it('uses the published-card path (appointmentsForUser) as the fallback, with the same arguments as before', async () => {
+      await handler(event)
+
+      expect(appointmentsForUser).toHaveBeenCalledWith({
+        user: { id: 5, person: { id: 77 }, aliasUsers: [] },
+        loadPerson: expect.any(Function),
+        publication: { publication: true },
+        xapi: { xapi: true },
+        strapi: expect.objectContaining({ gateway: true }),
+        lang: 'en'
+      })
+    })
+
+    it('reads no live data when MY_APPOINTMENTS_LIVE is "false" or when no XAPI client is configured', async () => {
+      process.env.MY_APPOINTMENTS_LIVE = ' False '
+      await handler(event)
+      expect(appointmentsForLogin.mock.calls[0][0].xapi).toBeNull()
+
+      delete process.env.MY_APPOINTMENTS_LIVE
+      buildXapiClient.mockReturnValue(null)
+      await handler(event)
+      expect(appointmentsForLogin.mock.calls[1][0].xapi).toBeNull()
+    })
+
+    it('does not need the Publication client for the live answer: it is built only when the fallback or the programme roles run', async () => {
+      buildPublicationClient.mockImplementation(() => { throw new Error('NUXT_FIONA_PUBLICATION_API_KEY is not configured') })
+      appointmentsForLogin.mockResolvedValue({ ok: true, source: 'live', programmes: [], appointments: [] })
+
+      expect(await handler(event)).toEqual({ ok: true, source: 'live', programmes: [], appointments: [] })
+      expect(buildPublicationClient).not.toHaveBeenCalled()
+    })
+
+    it('reads the programmes of the published cards by accreditation id for the roles, without any Strapi read for profile links', async () => {
+      appointmentsForPerson.mockResolvedValue({ ok: true, programmes: [{ id: 'mp-1', role: { key: 'ir', text: 'IR' } }], appointments: [] })
+      appointmentsForLogin.mockResolvedValue({ ok: true, programmes: [], appointments: [] })
+      await handler(event)
+      const { readCardProgrammes } = appointmentsForLogin.mock.calls[0][0]
+
+      expect(await readCardProgrammes(['acc-1', 'acc-2'])).toEqual([{ id: 'mp-1', role: { key: 'ir', text: 'IR' } }])
+
+      const call = appointmentsForPerson.mock.calls[0][0]
+      expect(call.person).toEqual({ fiona_person_id: null, fiona_accreditation_id: 'acc-1,acc-2' })
+      expect(call.publication).toEqual({ publication: true })
+      expect(call.lang).toBe('en')
+      expect(await call.strapi.findPeopleByFionaIds(['x'])).toEqual([])
+    })
+
+    it('says "unavailable" when the live-first function itself fails', async () => {
+      appointmentsForLogin.mockRejectedValue(new Error('boom'))
+
+      expect(await handler(event)).toEqual({ ok: false, error: 'unavailable', programmes: [], appointments: [] })
     })
   })
 
