@@ -133,6 +133,16 @@ describe('loginIdentity: who is this login (the main account and its aliases)', 
     expect(identity.names).toEqual(['anna kask'])
   })
 
+  it('loads a person that comes as a plain id, as Strapi gives the relations of the alias accounts', async () => {
+    const loadPerson = vi.fn(id => Promise.resolve(person(id, 'Jaan', 'Leppik')))
+    const user = { id: 23969, email: 'main@example.com', person: null, aliasUsers: [{ id: 22135, email: 'jaan@example.com', person: 120 }, { id: 29348, email: 'x@example.com', person: null }] }
+
+    const identity = await loginIdentity(user, { loadPerson })
+
+    expect(loadPerson).toHaveBeenCalledWith(120)
+    expect(identity.names).toEqual(['jaan leppik'])
+  })
+
   it('has no names for a login without any person', async () => {
     const identity = await loginIdentity({ id: 1, email: 'a@example.com', person: null, aliasUsers: [] }, { loadPerson: vi.fn() })
 
@@ -341,6 +351,19 @@ describe('appointmentsForUser: appointments of a logged-in user, by the Strapi p
     expect(result.appointments).toHaveLength(1)
     expect(env.publication.getRaw).not.toHaveBeenCalledWith('/persons')
     expect(env.xapi.getPerson).not.toHaveBeenCalled()
+  })
+
+  it('works when the persons come as plain ids (alias person 120, main account person 77)', async () => {
+    const env = setup({ fionaPersons: [fionaJaan()], cards: { 'acc-now': card('acc-now', 'fp-jaan') } })
+
+    const viaAlias = await run(env, userOf({ aliasUsers: [{ id: 22135, email: 'jaan@example.com', person: 120 }] }))
+    expect(viaAlias.appointments).toHaveLength(1)
+
+    const own = setup({ cards: { 'acc-1': card('acc-1', 'fp-me') } })
+    const loadPerson = vi.fn(id => Promise.resolve(personWith({ id, fiona_person_id: 'fp-me', fiona_accreditation_id: 'acc-1' })))
+    const viaPerson = await run(own, userOf({ person: 77 }), { loadPerson })
+    expect(viaPerson.appointments).toHaveLength(1)
+    expect(loadPerson).toHaveBeenCalledWith(77)
   })
 
   it('finds the accreditation through the login when the person has none: main account without a person, the alias\' person has the name', async () => {
