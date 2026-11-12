@@ -9,6 +9,7 @@
 import { hitLimit } from '../../utils/rateLimiter.js'
 import { buildPublicationClient, buildXapiClient, buildStrapiGateway } from '../../utils/fionaSync.js'
 import { appointmentsForUser } from '../../utils/fiona/loginAppointments.js'
+import { userCache, personCache, guestbookCache } from '../../utils/fiona/appointmentsCaches.js'
 
 const MAX_REQUESTS_PER_MINUTE = 30
 
@@ -31,7 +32,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 429, statusMessage: 'Too Many Requests' })
   }
 
-  const user = await getStrapiUser(userId)
+  // the full user is read from Strapi at most once in two minutes (and once at a time) per user
+  const user = await userCache.load(userId, () => getStrapiUser(userId))
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
   // appointments hold other people's names: the browser must not keep them
@@ -39,12 +41,13 @@ export default defineEventHandler(async (event) => {
 
   const lang = getQuery(event)?.lang === 'et' ? 'et' : 'en'
   try {
+    const gateway = buildStrapiGateway()
     return await appointmentsForUser({
       user,
-      loadPerson: getStrapiPerson,
+      loadPerson: id => personCache.load(String(id), () => getStrapiPerson(id)),
       publication: buildPublicationClient(),
       xapi: buildXapiClient(),
-      strapi: buildStrapiGateway(),
+      strapi: { ...gateway, getActiveGuestbookIds: () => guestbookCache.load('active', () => gateway.getActiveGuestbookIds()) },
       lang
     })
   } catch (err) {
