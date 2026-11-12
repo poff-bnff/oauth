@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('../server/utils/rateLimiter.js', () => ({ hitLimit: vi.fn() }))
-vi.mock('../server/utils/fionaSync.js', () => ({ buildPublicationClient: vi.fn(), buildStrapiGateway: vi.fn() }))
-vi.mock('../server/utils/fiona/myAppointments.js', () => ({ appointmentsForPerson: vi.fn() }))
+vi.mock('../server/utils/fionaSync.js', () => ({ buildPublicationClient: vi.fn(), buildXapiClient: vi.fn(), buildStrapiGateway: vi.fn() }))
+vi.mock('../server/utils/fiona/loginAppointments.js', () => ({ appointmentsForUser: vi.fn() }))
 
 const { hitLimit } = await import('../server/utils/rateLimiter.js')
-const { buildPublicationClient, buildStrapiGateway } = await import('../server/utils/fionaSync.js')
-const { appointmentsForPerson } = await import('../server/utils/fiona/myAppointments.js')
+const { buildPublicationClient, buildXapiClient, buildStrapiGateway } = await import('../server/utils/fionaSync.js')
+const { appointmentsForUser } = await import('../server/utils/fiona/loginAppointments.js')
 
 // Nitro auto-imports of server/utils/strapi.js and h3, stubbed as globals
 globalThis.defineEventHandler = handler => handler
@@ -24,13 +24,13 @@ describe('GET /api/my/appointments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     getUserIdFromEvent.mockReturnValue(5)
-    getStrapiUser.mockResolvedValue({ id: 5, person: { id: 77 } })
-    getStrapiPerson.mockResolvedValue({ id: 77, fiona_person_id: 'fp', fiona_accreditation_id: 'acc' })
+    getStrapiUser.mockResolvedValue({ id: 5, person: { id: 77 }, aliasUsers: [] })
     getQuery.mockReturnValue({})
     hitLimit.mockReturnValue({ exceeded: false, retryAfter: 0 })
     buildPublicationClient.mockReturnValue({ publication: true })
+    buildXapiClient.mockReturnValue({ xapi: true })
     buildStrapiGateway.mockReturnValue({ gateway: true })
-    appointmentsForPerson.mockResolvedValue({ ...EMPTY, appointments: [{ id: 'a' }] })
+    appointmentsForUser.mockResolvedValue({ ...EMPTY, appointments: [{ id: 'a' }] })
   })
 
   it('refuses a request without a valid login before it does anything else', async () => {
@@ -58,25 +58,15 @@ describe('GET /api/my/appointments', () => {
     await expect(handler(event)).rejects.toMatchObject({ statusCode: 404 })
   })
 
-  it('has nothing to show for a user without a person, and does not reach for Fiona', async () => {
-    getStrapiUser.mockResolvedValue({ id: 5, person: null })
-    expect(await handler(event)).toEqual(EMPTY)
-
-    getStrapiUser.mockResolvedValue({ id: 5, person: {} })
-    expect(await handler(event)).toEqual(EMPTY)
-
-    expect(buildPublicationClient).not.toHaveBeenCalled()
-    expect(appointmentsForPerson).not.toHaveBeenCalled()
-  })
-
-  it('shows the appointments of the person of the logged-in user, in English unless Estonian is asked for, and never lets the browser keep them', async () => {
+  it('hands the logged-in user, the loader of persons and the Fiona and Strapi clients to appointmentsForUser, in English unless Estonian is asked for, and never lets the browser keep the answer', async () => {
     const result = await handler(event)
 
     expect(result).toEqual({ ...EMPTY, appointments: [{ id: 'a' }] })
-    expect(getStrapiPerson).toHaveBeenCalledWith(77)
-    expect(appointmentsForPerson).toHaveBeenCalledWith({
-      person: { id: 77, fiona_person_id: 'fp', fiona_accreditation_id: 'acc' },
+    expect(appointmentsForUser).toHaveBeenCalledWith({
+      user: { id: 5, person: { id: 77 }, aliasUsers: [] },
+      loadPerson: getStrapiPerson,
       publication: { publication: true },
+      xapi: { xapi: true },
       strapi: { gateway: true },
       lang: 'en'
     })
@@ -84,11 +74,20 @@ describe('GET /api/my/appointments', () => {
 
     getQuery.mockReturnValue({ lang: 'et' })
     await handler(event)
-    expect(appointmentsForPerson.mock.calls[1][0].lang).toBe('et')
+    expect(appointmentsForUser.mock.calls[1][0].lang).toBe('et')
 
     getQuery.mockReturnValue({ lang: 'xx' })
     await handler(event)
-    expect(appointmentsForPerson.mock.calls[2][0].lang).toBe('en')
+    expect(appointmentsForUser.mock.calls[2][0].lang).toBe('en')
+  })
+
+  it('looks only at the logged-in user: nothing from the browser but the language reaches appointmentsForUser', async () => {
+    getQuery.mockReturnValue({ lang: 'en', userId: '999', accreditation: 'acc-x', person: '1' })
+
+    await handler(event)
+
+    expect(getStrapiUser).toHaveBeenCalledWith(5)
+    expect(Object.keys(appointmentsForUser.mock.calls[0][0]).sort()).toEqual(['lang', 'loadPerson', 'publication', 'strapi', 'user', 'xapi'])
   })
 
   it('says "unavailable" instead of failing when Fiona is not configured or breaks unexpectedly', async () => {
@@ -96,7 +95,7 @@ describe('GET /api/my/appointments', () => {
     expect(await handler(event)).toEqual({ ok: false, error: 'unavailable', programmes: [], appointments: [] })
 
     buildPublicationClient.mockReturnValue({})
-    appointmentsForPerson.mockRejectedValue(new Error('boom'))
+    appointmentsForUser.mockRejectedValue(new Error('boom'))
     expect(await handler(event)).toEqual({ ok: false, error: 'unavailable', programmes: [], appointments: [] })
   })
 })
