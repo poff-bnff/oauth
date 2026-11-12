@@ -34,7 +34,11 @@ export function normalizeName (value) {
   return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
-const nameOfPerson = person => normalizeName(person?.firstNameLastName || [person?.firstName, person?.lastName].filter(Boolean).join(' '))
+const nameOfPerson = person => (person !== null && typeof person === 'object'
+  ? normalizeName(person.firstNameLastName || [person.firstName, person.lastName].filter(Boolean).join(' '))
+  : '')
+// Strapi gives a relation as an object or, for the alias accounts of a user, as a plain id
+const personIdOf = person => (person !== null && typeof person === 'object' ? person.id : person)
 
 /**
  * Who a login is: the ids, the e-mails and the (normalized) names of the main account and of its aliases.
@@ -48,9 +52,10 @@ export async function loginIdentity (user, { loadPerson } = {}) {
     const person = account.person
     if (!person) continue
     let name = nameOfPerson(person)
-    if (!name && person.id && typeof loadPerson === 'function') {
+    const personId = personIdOf(person)
+    if (!name && personId && typeof loadPerson === 'function') {
       try {
-        name = nameOfPerson(await loadPerson(person.id))
+        name = nameOfPerson(await loadPerson(personId))
       } catch (err) {
         name = ''
       }
@@ -182,7 +187,8 @@ async function resolveAccreditations ({ user, loadPerson, publication, xapi, str
     if (!loaded.has(id)) loaded.set(id, Promise.resolve(loadPerson(id)))
     return loaded.get(id)
   }
-  const person = user?.person?.id ? await load(user.person.id) : null
+  const personId = personIdOf(user?.person)
+  const person = personId ? await load(personId) : null
   const own = splitIds(person?.fiona_accreditation_id)
   if (own.length) return { ok: true, source: 'person', person, fionaPersonId: person.fiona_person_id ?? null, accreditationIds: own }
 
