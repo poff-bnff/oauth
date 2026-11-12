@@ -29,6 +29,7 @@ import { buildPersonPayload, valuesToClear } from './personMapper.js'
 import { normalizeName, uniqueNames, splitOccupations, isPlaceholderCompany, planCategories, planRoles, planCountry } from './extraFields.js'
 import { headshotFileName } from './photoName.js'
 import { findSameNamePersons, describeCandidate } from './sameName.js'
+import { addCategoriesToParticipation } from './participation.js'
 import { assessSameName, collectFionaFilms } from './filmEvidence.js'
 
 export const JOB_KEY = 'accreditations'
@@ -110,7 +111,8 @@ function newStats (dryRun, mode) {
       country: { set: 0, unmatched: {} },
       organisations: { linked: 0, created: 0, wouldCreate: 0, skipped: 0, createdNames: [] },
       categories: { added: 0, unmatched: {} },
-      roles: { added: 0, unmatched: {} }
+      roles: { added: 0, unmatched: {} },
+      participation: { entriesCreated: 0, entriesUpdated: 0, links: 0, skipped: 0 } // the entries of Person.participationHistory (edition `participationEditionId`)
     },
     removals: { skipped: false, reason: null },
     incremental: null,
@@ -276,6 +278,9 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   // extra values (country, companies, Programme/category, occupation): written only with the switch on (or in a test run
   // that asks for it); a dry run always shows what they would do
   const extraFieldsOn = Boolean(config.extraFields) || Boolean(only?.extraFields)
+  // the Programme/category chips of a card also go into the person's participation history entry of THIS edition (default 114 = Industry@Tallinn 2026,
+  // set in hunt as NUXT_SYNC_PARTICIPATION_EDITION_ID; 0 = off); only for persons the rules give that edition, so next year's chips never land in this year's entry
+  const participationEditionId = Number(config.participationEditionId) > 0 ? Number(config.participationEditionId) : 0
   // a same-name Strapi person that a shared film confirms is adopted only with the switch on (or in a test run that asks for it);
   // the counts in stats.sameName are always there
   const adoptByFilmOn = Boolean(config.adoptByFilm) || Boolean(only?.adoptByFilm)
@@ -701,12 +706,18 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   const organisationIdByName = new Map() // normalised company name → organisation id, found or created in this run
   const plannedNewOrganisations = new Set() // a dry run: the names it would create
   const countName = (counts, name) => { counts[name] = (counts[name] || 0) + 1 }
-  async function planExtraFields ({ existing, fionaPerson, wanted }) {
+  const countParticipation = (entry) => {
+    if (entry.created) stats.extras.participation.entriesCreated++
+    else stats.extras.participation.entriesUpdated++
+    stats.extras.participation.links += entry.links
+  }
+  async function planExtraFields ({ existing, fionaPerson, wanted, editionIds }) {
     if (typeof strapi.listIndustryCategories !== 'function') return null
     const payload = {}
     const pending = [] // changes that are not a plain payload field the comparison sees
     let countryId = null
     let roles = null
+    let participation = null
 
     if (wanted?.categories.length) {
       const plan = planCategories({ labels: wanted.categories, strapiCategories: await strapi.listIndustryCategories(), existingIds: relationIds(existing?.industry_categories) })
@@ -714,6 +725,17 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       if (plan.ids) {
         payload.industry_categories = plan.ids
         stats.extras.categories.added += plan.added.length
+      }
+      // the same chips into the entry of the edition in the participation history (add only), written in a save of its own
+      if (participationEditionId && uniqueNumbers(editionIds || []).includes(participationEditionId)) {
+        const matched = planCategories({ labels: wanted.categories, strapiCategories: await strapi.listIndustryCategories(), existingIds: [] }).ids || []
+        const entry = addCategoriesToParticipation(existing ? existing.participationHistory : [], { editionId: participationEditionId, categoryIds: matched })
+        if (entry?.problem) {
+          if (++stats.extras.participation.skipped === 1) warn(`participation history not written: ${entry.problem}`)
+        } else if (entry?.rows) {
+          participation = entry
+          pending.push('participationHistory')
+        }
       }
     }
 
@@ -771,7 +793,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       countryId = country.id
       pending.push('addr_coll.country')
     }
-    return { payload, pending, countryId, roles }
+    return { payload, pending, countryId, roles, participation }
   }
 
   // 6. Upsert desired persons -----------------------------------------------
@@ -947,7 +969,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       let extra = null
       if (want.level === 2 && (dryRun || extraFieldsOn)) {
         try {
-          extra = await planExtraFields({ existing, fionaPerson, wanted: extras.get(fionaPersonId) })
+          extra = await planExtraFields({ existing, fionaPerson, wanted: extras.get(fionaPersonId), editionIds: want.editionIds })
         } catch (err) {
           if (++stats.extras.errors <= 3) warn(`person ${fionaPersonId}: extra values skipped (${describeError(err)})`)
         }
@@ -987,13 +1009,13 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
         if (!existing) {
           stats.persons.created++
           log.info(`${would}CREATE ${summary}`)
-          recordDryRun({ action: 'CREATE', ...plan, changed: null })
+          recordDryRun({ action: 'CREATE', ...plan, changed: null, ...(extra?.participation ? { participation: extra.participation.rows } : {}) })
         } else if (changed.length) {
           stats.persons.updated++
           log.info(`${would}UPDATE person #${existing.id} (${changed.join(', ')}) ${summary}`)
           const diff = contentDiff(existing, payload, changed)
           const compare = Object.keys(diff).length ? { diff, strapiUpdatedAt: existing.updated_at || null } : {}
-          recordDryRun({ action: 'UPDATE', personId: existing.id, ...plan, changed, ...compare })
+          recordDryRun({ action: 'UPDATE', personId: existing.id, ...plan, changed, ...compare, ...(extra?.participation ? { participation: extra.participation.rows } : {}) })
         } else {
           stats.persons.unchanged++
         }
@@ -1002,6 +1024,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
           recordDryRun({ action: action.type, fionaPersonId, personId: existing?.id, detachEditionIds: detach, removeRoleIds: removeRoles })
         }
         if (extra?.roles) stats.extras.roles.added += extra.roles.count
+        if (extra?.participation) countParticipation(extra.participation)
         stats.editions.attached += newlyAttached.length
         stats.editions.detached += detach.length
         if (want.level === 2 && (!existing || (changed.length && !onlyPublicChanged)) && [...want.fullRuleIds].some(id => buildRules.has(id))) stats.build.candidates++
@@ -1076,6 +1099,17 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
           personChanged = true
         } catch (err) {
           if (++stats.extras.errors <= 3) warn(`person ${fionaPersonId}: roles not written (${describeError(err)})`)
+        }
+      }
+
+      // the participation history entry goes in a save of its own too (its lists are sent whole, the other entries by id only)
+      if (extra?.participation) {
+        try {
+          await strapi.updatePerson(person.id, { participationHistory: extra.participation.rows, skipbuild: true })
+          countParticipation(extra.participation)
+          personChanged = true
+        } catch (err) {
+          if (++stats.extras.errors <= 3) warn(`person ${fionaPersonId}: participation history not written (${describeError(err)})`)
         }
       }
 

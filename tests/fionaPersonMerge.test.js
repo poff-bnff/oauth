@@ -171,6 +171,34 @@ describe('planMerge: what the kept record gets', () => {
     expect(planMerge({ keep: remove, remove: keep }).patch.orderedRaF).toBeUndefined() // it has role 13 already
   })
 
+  it('carries the participation history (the entries per edition) of the other record over, merged per edition, the kept entries by id only', () => {
+    const entry = (id, edition, categories = [], types = []) => ({ id, festival_edition: { id: edition }, industry_categories: categories.map(c => ({ id: c })), industry_person_types: types.map(t => ({ id: t })) })
+    const keep = person(20, { participationHistory: [entry(1, 114, [7], [5]), entry(2, 80, [3])] })
+    const remove = person(500, { participationHistory: [entry(9, 114, [7, 8]), entry(10, 86, [4], [6])] })
+
+    const result = planMerge({ keep, remove })
+
+    expect(result.ok).toBe(true)
+    expect(result.patch.participationHistory).toEqual([
+      { id: 1, industry_categories: [7, 8] },
+      { id: 2 },
+      { festival_edition: 86, industry_categories: [4], industry_person_types: [6] }
+    ])
+    expect(result.changes).toContain('participationHistory')
+    expect(planMerge({ keep: remove, remove: keep }).patch.participationHistory).toBeDefined() // the other way round, the 80 entry is new
+    expect(planMerge({ keep, remove: person(500) }).patch.participationHistory).toBeUndefined() // nothing to carry
+  })
+
+  it('refuses to merge when entries it must combine cannot be read, rather than lose or double the tags', () => {
+    const keep = person(20, { participationHistory: [{ id: 1, festival_edition: { id: 114 } }] })
+    const remove = person(500, { participationHistory: [{ id: 9, festival_edition: { id: 114 }, industry_categories: [{ id: 8 }], industry_person_types: [] }] })
+
+    const result = planMerge({ keep, remove })
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/participationHistory/)
+  })
+
   it('copies a single component (biography) only into an empty one, without the ids of the other record', () => {
     const remove = person(500, { biography: { id: 77, en: 'Text', et: 'Tekst' } })
     expect(planMerge({ keep: OLD, remove }).patch.biography).toEqual({ en: 'Text', et: 'Tekst' })
@@ -423,6 +451,32 @@ describe('mergePersons', () => {
     expect(strapi.store.get(500).fiona_person_id).toBeNull()
     expect(strapi.users[70].person).toBe(20)
     expect(result.verify).toEqual({ ok: true, problems: [] })
+  })
+
+  it('writes the participation history to the kept record and checks afterwards that every entry is there', async () => {
+    const entry = (id, edition, categories = []) => ({ id, festival_edition: { id: edition }, industry_categories: categories.map(c => ({ id: c })), industry_person_types: [] })
+    const withEntries = [{ ...clone(OLD), participationHistory: [entry(1, 114, [7])] }, { ...clone(COPY), participationHistory: [entry(9, 114, [8]), entry(10, 86, [4])] }]
+    const strapi = fakeStrapi(withEntries)
+
+    const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
+
+    expect(result.status).toBe('merged')
+    const [, , keepBody] = strapi.calls.find(([name, id]) => name === 'updatePerson' && id === 20)
+    expect(keepBody.participationHistory).toEqual([{ id: 1, industry_categories: [7, 8] }, { festival_edition: 86, industry_categories: [4], industry_person_types: [] }])
+    expect(result.verify).toEqual({ ok: true, problems: [] })
+  })
+
+  it('reports a check failure when an entry did not arrive on the kept record', async () => {
+    const entry = (id, edition, categories = []) => ({ id, festival_edition: { id: edition }, industry_categories: categories.map(c => ({ id: c })), industry_person_types: [] })
+    const withEntries = [{ ...clone(OLD), participationHistory: [entry(1, 114, [7])] }, { ...clone(COPY), participationHistory: [entry(10, 86, [4])] }]
+    const strapi = fakeStrapi(withEntries)
+    const write = strapi.updatePerson.bind(strapi)
+    strapi.updatePerson = (id, payload) => write(id, Number(id) === 20 ? { ...payload, participationHistory: [{ id: 1 }] } : payload) // Strapi drops the new entry
+
+    const result = await mergePersons({ keepId: 20, removeId: 500, strapi, dryRun: false, retire: 'hide', log: silent })
+
+    expect(result.verify.ok).toBe(false)
+    expect(result.verify.problems.join(' ')).toMatch(/participationHistory/)
   })
 
   it('works on a runtime without structuredClone (the hunt app has none): the backup is taken another way', async () => {
