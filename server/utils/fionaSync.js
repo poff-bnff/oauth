@@ -38,7 +38,8 @@ import { explainPersons } from './fiona/explainPerson.js'
 import { lostEditionsReport } from './fiona/lostEditions.js'
 import { listBadgeTypes } from './fiona/badgeTypes.js'
 import { appointmentsReport } from './fiona/myAppointments.js'
-import { loginAppointmentsReport } from './fiona/loginAppointments.js'
+import { loginAppointmentsReport, appointmentsForUserFresh } from './fiona/loginAppointments.js'
+import { liveAppointmentsReport } from './fiona/liveAppointmentsReport.js'
 import { programmeReport } from './fiona/programmeReport.js'
 
 const config = useRuntimeConfig()
@@ -255,6 +256,27 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
   // read-only: can the user-roles be read without their users? "roles" times the GraphQL read (id + badge rules only); "rolesCompare"
   // also does ONE heavy REST read (every role with every user, about 17 MB) and says whether the two agree
   if (mode === 'roles' || mode === 'rolesCompare') return { mode, ...(await rolesReadReport({ graphql: fetchStrapiUserRolesGraphql, rest: mode === 'rolesCompare' ? fetchStrapiUserRolesRest : null })) }
+  // read-only: what Fiona holds NOW for a login (XAPI, no publish step) against what the published card says, with the time of each read
+  // ("probe": true also shows the two values of a differing field)
+  if (mode === 'liveAppointments') {
+    const xapi = buildXapiClient()
+    if (!xapi) throw new Error('liveAppointments needs NUXT_FIONA_API_KEY')
+    if (!userIds.length) throw new Error('liveAppointments needs userIds (Strapi user ids)')
+    const strapi = buildStrapiGateway()
+    const publication = buildPublicationClient()
+    return {
+      mode,
+      ...(await liveAppointmentsReport({
+        userIds,
+        showValues: probe === true,
+        loadUser: getStrapiUser,
+        loadPerson: getStrapiPerson,
+        xapi,
+        strapi,
+        readPublished: ({ user }) => appointmentsForUserFresh({ user, loadPerson: getStrapiPerson, publication, xapi, strapi, log })
+      }))
+    }
+  }
   // read-only: the Programme/category chips of the Fiona card of everyone who holds a festival edition (default Industry@Tallinn 2026 = 114)
   if (mode === 'programmes') return { mode, ...(await programmeReport({ strapi: buildStrapiGateway(), publication: buildPublicationClient(), editionId: editionId || 114, log })) }
   // read-only: the raw field structure of a few persons from both Fiona APIs (where is a value kept?)
