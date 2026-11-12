@@ -1,14 +1,15 @@
-// The appointments (meetings, black carpets, Q&As, screenings, ...) of the logged-in user, read live from Fiona,
-// with the people in them and the meeting programmes the user takes part in. Nothing is stored; see
-// server/utils/fiona/myAppointments.js and loginAppointments.js. Only the user's own accreditation(s) are read: no id
-// comes from the browser. The accreditation is the one on the user's Strapi person (persons the Fiona sync manages);
-// for a login whose person has none (staff, organisers) it is found in Fiona by the login's name and accepted only
-// when Fiona's own record proves it is that login (e-mail, MyPoff user id).
+// The appointments (meetings, black carpets, Q&As, screenings, ...) of the logged-in user, with the people in them and the
+// meeting programmes the user takes part in. Nothing is stored. Read from Fiona NOW (the XAPI account routes of the user's
+// accounts, main + aliases: no publish step and no Strapi person needed; see server/utils/fiona/loginLiveAppointments.js), and
+// from the published accreditation card (myAppointments.js and loginAppointments.js) whenever Fiona has no account for any
+// of them or a live read fails. Only the user's own accounts are read: no id comes from the browser.
 //   GET /api/my/appointments?lang=en|et     (Authorization: Bearer <jwt>)
 //   → { ok, programmes[], appointments[], stale?, partial?, error? }
 import { hitLimit } from '../../utils/rateLimiter.js'
 import { buildPublicationClient, buildXapiClient, buildStrapiGateway } from '../../utils/fionaSync.js'
 import { appointmentsForUser } from '../../utils/fiona/loginAppointments.js'
+import { appointmentsForLogin } from '../../utils/fiona/loginLiveAppointments.js'
+import { appointmentsForPerson } from '../../utils/fiona/myAppointments.js'
 import { userCache, personCache, guestbookCache } from '../../utils/fiona/appointmentsCaches.js'
 
 const MAX_REQUESTS_PER_MINUTE = 30
@@ -17,6 +18,9 @@ const MAX_REQUESTS_PER_MINUTE = 30
 // now and the route is back on): set MY_APPOINTMENTS_ENABLED to "false" and the route answers an empty list without calling
 // Strapi or Fiona (login is still checked); the my-events page then simply hides the section. Anything else keeps it on.
 const isEnabled = () => String(process.env.MY_APPOINTMENTS_ENABLED ?? '').trim().toLowerCase() !== 'false'
+
+// MY_APPOINTMENTS_LIVE set to "false" skips the live read (Fiona XAPI) and answers from the published card only, as before 2026-11-12.
+const liveEnabled = () => String(process.env.MY_APPOINTMENTS_LIVE ?? '').trim().toLowerCase() !== 'false'
 
 export default defineEventHandler(async (event) => {
   const userId = getUserIdFromEvent(event)
@@ -42,13 +46,22 @@ export default defineEventHandler(async (event) => {
   const lang = getQuery(event)?.lang === 'et' ? 'et' : 'en'
   try {
     const gateway = buildStrapiGateway()
-    return await appointmentsForUser({
+    const strapi = { ...gateway, getActiveGuestbookIds: () => guestbookCache.load('active', () => gateway.getActiveGuestbookIds()) }
+    const xapi = liveEnabled() ? buildXapiClient() : null // null: no live read, the published-card path answers
+    const loadPerson = id => personCache.load(String(id), () => getStrapiPerson(id))
+    return await appointmentsForLogin({
       user,
-      loadPerson: id => personCache.load(String(id), () => getStrapiPerson(id)),
-      publication: buildPublicationClient(),
-      xapi: buildXapiClient(),
-      strapi: { ...gateway, getActiveGuestbookIds: () => guestbookCache.load('active', () => gateway.getActiveGuestbookIds()) },
-      lang
+      xapi,
+      strapi,
+      lang,
+      // the role of the user in a meeting programme is only on the published card (the XAPI does not give it); no Strapi read for profile links
+      readCardProgrammes: async ids => (await appointmentsForPerson({
+        person: { fiona_person_id: null, fiona_accreditation_id: ids.join(',') },
+        publication: buildPublicationClient(),
+        strapi: { findPeopleByFionaIds: () => Promise.resolve([]) },
+        lang
+      })).programmes,
+      fallback: () => appointmentsForUser({ user, loadPerson, publication: buildPublicationClient(), xapi, strapi, lang })
     })
   } catch (err) {
     console.warn(`[my/appointments] user ${userId}: ${err?.message || err}`) // eslint-disable-line no-console
