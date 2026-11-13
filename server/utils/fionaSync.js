@@ -41,6 +41,7 @@ import { appointmentsReport } from './fiona/myAppointments.js'
 import { loginAppointmentsReport, appointmentsForUserFresh } from './fiona/loginAppointments.js'
 import { liveAppointmentsReport } from './fiona/liveAppointmentsReport.js'
 import { xapiAccountReport } from './fiona/xapiAccountReport.js'
+import { recentTimings } from './fiona/timingLog.js'
 import { programmeReport } from './fiona/programmeReport.js'
 
 const config = useRuntimeConfig()
@@ -176,6 +177,8 @@ async function compareFionaSources () {
 
 export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], userIds = [], editionId = 0, testExtraFields = false, testAdoptByFilm = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [] } = {}) {
   if (mode === 'status') return statusReport()
+  // read-only and never refused by the run lock: the last timed requests (appointments, login) with the time of each step, optionally of the given Strapi user ids only
+  if (mode === 'timings') return { mode, entries: recentTimings({ userIds }) }
   if (mode === 'auto') {
     const waiting = autoBackoff.check()
     if (waiting) {
