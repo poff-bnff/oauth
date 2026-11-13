@@ -35,7 +35,8 @@ describe('GET /api/auth/oauth', () => {
   it('still redirects with a JWT for the Strapi user after the role sync', async () => {
     const result = await handler(event)
 
-    expect(updateUserAndAliasesRoles).toHaveBeenCalledWith({ id: 17745 })
+    expect(updateUserAndAliasesRoles).toHaveBeenCalledWith({ id: 17745 }, { timer: expect.objectContaining({ step: expect.any(Function) }) })
+    expect(authenticateStrapiUser).toHaveBeenCalledWith('someone@example.ee', { timer: expect.objectContaining({ step: expect.any(Function) }) })
     const token = result.redirect.replace('https://industry.poff.ee/?jwt=', '')
     expect(jwt.decode(token).sub).toBe('17745')
   })
@@ -49,6 +50,7 @@ describe('GET /api/auth/oauth', () => {
       'token exchange (OAuth provider)',
       'user info (OAuth provider)',
       'Strapi authenticate',
+      'role sync › user read (Strapi)',
       'role sync (Fiona badges + Strapi)'
     ])
     expect(JSON.stringify(entry)).not.toContain('someone@example.ee')
@@ -60,7 +62,7 @@ describe('GET /api/auth/oauth', () => {
     const result = await handler(event)
 
     expect(result.redirect).toContain('https://industry.poff.ee/?jwt=')
-    expect(recentTimings()[0].steps.find(step => step.name.startsWith('role sync'))).toMatchObject({ failed: true })
+    expect(recentTimings()[0].steps.find(step => step.name === 'role sync (Fiona badges + Strapi)')).toMatchObject({ failed: true })
   })
 
   it('refuses a callback with a wrong state and records nothing', async () => {

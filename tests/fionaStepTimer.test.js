@@ -40,8 +40,19 @@ describe('createStepTimer', () => {
     expect(timer.serverTiming()).toBe('live-read-Fiona-XAPI;dur=186, user;dur=2, total;dur=188')
   })
 
+  it('keeps details noted during the request (such as the time of each Fiona call) next to the steps', () => {
+    const c = clock()
+    const timer = createStepTimer({ now: c.now })
+    expect(timer.summary().details).toBeUndefined()
+
+    timer.detail('liveCalls', [{ what: 'appointments', outcome: 'ok', ms: 180 }])
+
+    expect(timer.summary().details).toEqual({ liveCalls: [{ what: 'appointments', outcome: 'ok', ms: 180 }] })
+  })
+
   it('has a timer that does nothing, for callers that were not given one', async () => {
     expect(await noopTimer.step('x', () => Promise.resolve(7))).toBe(7)
+    expect(() => noopTimer.detail('x', 1)).not.toThrow()
   })
 })
 
