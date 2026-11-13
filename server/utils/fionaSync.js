@@ -42,6 +42,7 @@ import { loginAppointmentsReport, appointmentsForUserFresh } from './fiona/login
 import { liveAppointmentsReport } from './fiona/liveAppointmentsReport.js'
 import { xapiAccountReport } from './fiona/xapiAccountReport.js'
 import { recentTimings } from './fiona/timingLog.js'
+import { whySyncedReport } from './fiona/whySynced.js'
 import { programmeReport } from './fiona/programmeReport.js'
 
 const config = useRuntimeConfig()
@@ -260,6 +261,13 @@ async function runInner ({ dryRun, force, mode, personIds, all, probe, guestbook
   // read-only: can the user-roles be read without their users? "roles" times the GraphQL read (id + badge rules only); "rolesCompare"
   // also does ONE heavy REST read (every role with every user, about 17 MB) and says whether the two agree
   if (mode === 'roles' || mode === 'rolesCompare') return { mode, ...(await rolesReadReport({ graphql: fetchStrapiUserRolesGraphql, rest: mode === 'rolesCompare' ? fetchStrapiUserRolesRest : null })) }
+  // read-only: for up to 5 Fiona accreditation ids, would the sync create a Strapi person, and if not why (the sync's own rules and evaluation)
+  if (mode === 'whySynced') {
+    const xapi = buildXapiClient()
+    if (!xapi) throw new Error('whySynced needs NUXT_FIONA_API_KEY')
+    if (!accreditationIds.length) throw new Error('whySynced needs accreditationIds (Fiona accreditation ids)')
+    return { mode, ...(await whySyncedReport({ accreditationIds, xapi, strapi: buildStrapiGateway() })) }
+  }
   // read-only: the untouched XAPI record /account/details/MyPoff/{userId}/ of up to 3 accounts (personal data: for the owner; needs "probe": true)
   if (mode === 'xapiAccount') {
     const xapi = buildXapiClient()

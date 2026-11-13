@@ -26,6 +26,9 @@
  *                lookup keys; names, contact details and addresses are reported as "exists" only. Trip fields (arrival,
  *                departure, travel, flight) show their values too. Add "paths": ["xapi:/accreditation/{accreditationId}/x",
  *                "publication:/persons/{personId}/y"] (at most 10) to read further endpoints by name.
+ *                { "mode": "whySynced", "accreditationIds": [..] } — read-only, at most 5 Fiona accreditation ids: would the sync create a Strapi person
+ *                for this accreditation, and if not, why? Badges and their statuses (XAPI), the active rules (Strapi), the sync's own evaluation, and
+ *                whether a Strapi person exists. Rule ids and names, badge names and statuses only: no names, e-mails or Fiona person ids.
  *                { "mode": "timings" } or { "mode": "timings", "userIds": [..] } — read-only, answered even while a sync run is going: the last 20 timed
  *                requests (appointments page, OAuth login) newest first: when, which Strapi user, which source answered, the total and the time of each
  *                step. In memory (lost on a restart); no names or e-mails. For load tests.
@@ -165,7 +168,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'xapiAccount', 'timings', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'xapiAccount', 'timings', 'whySynced', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
