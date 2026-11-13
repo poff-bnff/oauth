@@ -1,4 +1,6 @@
 import jwt from 'jsonwebtoken'
+import { createStepTimer } from '../../utils/fiona/stepTimer.js'
+import { recordTiming } from '../../utils/fiona/timingLog.js'
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
@@ -21,16 +23,17 @@ export default defineEventHandler(async (event) => {
     state: stateCookie
   }
 
+  const timer = createStepTimer() // how long each step took: read with the `timings` mode of the sync endpoint
   try {
-    const { access_token: token } = await $fetch(`${config.public.oauthUrl}/api/token`, { method: 'POST', body })
-    const user = await $fetch(`${config.public.oauthUrl}/api/user`, { headers: { Authorization: `Bearer ${token}` } })
+    const { access_token: token } = await timer.step('token exchange (OAuth provider)', () => $fetch(`${config.public.oauthUrl}/api/token`, { method: 'POST', body }))
+    const user = await timer.step('user info (OAuth provider)', () => $fetch(`${config.public.oauthUrl}/api/user`, { headers: { Authorization: `Bearer ${token}` } }))
 
     if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No OAuth.ee e-mail' })
 
-    const strapiUser = await authenticateStrapiUser(user.email)
+    const strapiUser = await timer.step('Strapi authenticate', () => authenticateStrapiUser(user.email))
 
     try {
-      await updateUserAndAliasesRoles(await getStrapiUser(strapiUser.id))
+      await timer.step('role sync (Fiona badges + Strapi)', async () => updateUserAndAliasesRoles(await getStrapiUser(strapiUser.id)))
     } catch (error) {
       console.error('api::oauth GET - role sync failed for user', strapiUser.id, error) // eslint-disable-line no-console
     }
@@ -47,6 +50,7 @@ export default defineEventHandler(async (event) => {
 
     const jwtToken = jwt.sign(jwtData, config.jwtSecret, { expiresIn: '14d', notBefore: 0, subject: strapiUser.id })
 
+    recordTiming({ kind: 'login', userId: strapiUser.id, source: 'oauth', ok: true, ...timer.summary() })
     return sendRedirect(event, redirectUri + jwtToken, 302)
   } catch (error) {
     // eslint-disable-next-line no-console

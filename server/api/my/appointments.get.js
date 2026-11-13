@@ -11,6 +11,8 @@ import { appointmentsForUser } from '../../utils/fiona/loginAppointments.js'
 import { appointmentsForLogin } from '../../utils/fiona/loginLiveAppointments.js'
 import { appointmentsForPerson } from '../../utils/fiona/myAppointments.js'
 import { userCache, personCache, guestbookCache } from '../../utils/fiona/appointmentsCaches.js'
+import { createStepTimer } from '../../utils/fiona/stepTimer.js'
+import { recordTiming } from '../../utils/fiona/timingLog.js'
 
 const MAX_REQUESTS_PER_MINUTE = 30
 
@@ -37,7 +39,8 @@ export default defineEventHandler(async (event) => {
   }
 
   // the full user is read from Strapi at most once in two minutes (and once at a time) per user
-  const user = await userCache.load(userId, () => getStrapiUser(userId))
+  const timer = createStepTimer()
+  const user = await timer.step('user (Strapi)', () => userCache.load(userId, () => getStrapiUser(userId)))
   if (!user) throw createError({ statusCode: 404, statusMessage: 'Not Found' })
 
   // appointments hold other people's names: the browser must not keep them
@@ -49,7 +52,8 @@ export default defineEventHandler(async (event) => {
     const strapi = { ...gateway, getActiveGuestbookIds: () => guestbookCache.load('active', () => gateway.getActiveGuestbookIds()) }
     const xapi = liveEnabled() ? buildXapiClient() : null // null: no live read, the published-card path answers
     const loadPerson = id => personCache.load(String(id), () => getStrapiPerson(id))
-    return await appointmentsForLogin({
+    const result = await appointmentsForLogin({
+      timer,
       user,
       xapi,
       strapi,
@@ -63,7 +67,11 @@ export default defineEventHandler(async (event) => {
       })).programmes,
       fallback: () => appointmentsForUser({ user, loadPerson, publication: buildPublicationClient(), xapi, strapi, lang })
     })
+    setHeader(event, 'Server-Timing', timer.serverTiming())
+    recordTiming({ kind: 'appointments', userId, source: result?.source ?? 'published', ok: result?.ok !== false, ...timer.summary() })
+    return result
   } catch (err) {
+    recordTiming({ kind: 'appointments', userId, source: 'error', ok: false, ...timer.summary() })
     console.warn(`[my/appointments] user ${userId}: ${err?.message || err}`) // eslint-disable-line no-console
     return { ok: false, error: 'unavailable', programmes: [], appointments: [] }
   }

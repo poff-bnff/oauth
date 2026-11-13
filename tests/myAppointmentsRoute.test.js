@@ -12,6 +12,7 @@ const { appointmentsForUser } = await import('../server/utils/fiona/loginAppoint
 const { appointmentsForLogin } = await import('../server/utils/fiona/loginLiveAppointments.js')
 const { appointmentsForPerson } = await import('../server/utils/fiona/myAppointments.js')
 const { clearAppointmentsCaches } = await import('../server/utils/fiona/appointmentsCaches.js')
+const { recentTimings, clearTimings } = await import('../server/utils/fiona/timingLog.js')
 
 // Nitro auto-imports of server/utils/strapi.js and h3, stubbed as globals
 globalThis.defineEventHandler = handler => handler
@@ -29,6 +30,7 @@ describe('GET /api/my/appointments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearAppointmentsCaches()
+    clearTimings()
     delete process.env.MY_APPOINTMENTS_ENABLED
     getUserIdFromEvent.mockReturnValue(5)
     getStrapiUser.mockResolvedValue({ id: 5, person: { id: 77 }, aliasUsers: [] })
@@ -182,6 +184,7 @@ describe('GET /api/my/appointments', () => {
 
       expect(result).toEqual({ ok: true, source: 'live', programmes: [], appointments: [{ id: 'live-1' }] })
       expect(appointmentsForLogin).toHaveBeenCalledWith({
+        timer: expect.objectContaining({ step: expect.any(Function) }),
         user: { id: 5, person: { id: 77 }, aliasUsers: [] },
         xapi: { xapi: true },
         strapi: expect.objectContaining({ gateway: true, getActiveGuestbookIds: expect.any(Function) }),
@@ -243,6 +246,40 @@ describe('GET /api/my/appointments', () => {
       appointmentsForLogin.mockRejectedValue(new Error('boom'))
 
       expect(await handler(event)).toEqual({ ok: false, error: 'unavailable', programmes: [], appointments: [] })
+    })
+  })
+
+  describe('times its steps', () => {
+    it('sets a Server-Timing header and records the request: who (Strapi user id), which source answered, and each step', async () => {
+      appointmentsForLogin.mockImplementation(async ({ timer }) => {
+        await timer.step('live read (Fiona XAPI)', () => Promise.resolve())
+        return { ok: true, source: 'live', programmes: [], appointments: [] }
+      })
+
+      await handler(event)
+
+      const header = setHeader.mock.calls.find(([, name]) => name === 'Server-Timing')[2]
+      expect(header).toMatch(/^user-Strapi;dur=\d+, live-read-Fiona-XAPI;dur=\d+, total;dur=\d+$/)
+      const [entry] = recentTimings()
+      expect(entry).toMatchObject({ kind: 'appointments', userId: 5, source: 'live', ok: true })
+      expect(entry.steps.map(step => step.name)).toEqual(['user (Strapi)', 'live read (Fiona XAPI)'])
+    })
+
+    it('says "published" when the published-card path answered, and records a failure as such', async () => {
+      await handler(event)
+      expect(recentTimings()[0]).toMatchObject({ source: 'published', ok: true })
+
+      appointmentsForLogin.mockRejectedValue(new Error('boom'))
+      await handler(event)
+      expect(recentTimings()[0]).toMatchObject({ kind: 'appointments', userId: 5, source: 'error', ok: false })
+    })
+
+    it('records nothing while the route is switched off', async () => {
+      process.env.MY_APPOINTMENTS_ENABLED = 'false'
+
+      await handler(event)
+
+      expect(recentTimings()).toEqual([])
     })
   })
 
