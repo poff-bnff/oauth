@@ -30,6 +30,12 @@ function fakeXapi (routes) {
   }
 }
 
+// a timer that only records the names of the steps it is asked to run
+function recordingTimer () {
+  const names = []
+  return { names, step: (name, fn) => { names.push(name); return fn() }, summary: () => ({ total: 0, steps: [] }), serverTiming: () => '' }
+}
+
 function setup (overrides = {}) {
   const fallbackAnswer = { ok: true, programmes: [], appointments: [{ id: 'from-card' }] }
   return {
@@ -150,5 +156,27 @@ describe('appointmentsForLogin', () => {
 
     expect(reads).toBe(2)
     expect(deps.xapi.asked.length).toBeGreaterThan(reads)
+  })
+
+  it('times its steps by name: guestbooks, the live Fiona read and the programme roles', async () => {
+    const timer = recordingTimer()
+    const deps = setup({ timer, readCardProgrammes: () => Promise.resolve([]) })
+
+    await appointmentsForLogin(deps)
+
+    expect(timer.names).toEqual(['guestbooks', 'live read (Fiona XAPI)', 'programme roles (Fiona card)'])
+  })
+
+  it('times the fallback when it has to use it', async () => {
+    const timer = recordingTimer()
+    const deps = setup({ timer, xapi: fakeXapi({}) })
+
+    await appointmentsForLogin(deps)
+
+    expect(timer.names).toEqual(['guestbooks', 'live read (Fiona XAPI)', 'fallback (published card path)'])
+  })
+
+  it('works without a timer', async () => {
+    expect((await appointmentsForLogin(setup())).source).toBe('live')
   })
 })

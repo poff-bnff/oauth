@@ -14,6 +14,7 @@
  */
 import { readLiveAppointments } from './liveAppointments.js'
 import { createLoaderCache } from './loaderCache.js'
+import { noopTimer } from './stepTimer.js'
 
 export const LIVE_TTL_MS = 60 * 1000
 const defaultCache = createLoaderCache({ ttlMs: LIVE_TTL_MS, maxEntries: 1000 })
@@ -41,15 +42,16 @@ function attachRoles (programmes, published) {
  * @param {() => Promise<object>} options.fallback   the published-card path
  * @returns {Promise<{ ok: boolean, source?: 'live', programmes: object[], appointments: object[] }>}
  */
-export async function appointmentsForLogin ({ user, xapi, strapi, lang = 'en', readCardProgrammes, fallback, cache = defaultCache, log = console } = {}) {
+export async function appointmentsForLogin ({ user, xapi, strapi, lang = 'en', readCardProgrammes, fallback: published, cache = defaultCache, timer = noopTimer, log = console } = {}) {
+  const fallback = () => timer.step('fallback (published card path)', published)
   const userIds = loginUserIds(user)
   if (!xapi || !userIds.length) return await fallback()
 
   let live
   try {
-    const guestbookIds = asList(await strapi.getActiveGuestbookIds()).map(String)
+    const guestbookIds = asList(await timer.step('guestbooks', () => strapi.getActiveGuestbookIds())).map(String)
     if (!guestbookIds.length) return await fallback()
-    live = await cache.load(`${lang}|${userIds.join(',')}|${guestbookIds.join(',')}`, () => readLiveAppointments({ xapi, userIds, guestbookIds, lang }))
+    live = await timer.step('live read (Fiona XAPI)', () => cache.load(`${lang}|${userIds.join(',')}|${guestbookIds.join(',')}`, () => readLiveAppointments({ xapi, userIds, guestbookIds, lang })))
   } catch (err) {
     log.warn?.(`[fiona appointments] live read failed, using the published card: ${shortError(err?.message || err)}`)
     return await fallback()
@@ -60,10 +62,10 @@ export async function appointmentsForLogin ({ user, xapi, strapi, lang = 'en', r
   }
   if (!live.found) return await fallback()
 
-  let published = []
+  let cardProgrammes = []
   if (live.programmes.length) {
     try {
-      published = await readCardProgrammes(live.accreditationIds)
+      cardProgrammes = await timer.step('programme roles (Fiona card)', () => readCardProgrammes(live.accreditationIds))
     } catch (err) {
       log.warn?.(`[fiona appointments] programme roles not read from the published card: ${shortError(err?.message || err)}`)
     }
@@ -72,7 +74,7 @@ export async function appointmentsForLogin ({ user, xapi, strapi, lang = 'en', r
   return {
     ok: true,
     source: 'live',
-    programmes: attachRoles(live.programmes, published),
+    programmes: attachRoles(live.programmes, cardProgrammes),
     appointments: live.appointments.map(appointment => ({
       ...appointment,
       members: appointment.members.map(member => ({ name: member.name, role: member.role, isMe: member.isMe, slug: null }))
