@@ -161,4 +161,24 @@ describe('updateUserAndAliasesRoles', () => {
     expect(puts).toEqual([])
     expect(calls().some(([url]) => url.includes('/festival-editions'))).toBe(false)
   })
+
+  it('times its parts by name, so the slow one can be seen: roles list, guestbooks, each Fiona badge call, the user reads and the writes', async () => {
+    const main = makeMain({ user_roles: [] })
+    const alias = makeAlias({ user_roles: [] })
+    mockStrapi({ main, alias, badgesById: { 41: [{ GuestbookBadge: { Description: 'Press' }, Status: { Description: 'Approved' } }] } })
+    const names = []
+    const timer = { step: (name, fn) => { names.push(name); return fn() }, detail: () => {} }
+
+    await updateUserAndAliasesRoles(main, { timer })
+
+    expect(names).toEqual([
+      'role sync › roles list',
+      'role sync › active guestbooks (Strapi)',
+      'role sync › Fiona badges call 1/2',
+      'role sync › Fiona badges call 2/2',
+      'role sync › current user (Strapi)',
+      'role sync › update roles (Strapi)',
+      'role sync › alias user read (Strapi)'
+    ])
+  })
 })

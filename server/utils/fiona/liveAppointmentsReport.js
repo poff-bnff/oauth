@@ -56,6 +56,7 @@ export async function liveAppointmentsReport ({ userIds = [], showValues = false
       programmes: live.programmes.map(programmeLine),
       errors: live.errors,
       unknownAccounts: live.unknownAccounts,
+      calls: live.calls,
       ms: now() - liveStart
     }
 

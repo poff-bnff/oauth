@@ -56,6 +56,7 @@ export async function appointmentsForLogin ({ user, xapi, strapi, lang = 'en', r
     log.warn?.(`[fiona appointments] live read failed, using the published card: ${shortError(err?.message || err)}`)
     return await fallback()
   }
+  timer.detail('liveCalls', live.calls) // as measured when the read ran (a cached answer repeats them)
   if (!live.ok) {
     log.warn?.(`[fiona appointments] live read failed, using the published card: ${live.errors.map(error => `${error.what} ${shortError(error.error)}`).join('; ')}`)
     return await fallback()

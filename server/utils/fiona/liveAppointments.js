@@ -30,9 +30,9 @@ const usable = value => value !== null && value !== undefined && String(value).t
  * @param {string[]} options.guestbookIds               the active guestbooks
  * @param {string} [options.lang]
  * @param {object[]} [options.publishedProgrammes]       programmes of the published card, for the role in each
- * @returns {Promise<{ ok: boolean, found: boolean, accreditationIds: string[], appointments: object[], programmes: object[], errors: Array<{ what: string, error: string }>, unknownAccounts: number }>}
+ * @returns {Promise<{ ok: boolean, found: boolean, accreditationIds: string[], appointments: object[], programmes: object[], errors: Array<{ what: string, error: string }>, unknownAccounts: number, calls: Array<{ what: string, outcome: string, ms: number }> }>}
  */
-export async function readLiveAppointments ({ xapi, userIds = [], guestbookIds = [], lang = 'en', publishedProgrammes = [] } = {}) {
+export async function readLiveAppointments ({ xapi, userIds = [], guestbookIds = [], lang = 'en', publishedProgrammes = [], now = () => performance.now() } = {}) {
   const ids = unique(asList(userIds).filter(usable).map(id => String(id).trim()))
   const guestbooks = unique(asList(guestbookIds).filter(usable).map(id => String(id).trim()))
 
@@ -46,12 +46,17 @@ export async function readLiveAppointments ({ xapi, userIds = [], guestbookIds =
   }
 
   const outcomes = await Promise.all(attempts.map(async ({ what, id, path }) => {
+    const startedAt = now()
     try {
-      return { what, id, raw: await xapi.getRaw(path) }
+      const raw = await xapi.getRaw(path)
+      return { what, id, raw, ms: Math.round(now() - startedAt) }
     } catch (err) {
-      return isNoAccount(err) ? { what, id, noAccount: true } : { what, id, error: String(err?.message || err) }
+      const ms = Math.round(now() - startedAt)
+      return isNoAccount(err) ? { what, id, noAccount: true, ms } : { what, id, error: String(err?.message || err), ms }
     }
   }))
+  // how each Fiona call ended and how long it took (no ids): to see which call is slow
+  const calls = outcomes.map(({ what, raw, noAccount, ms }) => ({ what, outcome: raw !== undefined ? 'ok' : (noAccount ? 'no account' : 'error'), ms }))
 
   const errors = outcomes.filter(outcome => outcome.error !== undefined).map(({ what, error }) => ({ what, error }))
   const accreditationIds = []
@@ -95,6 +100,7 @@ export async function readLiveAppointments ({ xapi, userIds = [], guestbookIds =
     appointments: [...appointmentsById.values(), ...loose].sort(compareByTime),
     programmes,
     errors,
-    unknownAccounts
+    unknownAccounts,
+    calls
   }
 }

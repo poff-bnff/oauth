@@ -33,7 +33,8 @@ function fakeXapi (routes) {
 // a timer that only records the names of the steps it is asked to run
 function recordingTimer () {
   const names = []
-  return { names, step: (name, fn) => { names.push(name); return fn() }, summary: () => ({ total: 0, steps: [] }), serverTiming: () => '' }
+  const details = {}
+  return { names, details, step: (name, fn) => { names.push(name); return fn() }, detail: (name, value) => { details[name] = value }, summary: () => ({ total: 0, steps: [] }), serverTiming: () => '' }
 }
 
 function setup (overrides = {}) {
@@ -178,5 +179,13 @@ describe('appointmentsForLogin', () => {
 
   it('works without a timer', async () => {
     expect((await appointmentsForLogin(setup())).source).toBe('live')
+  })
+
+  it('notes the time of each Fiona call on the timer, so a slow one can be seen', async () => {
+    const timer = recordingTimer()
+
+    await appointmentsForLogin(setup({ timer }))
+
+    expect(timer.details.liveCalls).toEqual(expect.arrayContaining([expect.objectContaining({ what: 'appointments', outcome: 'ok', ms: expect.any(Number) })]))
   })
 })
