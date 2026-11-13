@@ -68,7 +68,7 @@ describe('readLiveAppointments', () => {
   it('says "not found", but still "ok", when Fiona has no account under any of the ids', async () => {
     const result = await readLiveAppointments({ xapi: fakeXapi({}), userIds: [5, 6], guestbookIds: [GB] })
 
-    expect(result).toEqual({ ok: true, found: false, accreditationIds: [], appointments: [], programmes: [], errors: [], unknownAccounts: 2 })
+    expect(result).toMatchObject({ ok: true, found: false, accreditationIds: [], appointments: [], programmes: [], errors: [], unknownAccounts: 2 })
   })
 
   it('is not ok when a read fails for another reason, and keeps what the other reads gave', async () => {
@@ -147,5 +147,25 @@ describe('readLiveAppointments', () => {
     const result = await readLiveAppointments({ xapi, userIds: [5], guestbookIds: [GB] })
 
     expect(result).toMatchObject({ ok: false, unknownAccounts: 0 })
+  })
+
+  it('says how long each Fiona call took and how it ended, without any id', async () => {
+    const xapi = {
+      getRaw: (path) => {
+        if (path.includes('/account/MyPoff/6/')) return Promise.reject(badRequest())
+        return Promise.resolve(path.endsWith('/appointments?includeAttendees=true') ? accountAnswer('acc-1', 'Jaan Leppik', []) : participations)
+      }
+    }
+    const clockTicks = [0, 0, 200, 200, 200, 400, 2200, 2200, 2200, 4000]
+    let tick = 0
+    const now = () => clockTicks[Math.min(tick++, clockTicks.length - 1)]
+
+    const result = await readLiveAppointments({ xapi, userIds: [5, 6], guestbookIds: [GB], now })
+
+    expect(result.calls).toHaveLength(4)
+    expect(result.calls.map(call => call.what).sort()).toEqual(['appointments', 'appointments', 'meetingprogramparticipations', 'meetingprogramparticipations'])
+    expect(result.calls.every(call => ['ok', 'no account'].includes(call.outcome) && Number.isFinite(call.ms))).toBe(true)
+    expect(result.calls.filter(call => call.outcome === 'no account')).toHaveLength(2)
+    expect(result.calls.every(call => Object.keys(call).sort().join() === 'ms,outcome,what')).toBe(true)
   })
 })

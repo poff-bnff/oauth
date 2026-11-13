@@ -7,6 +7,7 @@
 export function createStepTimer ({ now = () => performance.now() } = {}) {
   const startedAt = now()
   const steps = []
+  const details = {}
 
   return {
     /** Runs `fn`, records how long it took (also when it fails) and returns what it returned. */
@@ -24,8 +25,14 @@ export function createStepTimer ({ now = () => performance.now() } = {}) {
         steps.push(entry)
       }
     },
+    /** Notes something measured during the request (for example the time of each Fiona call) next to the steps. */
+    detail (name, value) {
+      details[name] = value
+    },
     summary () {
-      return { total: Math.round(now() - startedAt), steps: [...steps] }
+      const summary = { total: Math.round(now() - startedAt), steps: [...steps] }
+      if (Object.keys(details).length) summary.details = { ...details }
+      return summary
     },
     /** A Server-Timing header value: "user;dur=12, guestbooks;dur=3, total;dur=20". */
     serverTiming () {
@@ -39,6 +46,7 @@ export function createStepTimer ({ now = () => performance.now() } = {}) {
 /** A timer that only runs the step: for callers that were not given one. */
 export const noopTimer = {
   step: (name, fn) => fn(),
+  detail: () => {},
   summary: () => ({ total: 0, steps: [] }),
   serverTiming: () => ''
 }

@@ -30,10 +30,10 @@ export default defineEventHandler(async (event) => {
 
     if (!user.email) throw createError({ statusCode: 500, statusMessage: 'No OAuth.ee e-mail' })
 
-    const strapiUser = await timer.step('Strapi authenticate', () => authenticateStrapiUser(user.email))
+    const strapiUser = await timer.step('Strapi authenticate', () => authenticateStrapiUser(user.email, { timer }))
 
     try {
-      await timer.step('role sync (Fiona badges + Strapi)', async () => updateUserAndAliasesRoles(await getStrapiUser(strapiUser.id)))
+      await timer.step('role sync (Fiona badges + Strapi)', async () => updateUserAndAliasesRoles(await timer.step('role sync › user read (Strapi)', () => getStrapiUser(strapiUser.id)), { timer }))
     } catch (error) {
       console.error('api::oauth GET - role sync failed for user', strapiUser.id, error) // eslint-disable-line no-console
     }

@@ -5,6 +5,7 @@ import { isUndeliverableEmail } from '../../utils/emailRules.js'
 import { CART_LIMITS } from './cartLimits.js'
 import { userPictureBaseName } from './userPicture.js'
 import { checkoutCartExpiry, checkoutCartExpired } from './cartExpiry.js'
+import { noopTimer } from './fiona/stepTimer.js'
 
 const config = useRuntimeConfig()
 
@@ -37,19 +38,19 @@ export async function getStrapiSingleUser (userId) {
 // silent path uses POST /users instead (user.create is granted to the Hunt role, which the service
 // token belongs to). It creates the same account, but it is marked confirmed, since no confirmation
 // mail is ever sent. Mirrors strapiGateway.findOrRegisterUser.
-export async function authenticateStrapiUser (email, { sendAccountEmail = true } = {}) {
+export async function authenticateStrapiUser (email, { sendAccountEmail = true, timer = noopTimer } = {}) {
   if (!email) return null
 
-  const token = await getStrapiToken()
+  const token = await timer.step('auth › service token (Strapi)', () => getStrapiToken())
 
-  const [user] = await $fetch(`${config.strapiUrl}/users?email=${encodeURIComponent(email)}`, { headers: { Authorization: `Bearer ${token}` } })
+  const [user] = await timer.step('auth › find user by e-mail (Strapi)', () => $fetch(`${config.strapiUrl}/users?email=${encodeURIComponent(email)}`, { headers: { Authorization: `Bearer ${token}` } }))
 
   if (user) {
     // An alias account (mainUser set) is only a login identity. The session must belong to the main
     // account, because carts, orders, billing profiles and Maksekeskus merchant_data.userId are all
     // keyed by the session id, and only the main account owns the profile and the purchases.
     const mainUserId = user.mainUser?.id || (Number.isInteger(user.mainUser) ? user.mainUser : null)
-    return getUserObject(mainUserId ? await getStrapiUser(mainUserId) : user)
+    return getUserObject(mainUserId ? await timer.step('auth › main user of alias (Strapi)', () => getStrapiUser(mainUserId)) : user)
   }
 
   const password = crypto.randomBytes(32).toString('hex')
@@ -266,7 +267,7 @@ export async function getActiveFionaGuestbooks () {
   return guestbookIds
 }
 
-export async function loadFionaBadges (user) {
+export async function loadFionaBadges (user, { timer = noopTimer } = {}) {
   const mainUserId = user.id
   const aliasUserIds = Array.isArray(user.aliasUsers) && user.aliasUsers.length
     ? user.aliasUsers.map(u => u.id)
@@ -274,12 +275,15 @@ export async function loadFionaBadges (user) {
   const allIds = [mainUserId, ...aliasUserIds]
 
   const consolidatedBadgesMap = new Map()
-  const guestbooks = await getActiveFionaGuestbooks()
+  const guestbooks = await timer.step('role sync › active guestbooks (Strapi)', () => getActiveFionaGuestbooks())
+  const totalCalls = guestbooks.length * allIds.length
+  let callNumber = 0
 
   for (const guestbookId of guestbooks) {
     for (const id of allIds) {
       try {
-        const fionaBadges = await fetchFionaBadges(guestbookId, id)
+        const number = ++callNumber
+        const fionaBadges = await timer.step(`role sync › Fiona badges call ${number}/${totalCalls}`, () => fetchFionaBadges(guestbookId, id))
 
         if (Array.isArray(fionaBadges) && fionaBadges.length) {
           for (const badge of fionaBadges) {
@@ -393,13 +397,13 @@ function areRoleArraysEqual (array1, array2) {
 
 // --- MASTER ORCHESTRATOR (Updated for Optimization and Resilience) ---
 
-export async function updateUserAndAliasesRoles (mainUser) {
+export async function updateUserAndAliasesRoles (mainUser, { timer = noopTimer } = {}) {
   const aliasUsers = Array.isArray(mainUser.aliasUsers) ? mainUser.aliasUsers : []
   let allStrapiRoles = []
 
   // 1. Fetch ALL Strapi roles ONCE (Optimization)
   try {
-    allStrapiRoles = await getStrapiUserRoles()
+    allStrapiRoles = await timer.step('role sync › roles list', () => getStrapiUserRoles())
   } catch (err) {
     console.error('CRITICAL: Failed to fetch Strapi roles. Aborting role validation.', err)
     return mainUser
@@ -418,7 +422,7 @@ export async function updateUserAndAliasesRoles (mainUser) {
   let allUserBadges = []
 
   try {
-    userWithBadges = await loadFionaBadges(mainUser)
+    userWithBadges = await loadFionaBadges(mainUser, { timer })
     allUserBadges = userWithBadges.badges || []
   } catch (err) {
     console.error('Non-critical: Total failure fetching Fiona badges. Roles will only include non-badge-dependent roles.', err)
@@ -429,7 +433,7 @@ export async function updateUserAndAliasesRoles (mainUser) {
   const mainUserId = mainUser.id
 
   // 3. Fetch current user details to get existing roles
-  const mainUserCurrentDetails = await getStrapiUser(mainUserId)
+  const mainUserCurrentDetails = await timer.step('role sync › current user (Strapi)', () => getStrapiUser(mainUserId))
   const mainUserExistingRoles = mainUserCurrentDetails?.user_roles || []
   const mainUserExistingRoleIds = mainUserExistingRoles.map(role => role.id) // Array of current IDs
 
@@ -444,7 +448,7 @@ export async function updateUserAndAliasesRoles (mainUser) {
   // 5. Compare and conditionally update (NEW LOGIC)
   if (mainUserId && !areRoleArraysEqual(mainUserRoleIds, mainUserExistingRoleIds)) {
     try {
-      await setStrapiUserRoles(mainUserId, mainUserRoleIds)
+      await timer.step('role sync › update roles (Strapi)', () => setStrapiUserRoles(mainUserId, mainUserRoleIds))
       console.log(`✅ Successfully updated roles (CHANGE DETECTED) for Main User ID: ${mainUserId}`)
     } catch (error) {
       console.error(`Error updating roles for Main User ID: ${mainUserId}`, error)
@@ -460,7 +464,7 @@ export async function updateUserAndAliasesRoles (mainUser) {
     // 6. Fetch current alias details to get existing roles. getStrapiUser would resolve this
     // aliasId back to the main account (mainUser is set), comparing the alias against the main's
     // roles instead of its own — getStrapiSingleUser fetches the alias record as-is.
-    const aliasCurrentDetails = await getStrapiSingleUser(aliasId)
+    const aliasCurrentDetails = await timer.step('role sync › alias user read (Strapi)', () => getStrapiSingleUser(aliasId))
     const aliasExistingRoles = aliasCurrentDetails?.user_roles || []
     const aliasExistingRoleIds = aliasExistingRoles.map(role => role.id) // Array of current IDs
 
@@ -480,7 +484,7 @@ export async function updateUserAndAliasesRoles (mainUser) {
     // 8. Compare and conditionally update (NEW LOGIC)
     if (aliasId && !areRoleArraysEqual(aliasRoleIds, aliasExistingRoleIds)) {
       try {
-        await setStrapiUserRoles(aliasId, aliasRoleIds)
+        await timer.step('role sync › update alias roles (Strapi)', () => setStrapiUserRoles(aliasId, aliasRoleIds))
         console.log(`✅ Successfully updated roles (CHANGE DETECTED) for Alias User ID: ${aliasId}`)
       } catch (error) {
         console.error(`Error updating roles for Alias User ID: ${aliasId}`, error)
