@@ -1,96 +1,39 @@
-import { getStrapiToken } from '../../utils/strapi.js'
+import { getStrapiAdminToken, getStrapiToken } from '../../utils/strapi.js'
+import {
+  ALLOWED_CONTENT_TYPES,
+  hasVideoPermission,
+  parseVideoUrl,
+  pickVideoUrl,
+  userFunctionIds,
+  videoContentPath
+} from '../../utils/videoAccess.js'
 
-const ALLOWED_CONTENT_TYPES = ['course-event', 'dis-camp-event', 'industry-project']
-
-// Fetch video URL from Strapi for the given content type and ID.
-// Returns a raw URL string or null.
+// Fetch the raw video URL of the given content type and id from Strapi, or null.
+// The admin token is used because the Hunt role may read only course-event by id.
 async function fetchVideoUrl (contentType, contentId) {
   const config = useRuntimeConfig()
-  const token = await getStrapiToken()
+  const token = await getStrapiAdminToken()
 
-  const fetch = path => $fetch(`${config.strapiUrl}${path}`, {
+  const record = await $fetch(`${config.strapiUrl}${videoContentPath(contentType)}/${contentId}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
-
-  switch (contentType) {
-    case 'course-event': {
-      const record = await fetch(`/course-events/${contentId}`)
-      return record?.video_url || null
-    }
-    case 'dis-camp-event': {
-      const record = await fetch(`/dis-camp-events/${contentId}`)
-      return record?.video_url || null
-    }
-    case 'industry-project': {
-      const record = await fetch(`/industry-projects/${contentId}`)
-      return record?.clipUrl || null
-    }
-    default:
-      return null
-  }
+  return pickVideoUrl(contentType, record)
 }
 
-// Parse a raw video URL into { videoProvider, videoId }.
-// Supports videolevels.com (/bc/ format), Vimeo, and YouTube.
-function parseVideoUrl (videoUrl) {
-  if (!videoUrl) return null
+// Does the user hold, through a currently valid role, a function with show_courseevent_video = true?
+// Strapi 3 returns the functions nested in the user WITHOUT their function_parameters, so the functions
+// the user holds are read separately from /functions (admin token: the Hunt role may not read functions).
+async function userMayWatchVideo (user) {
+  const functionIds = userFunctionIds(user)
+  if (!functionIds.length) return false
 
-  try {
-    if (videoUrl.includes('videolevels.com')) {
-      const parsedUrl = new URL(videoUrl)
-      const videoProvider = parsedUrl.hostname.replace(/^www\./, '')
-      if (videoProvider !== 'videolevels.com') return null
+  const config = useRuntimeConfig()
+  const token = await getStrapiAdminToken()
 
-      const pathMatch = parsedUrl.pathname.match(/^\/bc\/([^/]+)/)
-      const videoId = pathMatch ? pathMatch[1] : null
-
-      return videoId ? { videoProvider, videoId } : null
-    }
-
-    if (videoUrl.includes('vimeo.com')) {
-      let videoId = null
-      const vimeoMatch = videoUrl.match(/(?:vimeo\.com\/(?:.*\/)?|player\.vimeo\.com\/video\/)(\d+)(?:$|[/?#])/)
-      if (vimeoMatch) videoId = vimeoMatch[1]
-      return videoId ? { videoProvider: 'vimeo', videoId } : null
-    }
-
-    if (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be')) {
-      let videoId = null
-      const ytMatch = videoUrl.match(/(?:v=|\/embed\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
-      if (ytMatch) videoId = ytMatch[1]
-      return videoId ? { videoProvider: 'youtube', videoId } : null
-    }
-  } catch {
-    return null
-  }
-
-  return null
-}
-
-// Check whether a Strapi user (with populated user_roles) has the show_courseevent_video permission
-// in at least one currently valid role.
-function hasVideoPermission (user) {
-  if (!Array.isArray(user.user_roles)) return false
-
-  const now = new Date()
-
-  for (const role of user.user_roles) {
-    const validFrom = role.valid_from ? new Date(role.valid_from) : null
-    const validTo = role.valid_to ? new Date(role.valid_to) : null
-    if (validFrom && validFrom > now) continue
-    if (validTo && validTo < now) continue
-
-    for (const right of (role.user_right || [])) {
-      for (const func of (right.functions || [])) {
-        const allowed = (func.function_parameters || []).some(
-          p => p.property === 'show_courseevent_video' && p.value === 'true'
-        )
-        if (allowed) return true
-      }
-    }
-  }
-
-  return false
+  const functions = await $fetch(`${config.strapiUrl}/functions?${functionIds.map(id => `id_in=${id}`).join('&')}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return hasVideoPermission(user, functions)
 }
 
 export default defineEventHandler(async (event) => {
@@ -124,8 +67,7 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const token = await getStrapiToken()
 
-  const populateQuery = 'populate[user_roles][populate][0]=user_right.functions.function_parameters'
-  const user = await $fetch(`${config.strapiUrl}/users/${userId}?${populateQuery}`, {
+  const user = await $fetch(`${config.strapiUrl}/users/${userId}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
 
@@ -133,7 +75,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'User not found' })
   }
 
-  const permitted = hasVideoPermission(user)
+  const permitted = await userMayWatchVideo(user)
   console.log(`Video access for user ${userId}, ${contentType} ${contentId}: ${permitted ? 'GRANTED' : 'DENIED'}`) // eslint-disable-line no-console
 
   if (!permitted) {
