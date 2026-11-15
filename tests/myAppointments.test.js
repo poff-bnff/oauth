@@ -99,13 +99,13 @@ describe('appointmentsForPerson', () => {
   it('lists the meeting programmes of the card', async () => {
     const env = setup({
       cards: {
-        'acc-1': { meetingProgramParticipations: [{ meetingProgram: { id: 'p', description: 'Film Market', schedule: { description: 'One-on-one meetings 2026' } }, role: { key: 'industry-representative', translations: tr('Industry representative', 'Esindaja') } }] }
+        'acc-1': { id: 'acc-1', meetingProgramParticipations: [{ meetingProgram: { id: 'p', description: 'Film Market', schedule: { id: 'sch-1', description: 'One-on-one meetings 2026' } }, role: { key: 'industry-representative', translations: tr('Industry representative', 'Esindaja') } }] }
       }
     })
 
     const { programmes } = await run(env)
 
-    expect(programmes).toEqual([{ id: 'p', name: 'Film Market', schedule: 'One-on-one meetings 2026', role: { key: 'industry-representative', text: 'Industry representative' } }])
+    expect(programmes).toEqual([{ id: 'p', name: 'Film Market', schedule: 'One-on-one meetings 2026', scheduleId: 'sch-1', accreditationId: 'acc-1', role: { key: 'industry-representative', text: 'Industry representative' } }])
   })
 
   describe('the cache of cards', () => {

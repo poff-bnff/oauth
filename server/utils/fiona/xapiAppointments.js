@@ -89,11 +89,12 @@ export function normalizeXapiAppointments (answer, { lang = 'en' } = {}) {
 /**
  * @param {object|null} answer   the raw answer of .../meetingprogramparticipations
  * @param {{ publishedProgrammes?: object[] }} [options]   programmes read from the published card, for the role of the login in each
- * @returns {object[]} [{ id, name, schedule, role, requestsOpenOn, requestsCloseOn }]
+ * @returns {object[]} [{ id, name, schedule, scheduleId, accreditationId, role, requestsOpenOn, requestsCloseOn }]
  */
 export function normalizeXapiProgrammes (answer, { publishedProgrammes = [] } = {}) {
   const programmes = []
   const seen = new Set()
+  const accreditationId = orNull(isRecord(answer) && isRecord(answer.Accreditation) ? answer.Accreditation.Id : null) // whose participations these are
   for (const schedule of asList(isRecord(answer) ? answer.Schedules : null).filter(isRecord)) {
     for (const programme of asList(schedule.MeetingPrograms).filter(isRecord)) {
       const name = text(programme.Name)
@@ -107,6 +108,8 @@ export function normalizeXapiProgrammes (answer, { publishedProgrammes = [] } = 
         id,
         name,
         schedule: orNull(schedule.Name),
+        scheduleId: orNull(schedule.Id),
+        accreditationId,
         role: published?.role ?? null,
         requestsOpenOn: utcIso(programme.MeetingRequestFormsOpensOn),
         requestsCloseOn: utcIso(programme.MeetingRequestFormsClosesOn)

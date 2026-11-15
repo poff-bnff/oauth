@@ -15,7 +15,7 @@ const progPath = id => `/account/MyPoff/${id}/guestbook/${GB}/meetingprogrampart
 
 const answer = (appointments, accreditationId = 'acc-1') => ({ Accreditation: { Id: accreditationId, Description: 'Laura Jaakson' }, Appointments: appointments })
 const party = { Id: 'ap-party', AppointmentType: { Description: 'Party' }, StartsOn: '2026-11-13T06:30:00+00:00', EndsOn: '2026-11-13T06:45:00+00:00', Subject: 'TEST - Party', Location: { Description: 'Iglupark' }, Members: [{ FullName: 'Laura Jaakson', Role: { Key: 'film-maker', Translations: [{ Language: 'en', Text: 'Film maker' }] } }, { FullName: 'Jaan Leppik', Role: null }] }
-const participations = { Schedules: [{ Name: 'One-on-one meetings 2026', MeetingPrograms: [{ Id: 'mp-1', Name: 'Film Market' }] }] }
+const participations = { Accreditation: { Id: 'acc-1' }, Schedules: [{ Id: 'sch-1', Name: 'One-on-one meetings 2026', MeetingPrograms: [{ Id: 'mp-1', Name: 'Film Market' }] }] }
 
 function fakeXapi (routes) {
   const asked = []
@@ -62,7 +62,7 @@ describe('appointmentsForLogin', () => {
     expect(result).toEqual({
       ok: true,
       source: 'live',
-      programmes: [expect.objectContaining({ id: 'mp-1', name: 'Film Market', schedule: 'One-on-one meetings 2026', role: null })],
+      programmes: [expect.objectContaining({ id: 'mp-1', name: 'Film Market', schedule: 'One-on-one meetings 2026', scheduleId: 'sch-1', accreditationId: 'acc-1', role: null })],
       appointments: [{
         id: 'ap-party',
         type: { key: 'party', text: 'Party', abbreviation: null },
