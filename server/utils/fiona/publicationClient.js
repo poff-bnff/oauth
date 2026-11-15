@@ -137,6 +137,29 @@ function normalizePublishedPerson (person, record) {
 }
 
 /** Publication API `/accreditations/{id}` record → the shape the sync works with. */
+/**
+ * The meeting programme participations of a card (Film Market, Series Market, ...), one entry per programme the person takes part in.
+ * `hiddenForRequests` is Fiona's "hide for meeting requests": the person asked not to be requested for meetings in that programme.
+ * A participation without a programme id is skipped.
+ * @returns {Array<{ programmeId: string, programmeName: string, scheduleId: string, scheduleName: string, hiddenForRequests: boolean }>}
+ */
+function meetingProgrammeParticipations (raw) {
+  const found = []
+  for (const item of Array.isArray(raw?.meetingProgramParticipations) ? raw.meetingProgramParticipations : []) {
+    const programme = item?.meetingProgram
+    const programmeId = text(programme?.id)
+    if (!programmeId) continue
+    found.push({
+      programmeId,
+      programmeName: text(programme?.description) || '',
+      scheduleId: text(programme?.schedule?.id) || '',
+      scheduleName: text(programme?.schedule?.description) || '',
+      hiddenForRequests: item?.hideForMeetingRequests === true
+    })
+  }
+  return found
+}
+
 export function normalizeAccreditationRecord (raw) {
   const badges = (Array.isArray(raw?.badges) ? raw.badges : []).map(badge => ({
     badgeId: text(badge?.guestbookBadge?.id) || '',
@@ -164,6 +187,7 @@ export function normalizeAccreditationRecord (raw) {
     currentOccupation: customFieldText(raw?.customFieldValues, OCCUPATION_KEY),
     categories: categoryLabels(raw?.customFieldOptions),
     companies: accreditationCompanies(raw),
+    meetingProgrammes: meetingProgrammeParticipations(raw),
     films,
     person: normalizePublishedPerson(raw?.person, raw)
   }

@@ -455,6 +455,16 @@ describe('createStrapiGateway lookups for the extra Fiona values', () => {
     expect(calls.map(call => call.url.replace(STRAPI, ''))).toEqual(['/countries?_limit=-1', '/industry-categories?_limit=-1', '/role-at-films?_limit=-1'])
   })
 
+  it('reads the MeetingProgramme records once per gateway, with the fields the sync matches on', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /meeting-programmes': [{ id: 1, programme_id: 'mp-film', programme_name: 'Film Market', schedule_id: 'sch-1', schedule_name: 'ITBE2026', guestbook_id: 'gb-30', created_at: 'x', updated_at: 'y' }] })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+
+    expect(await gateway.listMeetingProgrammes()).toEqual([{ id: 1, programme_id: 'mp-film', programme_name: 'Film Market', schedule_id: 'sch-1', schedule_name: 'ITBE2026', guestbook_id: 'gb-30' }])
+    await gateway.listMeetingProgrammes()
+
+    expect(calls.map(call => call.url.replace(STRAPI, ''))).toEqual(['/meeting-programmes?_limit=-1'])
+  })
+
   it('finds organisations by name in every name field, public or not', async () => {
     const { fetch, calls } = fakeFetch({ 'GET /organisations': [{ id: 5, name_en: 'in.kind', namePrivate: null, name_et: 'in.kind', name_ru: undefined, public: false }] })
 

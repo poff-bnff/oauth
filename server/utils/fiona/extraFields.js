@@ -114,3 +114,37 @@ export function planCountry ({ country, strapiCountries }) {
   const hit = (strapiCountries || []).find(item => normalizeName(item.name_en) === normalizeName(name))
   return hit ? { id: Number(hit.id), unmatched: null } : { id: null, unmatched: name }
 }
+
+const programmeGuid = value => String(value ?? '').trim().toLowerCase()
+const linkIdOf = item => (item !== null && typeof item === 'object' ? item.id : item)
+
+/**
+ * Which Strapi MeetingProgramme records a person is linked to: for every programme the person takes part in (and is not hidden for
+ * meeting requests in), the record with the same Fiona programme id. The records are the ones Jaan creates by hand: the sync only LINKS,
+ * it never creates one, so a programme without a record is only reported. When both the record and the card name a guestbook they must
+ * be the same festival; a record without a guestbook matches any. Pure.
+ * @param {{ wanted: Array<{ programmeId: string, programmeName?: string, guestbookId?: string }>, records: object[], current: Array<number|{ id: number }> }} options
+ *   wanted = the programmes of the person's cards; records = Strapi MeetingProgramme records; current = the person's meeting_programmes now
+ * @returns {{ ids: number[], linked: Array<{ id: number, name: string }>, unmatched: string[], changed: boolean }}
+ *   ids ascending; changed = the set of records differs from `current` (an empty `ids` with a non-empty `current` clears the links)
+ */
+export function planMeetingProgrammes ({ wanted, records, current } = {}) {
+  const list = Array.isArray(records) ? records : []
+  const byId = new Map()
+  const unmatched = []
+  for (const entry of Array.isArray(wanted) ? wanted : []) {
+    const programmeId = programmeGuid(entry?.programmeId)
+    if (!programmeId) continue
+    const guestbookId = programmeGuid(entry?.guestbookId)
+    const record = list.find(item => programmeGuid(item?.programme_id) === programmeId && (!programmeGuid(item?.guestbook_id) || !guestbookId || programmeGuid(item.guestbook_id) === guestbookId))
+    if (record) {
+      byId.set(Number(record.id), { id: Number(record.id), name: String(record.programme_name ?? entry.programmeName ?? '').trim() })
+    } else {
+      const name = String(entry.programmeName ?? '').trim() || String(entry.programmeId).trim()
+      if (!unmatched.includes(name)) unmatched.push(name)
+    }
+  }
+  const ids = [...byId.keys()].sort((a, b) => a - b)
+  const have = [...new Set((Array.isArray(current) ? current : []).map(linkIdOf).filter(id => id !== null && id !== undefined).map(Number))].sort((a, b) => a - b)
+  return { ids, linked: ids.map(id => byId.get(id)), unmatched, changed: ids.join(',') !== have.join(',') }
+}
