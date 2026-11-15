@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeName, splitOccupations, planCategories, planRoles, planCountry, uniqueNames, isPlaceholderCompany } from '../server/utils/fiona/extraFields.js'
+import { normalizeName, splitOccupations, planCategories, planRoles, planCountry, uniqueNames, isPlaceholderCompany, planMeetingProgrammes } from '../server/utils/fiona/extraFields.js'
 
 describe('normalizeName', () => {
   it('ignores case, accents, punctuation and spacing', () => {
@@ -144,5 +144,66 @@ describe('planCountry', () => {
 
   it('does nothing without a country', () => {
     expect(planCountry({ country: null, strapiCountries })).toEqual({ id: null, unmatched: null })
+  })
+})
+
+describe('planMeetingProgrammes: which Strapi MeetingProgramme records a person is linked to', () => {
+  const records = [
+    { id: 1, programme_id: '7ED807FA-0001', programme_name: 'Film Market', guestbook_id: 'gb-30' },
+    { id: 2, programme_id: '8e227662-0002', programme_name: 'Series Market', guestbook_id: 'gb-30' },
+    { id: 3, programme_id: 'no-guestbook', programme_name: 'Open', guestbook_id: null }
+  ]
+  const want = (programmeId, programmeName, guestbookId = 'gb-30') => ({ programmeId, programmeName, guestbookId })
+
+  it('links by the Fiona programme id (ignoring case and spaces) and reports the names it linked', () => {
+    const plan = planMeetingProgrammes({ wanted: [want(' 7ed807fa-0001 ', 'Film Market'), want('8E227662-0002', 'Series Market')], records, current: [] })
+
+    expect(plan.ids).toEqual([1, 2])
+    expect(plan.linked).toEqual([{ id: 1, name: 'Film Market' }, { id: 2, name: 'Series Market' }])
+    expect(plan.unmatched).toEqual([])
+    expect(plan.changed).toBe(true)
+  })
+
+  it('never creates anything: a programme without a record is only reported, once', () => {
+    const plan = planMeetingProgrammes({ wanted: [want('7ed807fa-0001', 'Film Market'), want('mentor', 'Mentor: Baltic Event Co-Production Market'), want('mentor', 'Mentor: Baltic Event Co-Production Market')], records, current: [] })
+
+    expect(plan.ids).toEqual([1])
+    expect(plan.unmatched).toEqual(['Mentor: Baltic Event Co-Production Market'])
+  })
+
+  it('when both sides name a guestbook they must be the same festival; a record without a guestbook matches any', () => {
+    expect(planMeetingProgrammes({ wanted: [want('7ed807fa-0001', 'Film Market', 'gb-29')], records, current: [] }).ids).toEqual([])
+    expect(planMeetingProgrammes({ wanted: [want('no-guestbook', 'Open', 'gb-29')], records, current: [] }).ids).toEqual([3])
+    expect(planMeetingProgrammes({ wanted: [want('7ed807fa-0001', 'Film Market', '')], records, current: [] }).ids).toEqual([1])
+  })
+
+  it('is unchanged when the person already has exactly those records, whatever the order or the shape (ids or objects)', () => {
+    const plan = planMeetingProgrammes({ wanted: [want('8e227662-0002', 'Series Market'), want('7ed807fa-0001', 'Film Market')], records, current: [{ id: 1 }, { id: 2 }] })
+
+    expect(plan.ids).toEqual([1, 2])
+    expect(plan.changed).toBe(false)
+    expect(planMeetingProgrammes({ wanted: [want('7ed807fa-0001', 'Film Market')], records, current: [1] }).changed).toBe(false)
+  })
+
+  it('clears the links of a person who is no longer in any listed programme, and leaves an empty person alone', () => {
+    const cleared = planMeetingProgrammes({ wanted: [], records, current: [{ id: 1 }] })
+    expect(cleared).toMatchObject({ ids: [], changed: true })
+
+    expect(planMeetingProgrammes({ wanted: [], records, current: [] }).changed).toBe(false)
+    expect(planMeetingProgrammes({ wanted: [], records, current: undefined }).changed).toBe(false)
+    expect(planMeetingProgrammes({ wanted: undefined, records, current: null }).changed).toBe(false)
+  })
+
+  it('changes when the set differs (one more, one fewer, another one)', () => {
+    expect(planMeetingProgrammes({ wanted: [want('7ed807fa-0001', 'Film Market'), want('8e227662-0002', 'Series Market')], records, current: [1] }).changed).toBe(true)
+    expect(planMeetingProgrammes({ wanted: [want('7ed807fa-0001', 'Film Market')], records, current: [1, 2] }).changed).toBe(true)
+    expect(planMeetingProgrammes({ wanted: [want('8e227662-0002', 'Series Market')], records, current: [1] }).changed).toBe(true)
+  })
+
+  it('ignores records without a programme id and wanted entries without one', () => {
+    const plan = planMeetingProgrammes({ wanted: [want('', 'blank'), { programmeName: 'x' }], records: [...records, { id: 9, programme_id: '' }], current: [] })
+
+    expect(plan.ids).toEqual([])
+    expect(plan.unmatched).toEqual([])
   })
 })

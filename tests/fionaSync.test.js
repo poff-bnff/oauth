@@ -63,7 +63,8 @@ function fakeFiona () {
         occupation: a.occupation || null,
         categories: a.categories || [],
         companies: a.companies || [],
-        films: a.films || []
+        films: a.films || [],
+        meetingProgrammes: a.meetingProgrammes || []
       }
     },
     getPersonFilms (personId) {
@@ -121,6 +122,9 @@ function fakeStrapi () {
     countries: [], // { id, name_en }
     industryCategories: [], // { id, name }
     roleAtFilms: [], // { id, order, names }
+    meetingProgrammes: [], // the MeetingProgramme records Jaan created: { id, programme_id, programme_name, schedule_id, schedule_name, guestbook_id }
+    failMeetingProgrammes: false, // the records cannot be read (for example the sync's login has no permission on the new content type)
+    meetingProgrammeCalls: 0,
     organisations: [], // { id, names, public }
     addresses: new Map(), // personId → { id, country }
     nextId: 1000
@@ -145,6 +149,7 @@ function fakeStrapi () {
     festival_editions: (p.festival_editions || []).map(id => ({ id })),
     ...(p.organisations ? { organisations: p.organisations.map(id => ({ id })) } : {}),
     ...(p.industry_categories ? { industry_categories: p.industry_categories.map(id => ({ id })) } : {}),
+    ...(p.meeting_programmes ? { meeting_programmes: p.meeting_programmes.map(id => ({ id })) } : {}),
     // person.participation-history entries: stored with plain ids, answered with the edition and the lists expanded (an
     // entry flagged `unreadable` is answered without its lists, as Strapi would if the relations of a component were not expanded)
     participationHistory: (p.participationHistory || []).map(row => (row.unreadable
@@ -285,6 +290,11 @@ function fakeStrapi () {
     listCountries () { return clone(state.countries) },
     listIndustryCategories () { return clone(state.industryCategories) },
     listRoleAtFilms () { return clone(state.roleAtFilms) },
+    listMeetingProgrammes () {
+      state.meetingProgrammeCalls++
+      if (state.failMeetingProgrammes) throw Object.assign(new Error('HTTP 403 Forbidden'), { statusCode: 403 })
+      return clone(state.meetingProgrammes)
+    },
     findOrganisationsByName (name) {
       const wanted = name.toLowerCase()
       return state.organisations.filter(org => org.names.some(n => n.toLowerCase().includes(wanted))).map(org => ({ id: org.id, names: [...org.names] }))
@@ -1488,15 +1498,16 @@ describe('runSync', () => {
     })
   })
 
-  it('shows in its stats whether the unpublished photo and biography, the extra values and the adopt-by-film switches are on', async () => {
+  it('shows in its stats whether the unpublished photo and biography, the extra values, the adopt-by-film and the meeting-programmes switches are on', async () => {
     fiona.state.guestbooks.set(GB, guestbookWith())
-    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: false, unpublishedBios: false, extraFields: false, adoptByFilm: false })
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: false, unpublishedBios: false, extraFields: false, adoptByFilm: false, meetingProgrammes: false })
 
     deps.config.unpublishedPhotos = true
     deps.config.unpublishedBios = true
     deps.config.extraFields = true
     deps.config.adoptByFilm = true
-    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true, extraFields: true, adoptByFilm: true })
+    deps.config.meetingProgrammes = true
+    expect((await runSync({ dryRun: true }, deps)).switches).toEqual({ unpublishedPhotos: true, unpublishedBios: true, extraFields: true, adoptByFilm: true, meetingProgrammes: true })
   })
 
   it('reports per rule how many persons it matches, and how many of them get the full profile', async () => {
@@ -3005,5 +3016,152 @@ describe('runSync: the 2026 Fiona chips also go into the participation history o
     const update = stats.dryRunActions.find(action => action.action === 'UPDATE')
     expect(update.changed).toContain('participationHistory')
     expect(update.participation).toEqual([{ id: 801, industry_categories: [2, 1] }])
+  })
+})
+
+describe('runSync: the meeting programmes of a person (Film Market, Series Market) are linked to the MeetingProgramme records', () => {
+  let fiona, strapi, deps
+
+  const FILM = 'mp-film'
+  const SERIES = 'mp-series'
+  const MENTOR = 'mp-mentor'
+  const participation = (programmeId, programmeName, extra = {}) => ({ programmeId, programmeName, scheduleId: 'sch-1', scheduleName: 'One-on-one meetings 2026', hiddenForRequests: false, ...extra })
+  const proCard = (id, personId, programmes) => accreditation(id, personId, BADGE_PRO, 'Paid', { meetingProgrammes: programmes })
+  const person = (extra = {}) => ({ firstName: 'Alicja', lastName: 'Osiej', email: 'alicja@example.com', ...extra })
+  const peopleOf = () => [...strapi.state.people.values()]
+  const linkWrites = (from = 0) => strapi.state.writes.slice(from).filter(w => w.payload && 'meeting_programmes' in w.payload)
+
+  beforeEach(() => {
+    fiona = fakeFiona()
+    strapi = fakeStrapi()
+    deps = { fiona, strapi, log: silentLog(), config: { maxRemovals: 50, maxBuildsPerRun: 20, meetingProgrammes: true }, now: () => new Date('2026-09-13T10:00:00.000Z') }
+    strapi.state.rules = [TEAM_RULE, PRO_RULE]
+    strapi.state.meetingProgrammes = [
+      { id: 1, programme_id: FILM, programme_name: 'Film Market', schedule_id: 'sch-1', schedule_name: 'ITBE2026', guestbook_id: GB },
+      { id: 2, programme_id: SERIES, programme_name: 'Series Market', schedule_id: 'sch-1', schedule_name: 'ITBE2026', guestbook_id: GB }
+    ]
+  })
+
+  it('level 2: links the person to the records of its programmes, reading the records once for the whole run', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market'), participation(SERIES, 'Series Market')]), proCard('acc2', 'fp2', [participation(FILM, 'Film Market')])))
+    fiona.state.persons.set('fp1', person())
+    fiona.state.persons.set('fp2', person({ firstName: 'Bo', lastName: 'Berg', email: 'bo@example.com' }))
+
+    const stats = await runSync({}, deps)
+
+    const byFionaId = Object.fromEntries(peopleOf().map(p => [p.fiona_person_id, p]))
+    expect(byFionaId.fp1.meeting_programmes).toEqual([1, 2])
+    expect(byFionaId.fp2.meeting_programmes).toEqual([1])
+    expect(stats.switches.meetingProgrammes).toBe(true)
+    expect(stats.meetingProgrammes).toMatchObject({ records: 2, persons: { linked: 2, cleared: 0, unchanged: 0 }, skippedHidden: 0, unmatched: {}, error: null })
+    expect(strapi.state.meetingProgrammeCalls).toBe(1)
+  })
+
+  it('a participation that Fiona marks "hide for meeting requests" gets no link, and is counted', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market'), participation(SERIES, 'Series Market', { hiddenForRequests: true })])))
+    fiona.state.persons.set('fp1', person())
+
+    const stats = await runSync({}, deps)
+
+    expect(peopleOf()[0].meeting_programmes).toEqual([1])
+    expect(stats.meetingProgrammes.skippedHidden).toBe(1)
+  })
+
+  it('a programme without a record is ignored and reported; the sync never creates a MeetingProgramme', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market'), participation(MENTOR, 'Mentor: Baltic Event Co-Production Market')])))
+    fiona.state.persons.set('fp1', person())
+
+    const stats = await runSync({}, deps)
+
+    expect(peopleOf()[0].meeting_programmes).toEqual([1])
+    expect(stats.meetingProgrammes.unmatched).toEqual({ 'Mentor: Baltic Event Co-Production Market': 1 })
+    expect(strapi.state.writes.some(w => /meeting/i.test(w.op))).toBe(false)
+    expect(strapi.state.meetingProgrammes).toHaveLength(2)
+  })
+
+  it('the programmes of two accreditations of one person are merged, once each', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market')]), proCard('acc2', 'fp1', [participation(FILM, 'Film Market'), participation(SERIES, 'Series Market')])))
+    fiona.state.persons.set('fp1', person())
+
+    await runSync({}, deps)
+
+    expect(peopleOf()[0].meeting_programmes).toEqual([1, 2])
+  })
+
+  it('a second run changes nothing: no write for the links, the person counts as still linked', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market')])))
+    fiona.state.persons.set('fp1', person())
+    await runSync({}, deps)
+    const before = strapi.state.writes.length
+
+    const second = await runSync({}, deps)
+
+    expect(linkWrites(before)).toEqual([])
+    expect(second.meetingProgrammes.persons).toEqual({ linked: 0, cleared: 0, unchanged: 1 })
+  })
+
+  it('when the person is no longer in the programme in Fiona, the link is removed on the next run', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market')])))
+    fiona.state.persons.set('fp1', person())
+    await runSync({}, deps)
+    fiona.state.guestbooks.get(GB).accreditations[0].meetingProgrammes = []
+
+    const stats = await runSync({}, deps)
+
+    expect(peopleOf()[0].meeting_programmes).toEqual([])
+    expect(stats.meetingProgrammes.persons).toMatchObject({ cleared: 1, linked: 0 })
+  })
+
+  it('with the switch off a real run writes no link and does not even read the records, while a dry run shows what the switch would do', async () => {
+    deps.config.meetingProgrammes = false
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market'), participation(MENTOR, 'Mentor: Baltic Event Co-Production Market')])))
+    fiona.state.persons.set('fp1', person())
+
+    const preview = await runSync({ dryRun: true }, deps)
+    const callsAfterPreview = strapi.state.meetingProgrammeCalls
+    const real = await runSync({}, deps)
+
+    expect(preview.switches.meetingProgrammes).toBe(false)
+    expect(preview.meetingProgrammes.persons.linked).toBe(1)
+    expect(preview.dryRunActions[0].meetingProgrammes).toEqual({ link: ['Film Market'], unmatched: ['Mentor: Baltic Event Co-Production Market'] })
+    expect(callsAfterPreview).toBe(1)
+    expect(peopleOf()[0].meeting_programmes).toBeUndefined()
+    expect(strapi.state.meetingProgrammeCalls).toBe(callsAfterPreview) // the real run read nothing
+    expect(real.meetingProgrammes.persons.linked).toBe(0)
+  })
+
+  it('a test run can switch it on for itself, so a few persons can be tried before the switch is turned on', async () => {
+    deps.config.meetingProgrammes = false
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market')])))
+    fiona.state.persons.set('fp1', person())
+
+    const stats = await runSync({ only: { ruleIds: [2], maxPersons: 5, scope: 'all', meetingProgrammes: true } }, deps)
+
+    expect(stats.switches.meetingProgrammes).toBe(true)
+    expect(peopleOf()[0].meeting_programmes).toEqual([1])
+  })
+
+  it('level 1 (basic) persons get no link', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc1', 'fp1', BADGE_TEAM, 'Created', { meetingProgrammes: [participation(FILM, 'Film Market')] })))
+    fiona.state.persons.set('fp1', person())
+
+    await runSync({}, deps)
+
+    expect(peopleOf()[0].meeting_programmes).toBeUndefined()
+  })
+
+  it('records that cannot be read: the person is still synced, one warning is raised, and no existing link is removed', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(proCard('acc1', 'fp1', [participation(FILM, 'Film Market')])))
+    fiona.state.persons.set('fp1', person())
+    await runSync({}, deps)
+    strapi.state.failMeetingProgrammes = true
+    fiona.state.guestbooks.get(GB).accreditations[0].meetingProgrammes = []
+
+    const stats = await runSync({}, deps)
+
+    expect(peopleOf()[0].meeting_programmes).toEqual([1]) // unreadable records are not "no programmes"
+    expect(stats.meetingProgrammes.error).toMatch(/403/)
+    expect(stats.errors).toBe(0)
+    expect(deps.log.lines.warn.filter(line => /meeting programme/i.test(line))).toHaveLength(1)
   })
 })

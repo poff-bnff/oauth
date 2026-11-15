@@ -353,6 +353,18 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return await readOnce('industry-categories', async () => asList(await get('/industry-categories?_limit=-1')).map(({ id, name }) => ({ id, name })))
     },
 
+    /** The MeetingProgramme records (Film Market, Series Market, ...) created in Strapi; the sync links persons to them, it never creates one. */
+    async listMeetingProgrammes () {
+      return await readOnce('meeting-programmes', async () => asList(await get('/meeting-programmes?_limit=-1')).map(record => ({
+        id: record.id,
+        programme_id: record.programme_id,
+        programme_name: record.programme_name,
+        schedule_id: record.schedule_id,
+        schedule_name: record.schedule_name,
+        guestbook_id: record.guestbook_id
+      })))
+    },
+
     /** Strapi roles at films with every name they carry (English first), for matching an occupation. */
     async listRoleAtFilms () {
       return await readOnce('role-at-films', async () => asList(await get('/role-at-films?_limit=-1')).map(role => ({
