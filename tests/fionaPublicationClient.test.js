@@ -348,3 +348,28 @@ describe('createPublicationClient getPersonFilms', () => {
     expect(await client.getPersonFilms('p')).toEqual([])
   })
 })
+
+describe('normalizeAccreditationRecord: the meeting programme participations of the card', () => {
+  const participation = (id, name, extra = {}) => ({ hideForMeetingRequests: false, meetingProgram: { id, description: name, schedule: { id: 'sch-1', description: 'One-on-one meetings 2026' } }, role: lookup('industry-representative', 'Industry representative'), ...extra })
+
+  it('lists each participation with the programme, its schedule and whether the person is hidden for meeting requests', () => {
+    const rec = normalizeAccreditationRecord(rawRecord({ meetingProgramParticipations: [participation('mp-film', 'Film Market'), participation('mp-series', 'Series Market', { hideForMeetingRequests: true })] }))
+
+    expect(rec.meetingProgrammes).toEqual([
+      { programmeId: 'mp-film', programmeName: 'Film Market', scheduleId: 'sch-1', scheduleName: 'One-on-one meetings 2026', hiddenForRequests: false },
+      { programmeId: 'mp-series', programmeName: 'Series Market', scheduleId: 'sch-1', scheduleName: 'One-on-one meetings 2026', hiddenForRequests: true }
+    ])
+  })
+
+  it('skips a participation without a programme id, and copes with nothing, null entries or odd values', () => {
+    expect(normalizeAccreditationRecord(rawRecord({ meetingProgramParticipations: [{ meetingProgram: { description: 'no id' } }, null, 'x', participation('', 'blank')] })).meetingProgrammes).toEqual([])
+    expect(normalizeAccreditationRecord(rawRecord({ meetingProgramParticipations: undefined })).meetingProgrammes).toEqual([])
+    expect(normalizeAccreditationRecord(rawRecord({ meetingProgramParticipations: 'x' })).meetingProgrammes).toEqual([])
+  })
+
+  it('a participation is hidden only when Fiona says so (true), never by default', () => {
+    const rec = normalizeAccreditationRecord(rawRecord({ meetingProgramParticipations: [participation('mp-film', 'Film Market', { hideForMeetingRequests: undefined })] }))
+
+    expect(rec.meetingProgrammes[0].hiddenForRequests).toBe(false)
+  })
+})

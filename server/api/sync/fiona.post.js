@@ -106,6 +106,11 @@
  *                job entry, so a test cannot start, delay or shorten the real import.
  *                Add "extraFields": true to a test run to let it write the extra values (country, companies, Programme/category,
  *                Current occupation) while the NUXT_SYNC_EXTRA_FIELDS switch is still off; a dry run always shows them.
+ *                Add "meetingProgrammes": true to a test run to let it link the persons to the Strapi MeetingProgramme records of their
+ *                meeting programmes (Film Market, Series Market, ...) while the NUXT_SYNC_MEETING_PROGRAMMES switch is still off; a dry
+ *                run always shows who would be linked to what. The sync only LINKS to records that exist (matched by the Fiona programme
+ *                id), never creates one; a participation Fiona marks "hide for meeting requests" gets no link. The answer has the counts
+ *                in stats.meetingProgrammes and, in a dry run, the names per person in dryRunActions[].meetingProgrammes.
  *                Add "adoptByFilm": true to a test run to let it adopt a same-name Strapi person that a shared film confirms (the
  *                Fiona person and the Strapi person are linked to the same film: the Strapi film's remoteId is the Fiona film id, or
  *                the titles are the same) while the NUXT_SYNC_ADOPT_BY_FILM switch is off; every run shows `sameName` counts.
@@ -185,6 +190,7 @@ export default defineEventHandler(async (event) => {
   const editionId = Number.isInteger(Number(body?.editionId)) && Number(body.editionId) > 0 ? Number(body.editionId) : 0 // programmes mode: the festival edition whose holders are listed (default 114)
   const fieldPaths = Array.isArray(body?.paths) ? body.paths.map(String) : [] // fields mode: extra endpoints to read, "xapi:/..." or "publication:/..."
   const testExtraFields = body?.extraFields === true // a test run only: write the extra values (country, companies, ...) even while the switch is off
+  const testMeetingProgrammes = body?.meetingProgrammes === true // a test run only: link the persons to the MeetingProgramme records even while the NUXT_SYNC_MEETING_PROGRAMMES switch is off
   const testAdoptByFilm = body?.adoptByFilm === true // a test run only: adopt the same-name person a shared film confirms even while the NUXT_SYNC_ADOPT_BY_FILM switch is off
   const testFionaPersonIds = Array.isArray(body?.testFionaPersonIds) ? body.testFionaPersonIds.map(String) : [] // a test run only: handle just these Fiona person ids
   const mergePairs = Array.isArray(body?.pairs) ? body.pairs.map(pair => ({ keep: Number(pair?.keep), remove: Number(pair?.remove), mainUser: Number(pair?.mainUser) || null })) : [] // merge mode: [{ keep, remove }] Strapi person ids
@@ -202,7 +208,7 @@ export default defineEventHandler(async (event) => {
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testMeetingProgrammes, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
 
   return { ok: true, stats }
 })

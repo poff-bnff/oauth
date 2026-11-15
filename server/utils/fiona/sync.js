@@ -26,7 +26,7 @@
 import { normalizeRules, indexRules, evaluateBadges } from './rules.js'
 import { mergeDesired, planRemovals, splitIds } from './desiredState.js'
 import { buildPersonPayload, valuesToClear } from './personMapper.js'
-import { normalizeName, uniqueNames, splitOccupations, isPlaceholderCompany, planCategories, planRoles, planCountry } from './extraFields.js'
+import { normalizeName, uniqueNames, splitOccupations, isPlaceholderCompany, planCategories, planRoles, planCountry, planMeetingProgrammes } from './extraFields.js'
 import { headshotFileName } from './photoName.js'
 import { findSameNamePersons, describeCandidate } from './sameName.js'
 import { addCategoriesToParticipation } from './participation.js'
@@ -101,7 +101,11 @@ function newStats (dryRun, mode) {
     customFieldKeys: {},
     ruleRoles: [],
     build: { triggered: false, ids: [], queued: 0, candidates: 0, removedWithoutBuild: [] },
-    switches: { unpublishedPhotos: false, unpublishedBios: false, extraFields: false, adoptByFilm: false },
+    switches: { unpublishedPhotos: false, unpublishedBios: false, extraFields: false, adoptByFilm: false, meetingProgrammes: false },
+    // the meeting programmes of a full-profile person (Film Market, Series Market, ...), linked to the MeetingProgramme records created in Strapi:
+    // records = how many records were read; persons = how many were linked / cleared / still linked unchanged; skippedHidden = participations
+    // Fiona marks "hide for meeting requests" (no link); unmatched = programme name -> persons whose programme has no record (never created); error = the records could not be read
+    meetingProgrammes: { records: 0, persons: { linked: 0, cleared: 0, unchanged: 0 }, skippedHidden: 0, unmatched: {}, error: null },
     backlog: { cap: 0, more: false },
     photos: { published: 0, headshot: 0, missing: [] },
     bios: { accreditation: 0, missing: [] },
@@ -284,7 +288,10 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   // a same-name Strapi person that a shared film confirms is adopted only with the switch on (or in a test run that asks for it);
   // the counts in stats.sameName are always there
   const adoptByFilmOn = Boolean(config.adoptByFilm) || Boolean(only?.adoptByFilm)
-  stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios), extraFields: extraFieldsOn, adoptByFilm: adoptByFilmOn }
+  // links a full-profile person to the MeetingProgramme records of its meeting programmes (Film Market, Series Market, ...): only with the
+  // switch on (NUXT_SYNC_MEETING_PROGRAMMES), or in a test run that asks for it; a dry run always shows what it would link
+  const meetingProgrammesOn = Boolean(config.meetingProgrammes) || Boolean(only?.meetingProgrammes)
+  stats.switches = { unpublishedPhotos: Boolean(config.unpublishedPhotos), unpublishedBios: Boolean(config.unpublishedBios), extraFields: extraFieldsOn, adoptByFilm: adoptByFilmOn, meetingProgrammes: meetingProgrammesOn }
   stats.backlog = { cap: maxPersonsPerRun, more: false }
   if (only) stats.test = { ruleIds: [...(testRuleIds || [])], maxPersons: maxPersonsPerRun, scope: testScope, outsideRules: 0, alreadyInStrapi: 0 }
   const would = dryRun ? 'DRY RUN would ' : ''
@@ -447,7 +454,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   // 4. Desired state ---------------------------------------------------------
   const desired = new Map()
   const privacy = new Map() // fionaPersonId → { contact, email, phone }, true when ANY of the person's accreditations says so
-  const extras = new Map() // fionaPersonId → { categories, occupations, companies } from the person's matching accreditations
+  const extras = new Map() // fionaPersonId → { categories, occupations, companies, programmes } from the person's matching accreditations
   const erroredAccreditationIds = new Set()
   const erroredPersonIds = new Set()
   const histogram = new Map() // guestbookId → Map(label → { badgeName, badgeId, counts })
@@ -498,10 +505,18 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       phone: before.phone || detail.noPublicationOfPhone === true
     })
     countCustomFields(detail.customFields)
-    const wanted = extras.get(detail.personId) || { categories: [], occupations: [], companies: [] }
+    const wanted = extras.get(detail.personId) || { categories: [], occupations: [], companies: [], programmes: [] }
     wanted.categories.push(...(detail.categories || []))
     wanted.occupations.push(...splitOccupations(detail.occupation))
     wanted.companies.push(...(detail.companies || []))
+    // the meeting programmes of the card; one the person is hidden for meeting requests in is skipped, so it gets no button
+    for (const programme of detail.meetingProgrammes || []) {
+      if (programme.hiddenForRequests) {
+        if (evaluation.level === 2) stats.meetingProgrammes.skippedHidden++
+      } else {
+        wanted.programmes.push({ programmeId: programme.programmeId, programmeName: programme.programmeName, guestbookId })
+      }
+    }
     extras.set(detail.personId, wanted)
     return true
   }
@@ -711,6 +726,23 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
     else stats.extras.participation.entriesUpdated++
     stats.extras.participation.links += entry.links
   }
+  // The MeetingProgramme records (created by hand in Strapi), read once per run and only when a person needs them. undefined = not read yet,
+  // null = could not be read: then no link is written or removed in this run (unreadable is not the same as "no programmes").
+  let programmeRecords
+  async function readProgrammeRecords () {
+    if (programmeRecords !== undefined) return programmeRecords
+    if (typeof strapi.listMeetingProgrammes !== 'function') return (programmeRecords = null)
+    try {
+      programmeRecords = await strapi.listMeetingProgrammes()
+      stats.meetingProgrammes.records = programmeRecords.length
+    } catch (err) {
+      programmeRecords = null
+      stats.meetingProgrammes.error = describeError(err)
+      warn(`meeting programmes: the MeetingProgramme records could not be read (${describeError(err)}); no programme link is written or removed in this run`)
+    }
+    return programmeRecords
+  }
+
   async function planExtraFields ({ existing, fionaPerson, wanted, editionIds }) {
     if (typeof strapi.listIndustryCategories !== 'function') return null
     const payload = {}
@@ -975,6 +1007,18 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
         }
       }
       if (extra) Object.assign(payload, extra.payload)
+      // the meeting programmes: link the person to the MeetingProgramme records of the programmes of its cards (full profile only; never creates a record)
+      let programmes = null
+      if (want.level === 2 && (dryRun || meetingProgrammesOn)) {
+        const records = await readProgrammeRecords()
+        if (records) {
+          programmes = planMeetingProgrammes({ wanted: extras.get(fionaPersonId)?.programmes, records, current: existing?.meeting_programmes })
+          if (programmes.ids.length || programmes.changed) payload.meeting_programmes = programmes.ids
+          if (programmes.changed) stats.meetingProgrammes.persons[programmes.ids.length ? 'linked' : 'cleared']++
+          else if (programmes.ids.length) stats.meetingProgrammes.persons.unchanged++
+          for (const name of programmes.unmatched) stats.meetingProgrammes.unmatched[name] = (stats.meetingProgrammes.unmatched[name] || 0) + 1
+        }
+      }
       if (existing?.fiona_unpublished_at) {
         payload.fiona_unpublished_at = null
         payload.show_in_cg_search = true
@@ -1005,7 +1049,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
 
       if (dryRun) {
         const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
-        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}), ...(cleared.length ? { cleared } : {}), ...(photo?.source ? { photo: photo.source } : {}), ...(want.level === 2 && fionaPerson.bio ? { bio: 'accreditation', bioChars: String(fionaPerson.bio).length } : {}), ...(photo?.choice === 'default' || photo?.choice === 'latest' ? { photoChoice: photo.choice } : {}) }
+        const plan = { fionaPersonId, name, level: want.level, editionIds: uniqueNumbers(want.editionIds), roleIds: uniqueNumbers(want.roleIds), ...(withheld.length ? { withheld } : {}), ...(cleared.length ? { cleared } : {}), ...(photo?.source ? { photo: photo.source } : {}), ...(want.level === 2 && fionaPerson.bio ? { bio: 'accreditation', bioChars: String(fionaPerson.bio).length } : {}), ...(photo?.choice === 'default' || photo?.choice === 'latest' ? { photoChoice: photo.choice } : {}), ...(programmes && (programmes.linked.length || programmes.unmatched.length || programmes.changed) ? { meetingProgrammes: { link: programmes.linked.map(item => item.name), unmatched: programmes.unmatched } } : {}) }
         if (!existing) {
           stats.persons.created++
           log.info(`${would}CREATE ${summary}`)
