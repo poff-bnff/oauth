@@ -5,6 +5,9 @@
 // of them or a live read fails. Only the user's own accounts are read: no id comes from the browser.
 //   GET /api/my/appointments?lang=en|et     (Authorization: Bearer <jwt>)
 //   → { ok, programmes[], appointments[], stale?, partial?, error? }
+//   programmes[]: { id, name, schedule, scheduleId, accreditationId, role, requestsOpenOn?, requestsCloseOn? } - id = meeting programme id,
+//   scheduleId = its schedule, accreditationId = the accreditation of this user that takes part: the festival site builds the
+//   pro.poff.ee "meeting wishes" link of a programme from these three ids (null when Fiona does not give one).
 import { hitLimit } from '../../utils/rateLimiter.js'
 import { buildPublicationClient, buildXapiClient, buildStrapiGateway } from '../../utils/fionaSync.js'
 import { appointmentsForUser } from '../../utils/fiona/loginAppointments.js'

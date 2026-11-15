@@ -11,6 +11,7 @@
  *                   subject, isOnline, location { id, description, isOnline, abbreviation }, showId, filmId, table,
  *                   publicationNotes, members[{ id, personId, accreditationId, personFullName, role { key, translations } }] }
  *   participation { hideForMeetingRequests, meetingProgram { id, description, schedule { id, description } }, role { key, translations } }
+ *   card          { id (= the accreditation), guestbook { id, description }, appointments[], meetingProgramParticipations[], ... }
  * `table` was null in every sample, so its shape is a guess: text, or an object with a description / name / number.
  */
 
@@ -81,7 +82,9 @@ function normalizeAppointment (raw, lang, mine) {
   }
 }
 
-function normalizeProgramme (raw, lang) {
+// scheduleId + accreditationId: the festival site builds the "meeting wishes" link of a programme from them
+// (programme id + schedule id + the id of the accreditation of the user that takes part), so every programme carries both.
+function normalizeProgramme (raw, lang, accreditationId = null) {
   const programme = isRecord(raw?.meetingProgram) ? raw.meetingProgram : null
   const name = text(programme?.description)
   if (!name) return null
@@ -89,6 +92,8 @@ function normalizeProgramme (raw, lang) {
     id: orNull(programme.id),
     name,
     schedule: orNull(programme.schedule?.description),
+    scheduleId: orNull(programme.schedule?.id),
+    accreditationId,
     role: lookup(raw.role, lang)
   }
 }
@@ -116,8 +121,9 @@ export function normalizeAppointments (card, { lang = 'en', myPersonId = null, m
 
   const seen = new Set()
   const programmes = []
+  const accreditationId = orNull(source.id) // the card's own id: the accreditation these participations belong to
   for (const raw of asList(source.meetingProgramParticipations)) {
-    const programme = normalizeProgramme(raw, lang)
+    const programme = normalizeProgramme(raw, lang, accreditationId)
     if (!programme) continue
     const key = `${programme.id ?? programme.name}|${programme.role?.key ?? ''}`
     if (seen.has(key)) continue

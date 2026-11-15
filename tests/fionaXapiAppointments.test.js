@@ -131,10 +131,18 @@ describe('normalizeXapiProgrammes', () => {
       id: 'mp-1',
       name: 'Film Market',
       schedule: 'One-on-one meetings 2026',
+      scheduleId: 's1',
+      accreditationId: 'acc-me',
       role: null,
       requestsOpenOn: '2026-10-28T22:00:00.000Z',
       requestsCloseOn: '2026-11-14T22:00:00.000Z'
     }])
+  })
+
+  it('has no schedule id or accreditation id when the answer does not give one', () => {
+    const [programme] = normalizeXapiProgrammes({ Schedules: [{ Name: 's', MeetingPrograms: [{ Id: 'mp-9', Name: 'Series Market' }] }] })
+
+    expect(programme).toMatchObject({ id: 'mp-9', scheduleId: null, accreditationId: null })
   })
 
   it('takes the role in the programme from the published card when it names the same programme, else shows none', () => {
