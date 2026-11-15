@@ -17,7 +17,7 @@ const accountAnswer = (accreditationId, name, appointments) => ({
   Appointments: appointments
 })
 const appt = (id, startsOn, members = []) => ({ Id: id, AppointmentType: { Description: 'Interview' }, StartsOn: startsOn, EndsOn: startsOn, Subject: id, Members: members })
-const participations = { Schedules: [{ Name: 'One-on-one meetings 2026', MeetingPrograms: [{ Id: 'mp-1', Name: 'Film Market' }] }] }
+const participations = { Accreditation: { Id: 'acc-1' }, Schedules: [{ Id: 'sch-1', Name: 'One-on-one meetings 2026', MeetingPrograms: [{ Id: 'mp-1', Name: 'Film Market' }] }] }
 
 // a fake XAPI: routes are path → answer or error; every path asked is recorded
 function fakeXapi (routes) {
@@ -84,6 +84,20 @@ describe('readLiveAppointments', () => {
     expect(result.found).toBe(true)
     expect(result.appointments.map(item => item.id)).toEqual(['a'])
     expect(result.errors).toEqual([{ what: 'meetingprogramparticipations', error: '504 Gateway Time-out' }, { what: 'appointments', error: '500 Internal' }])
+  })
+
+  it('gives every programme the schedule and the accreditation it was read for (one accreditation per guestbook)', async () => {
+    const xapi = fakeXapi({
+      [progPath(5)]: participations,
+      '/account/MyPoff/5/guestbook/gb-2/meetingprogramparticipations': { Accreditation: { Id: 'acc-2' }, Schedules: [{ Id: 'sch-2', Name: 'Pitching 2027', MeetingPrograms: [{ Id: 'mp-2', Name: 'Series Market' }] }] }
+    })
+
+    const result = await readLiveAppointments({ xapi, userIds: [5], guestbookIds: [GB, 'gb-2'] })
+
+    expect(result.programmes).toEqual([
+      expect.objectContaining({ id: 'mp-1', scheduleId: 'sch-1', accreditationId: 'acc-1' }),
+      expect.objectContaining({ id: 'mp-2', scheduleId: 'sch-2', accreditationId: 'acc-2' })
+    ])
   })
 
   it('reads every active guestbook', async () => {

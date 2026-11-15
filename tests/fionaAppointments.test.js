@@ -29,6 +29,7 @@ function blackCarpet (overrides = {}) {
 }
 
 const card = (overrides = {}) => ({
+  id: 'acc-card',
   appointments: [blackCarpet()],
   meetingProgramParticipations: [{
     hideForMeetingRequests: false,
@@ -175,9 +176,27 @@ describe('normalizeAppointments', () => {
     const { programmes } = normalizeAppointments(card({ meetingProgramParticipations: [participation, series, participation] }), { lang: 'et' })
 
     expect(programmes).toEqual([
-      { id: 'prog-film', name: 'Film Market', schedule: 'One-on-one meetings 2026', role: { key: 'industry-representative', text: 'Tööstuse esindaja' } },
-      { id: 'prog-series', name: 'Series Market', schedule: 'One-on-one meetings 2026', role: { key: 'industry-representative', text: 'Tööstuse esindaja' } }
+      { id: 'prog-film', name: 'Film Market', schedule: 'One-on-one meetings 2026', scheduleId: 'sch-1', accreditationId: 'acc-card', role: { key: 'industry-representative', text: 'Tööstuse esindaja' } },
+      { id: 'prog-series', name: 'Series Market', schedule: 'One-on-one meetings 2026', scheduleId: 'sch-1', accreditationId: 'acc-card', role: { key: 'industry-representative', text: 'Tööstuse esindaja' } }
     ])
+  })
+
+  it('gives each programme the id of its schedule and of the accreditation (card) it was read from, for the meeting-wishes link', () => {
+    const { programmes } = normalizeAppointments(card())
+
+    expect(programmes[0]).toMatchObject({ id: 'prog-film', scheduleId: 'sch-1', accreditationId: 'acc-card' })
+  })
+
+  it('has no schedule id or accreditation id when the card does not give one (never an empty string)', () => {
+    const raw = card({
+      id: undefined,
+      meetingProgramParticipations: [{ meetingProgram: { id: 'p', description: 'Film Market', schedule: { description: 'One-on-one meetings 2026' } }, role: null }]
+    })
+
+    const { programmes } = normalizeAppointments(raw)
+
+    expect(programmes[0].scheduleId).toBeNull()
+    expect(programmes[0].accreditationId).toBeNull()
   })
 
   it('only passes on what the page shows: no ids of films, shows or locations, no hide flag', () => {
@@ -185,7 +204,7 @@ describe('normalizeAppointments', () => {
 
     expect(Object.keys(appointments[0]).sort()).toEqual(['endsOn', 'id', 'isOnline', 'location', 'members', 'notes', 'startsOn', 'subject', 'table', 'type'])
     expect(Object.keys(appointments[0].members[0]).sort()).toEqual(['id', 'isMe', 'name', 'personId', 'role'])
-    expect(Object.keys(programmes[0]).sort()).toEqual(['id', 'name', 'role', 'schedule'])
+    expect(Object.keys(programmes[0]).sort()).toEqual(['accreditationId', 'id', 'name', 'role', 'schedule', 'scheduleId'])
   })
 
   it('copes with a card that has nothing, null lists or odd values', () => {
