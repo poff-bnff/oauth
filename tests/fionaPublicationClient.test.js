@@ -372,4 +372,21 @@ describe('normalizeAccreditationRecord: the meeting programme participations of 
 
     expect(rec.meetingProgrammes[0].hiddenForRequests).toBe(false)
   })
+
+  // found on the first live test run (2026-11-16): the sync reads the card through getAccreditation, which handed on a fixed list of
+  // fields and dropped this one, so no person ever got a programme (the tests with a fake Fiona client did not see it)
+  it('hands the programmes to the sync through getAccreditation, hidden ones marked', async () => {
+    const fetch = () => rawRecord({ meetingProgramParticipations: [participation('mp-film', 'Film Market'), participation('mp-series', 'Series Market', { hideForMeetingRequests: true })] })
+    const client = createPublicationClient({ fetch, apiKey: 'K', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    const detail = await client.getAccreditation('acc-1')
+
+    expect(detail.meetingProgrammes.map(item => [item.programmeId, item.programmeName, item.hiddenForRequests])).toEqual([['mp-film', 'Film Market', false], ['mp-series', 'Series Market', true]])
+  })
+
+  it('hands on an empty list for an accreditation without participations', async () => {
+    const client = createPublicationClient({ fetch: () => rawRecord({}), apiKey: 'K', baseUrl: 'https://pub.example/v1', log: { warn () {} } })
+
+    expect((await client.getAccreditation('acc-1')).meetingProgrammes).toEqual([])
+  })
 })
