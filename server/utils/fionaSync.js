@@ -25,7 +25,8 @@ import { createXapiClient } from './fiona/xapiClient.js'
 import { createPublicationClient } from './fiona/publicationClient.js'
 import { createHybridClient } from './fiona/hybridClient.js'
 import { createStrapiGateway } from './fiona/strapiGateway.js'
-import { runSync } from './fiona/sync.js'
+import { runSync, JOB_KEY } from './fiona/sync.js'
+import { attentionReport } from './fiona/attentionReport.js'
 import { compareSources } from './fiona/compare.js'
 import { renotifyPersons } from './fiona/renotify.js'
 import { describePhotos } from './fiona/photoDiagnostic.js'
@@ -181,6 +182,8 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
   if (mode === 'status') return statusReport()
   // read-only and never refused by the run lock: the last timed requests (appointments, login) with the time of each step, optionally of the given Strapi user ids only
   if (mode === 'timings') return { mode, entries: recentTimings({ userIds }) }
+  // read-only and never refused by the run lock: the persons somebody has to look at in Strapi (held back, conflicts, no e-mail), as the job entry saved them
+  if (mode === 'attention') return { mode, ...(await attentionReport({ strapi: buildStrapiGateway(), jobKey: JOB_KEY })) }
   if (mode === 'auto') {
     const waiting = autoBackoff.check()
     if (waiting) {

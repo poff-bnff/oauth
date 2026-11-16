@@ -3165,3 +3165,176 @@ describe('runSync: the meeting programmes of a person (Film Market, Series Marke
     expect(deps.log.lines.warn.filter(line => /meeting programme/i.test(line))).toHaveLength(1)
   })
 })
+
+describe('runSync: the persons somebody has to look at (held back, conflicts, no e-mail) are listed and stay listed', () => {
+  let fiona, strapi, deps
+
+  const job = (overrides = {}) => ({
+    id: 1,
+    key: 'accreditations',
+    enabled: true,
+    incremental_interval_minutes: 15,
+    full_run_hour: 3,
+    mutation_cursor: null,
+    last_incremental_run_at: null,
+    last_full_run_at: null,
+    last_stats: null,
+    last_error: null,
+    ...overrides
+  })
+  const strapiPerson = (id, fields) => ({ id, firstName: 'X', lastName: 'Y', firstNameLastName: 'X Y', eMail: null, festival_editions: [], ...fields })
+
+  // fp1: its e-mail belongs to Strapi person 20, synced from another Fiona person (conflict)
+  // fp2: a same-name Strapi person 21 without a Fiona id (held back, needs a decision)
+  // fp3: no e-mail anywhere (cannot be created)
+  const seedThreeTroubles = () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(
+      accreditation('acc1', 'fp1', BADGE_TEAM, 'Created'),
+      accreditation('acc2', 'fp2', BADGE_TEAM, 'Created'),
+      accreditation('acc3', 'fp3', BADGE_TEAM, 'Created')
+    ))
+    fiona.state.persons.set('fp1', { firstName: 'Edmond', lastName: 'Yang', email: 'edmond@example.com' })
+    fiona.state.persons.set('fp2', { firstName: 'Mari', lastName: 'Maasikas', email: 'mari@example.com' })
+    fiona.state.persons.set('fp3', { firstName: 'No', lastName: 'Mail' })
+    strapi.state.people.set(20, strapiPerson(20, { firstName: 'Edmond', lastName: 'Yang', firstNameLastName: 'Edmond Yang', eMail: 'edmond@example.com', fiona_person_id: 'fp-other' }))
+    strapi.state.people.set(21, strapiPerson(21, { firstName: 'Mari', lastName: 'Maasikas', firstNameLastName: 'Mari Maasikas' }))
+  }
+
+  beforeEach(() => {
+    fiona = fakeFiona()
+    strapi = fakeStrapi()
+    deps = { fiona, strapi, log: silentLog(), config: { maxRemovals: 50, maxBuildsPerRun: 20 }, now: () => new Date('2026-09-13T10:00:00.000Z') }
+    strapi.state.rules = [TEAM_RULE, PRO_RULE]
+    strapi.state.syncJob = job()
+  })
+
+  it('lists a conflict: who it is and which Strapi person and Fiona person hold the e-mail', async () => {
+    seedThreeTroubles()
+
+    const stats = await runSync({ mode: 'full' }, deps)
+
+    expect(stats.persons.conflicts).toBe(1)
+    expect(stats.conflictList).toEqual([{
+      fionaPersonId: 'fp1',
+      name: 'Edmond Yang',
+      email: 'edmond@example.com',
+      kind: 'email-owned-by-other-fiona-person',
+      strapiPersonId: 20,
+      otherFionaPersonId: 'fp-other',
+      seenAt: '2026-09-13T10:00:00.000Z'
+    }])
+  })
+
+  it('lists a conflict between the Fiona id of a person and the person the MyPoff login owns', async () => {
+    fiona.state.guestbooks.set(GB, guestbookWith(accreditation('acc4', 'fp4', BADGE_TEAM, 'Created')))
+    fiona.state.persons.set('fp4', { firstName: 'Anna', lastName: 'Ots', email: 'anna@example.com', myPoffUserId: 500 })
+    strapi.state.people.set(30, strapiPerson(30, { firstName: 'Anna', lastName: 'Ots', firstNameLastName: 'Anna Ots', fiona_person_id: 'fp4' }))
+    strapi.state.people.set(31, strapiPerson(31, { firstName: 'Anna', lastName: 'Ots', firstNameLastName: 'Anna Ots', user: 500 }))
+    strapi.state.users.set(500, { id: 500, email: 'anna@example.com', person: 31, user_roles: [] })
+
+    const stats = await runSync({ mode: 'full' }, deps)
+
+    expect(stats.persons.conflicts).toBe(1)
+    expect(stats.conflictList).toEqual([expect.objectContaining({
+      fionaPersonId: 'fp4',
+      name: 'Anna Ots',
+      kind: 'login-owns-other-person',
+      strapiPersonId: 30,
+      otherStrapiPersonId: 31,
+      userId: 500
+    })])
+  })
+
+  it('lists a person without any e-mail', async () => {
+    seedThreeTroubles()
+
+    const stats = await runSync({ mode: 'full' }, deps)
+
+    expect(stats.persons.skippedNoEmail).toBe(1)
+    expect(stats.noEmailList).toEqual([{ fionaPersonId: 'fp3', name: 'No Mail', seenAt: '2026-09-13T10:00:00.000Z' }])
+  })
+
+  it('saves the three lists with the job, so they are readable after a restart', async () => {
+    seedThreeTroubles()
+
+    await runSync({ mode: 'full' }, deps)
+
+    const saved = strapi.state.syncJob.last_stats
+    expect(saved.conflictList.map(item => item.fionaPersonId)).toEqual(['fp1'])
+    expect(saved.needsDecision.map(item => item.fionaPersonId)).toEqual(['fp2'])
+    expect(saved.noEmailList.map(item => item.fionaPersonId)).toEqual(['fp3'])
+  })
+
+  it('an incremental run that looks at nobody keeps all three lists (they do not disappear every 15 minutes)', async () => {
+    seedThreeTroubles()
+    await runSync({ mode: 'full' }, deps)
+    fiona.state.mutations = []
+
+    const stats = await runSync({ mode: 'incremental' }, deps)
+
+    expect(stats.mode).toBe('incremental')
+    expect(stats.conflictList.map(item => item.fionaPersonId)).toEqual(['fp1'])
+    expect(stats.needsDecision.map(item => item.fionaPersonId)).toEqual(['fp2'])
+    expect(stats.noEmailList.map(item => item.fionaPersonId)).toEqual(['fp3'])
+    expect(strapi.state.syncJob.last_stats.conflictList.map(item => item.fionaPersonId)).toEqual(['fp1'])
+  })
+
+  it('an incremental run drops a person it looked at again and that is fine now, and keeps the others', async () => {
+    seedThreeTroubles()
+    await runSync({ mode: 'full' }, deps)
+    // the other Fiona person no longer owns Strapi person 20: fp1 can adopt it
+    strapi.state.people.get(20).fiona_person_id = null
+    fiona.state.mutations = [{ entityName: 'Accreditation', entityId: 'acc1', mutation: 1 }]
+
+    const stats = await runSync({ mode: 'incremental' }, deps)
+
+    expect(stats.persons.conflicts).toBe(0)
+    expect(stats.conflictList).toEqual([])
+    expect(stats.needsDecision.map(item => item.fionaPersonId)).toEqual(['fp2'])
+    expect(stats.noEmailList.map(item => item.fionaPersonId)).toEqual(['fp3'])
+    expect(strapi.state.people.get(20).fiona_person_id).toBe('fp1')
+  })
+
+  it('a full run replaces the lists: what is fine now is gone, what is still wrong is listed again with the new date', async () => {
+    seedThreeTroubles()
+    await runSync({ mode: 'full' }, deps)
+    deps.now = () => new Date('2026-09-14T10:00:00.000Z')
+    fiona.state.persons.get('fp3').email = 'nomail@example.com' // the e-mail is in Fiona now
+
+    const stats = await runSync({ mode: 'full' }, deps)
+
+    expect(stats.noEmailList).toEqual([])
+    expect(stats.conflictList).toEqual([expect.objectContaining({ fionaPersonId: 'fp1', seenAt: '2026-09-14T10:00:00.000Z' })])
+    expect(stats.needsDecision).toEqual([expect.objectContaining({ fionaPersonId: 'fp2' })])
+  })
+
+  it('a run that stops at the cap of persons keeps the entries of the persons it did not reach', async () => {
+    seedThreeTroubles()
+    await runSync({ mode: 'full' }, deps)
+    // a new person comes first in the list and uses up the cap of one person written; fp1 is not reached
+    fiona.state.guestbooks.get(GB).accreditations.unshift(accreditation('acc9', 'fp9', BADGE_TEAM, 'Created'))
+    fiona.state.persons.set('fp9', { firstName: 'Neil', lastName: 'New', email: 'neil@example.com' })
+    deps.config.maxPersonsPerRun = 1
+
+    const stats = await runSync({ mode: 'full' }, deps)
+
+    expect(stats.backlog.more).toBe(true)
+    expect(stats.conflictList.map(item => item.fionaPersonId)).toEqual(['fp1'])
+    expect(stats.needsDecision.map(item => item.fionaPersonId)).toEqual(['fp2'])
+    expect(stats.noEmailList.map(item => item.fionaPersonId)).toEqual(['fp3'])
+  })
+
+  it('a dry run lists only what it finds itself: nothing is carried over from the job and nothing is saved', async () => {
+    seedThreeTroubles()
+    await runSync({ mode: 'full' }, deps)
+    const writesBefore = strapi.state.writes.length
+    fiona.state.mutations = []
+
+    const stats = await runSync({ mode: 'incremental', dryRun: true }, deps)
+
+    expect(stats.conflictList).toEqual([])
+    expect(stats.needsDecision).toEqual([])
+    expect(stats.noEmailList).toEqual([])
+    expect(strapi.state.writes.length).toBe(writesBefore)
+  })
+})
