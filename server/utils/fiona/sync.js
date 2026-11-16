@@ -89,6 +89,11 @@ function newStats (dryRun, mode) {
     persons: { desired: 0, created: 0, updated: 0, unchanged: 0, downgraded: 0, unpublished: 0, conflicts: 0, skippedNoEmail: 0, needsDecision: 0 },
     // Fiona persons the sync did not create because Strapi may already hold them: { fionaPersonId, name, email, reason, candidates, film }
     needsDecision: [],
+    // The other two lists of persons somebody has to look at. All three are KEPT between runs (see carryOverLists): a run that does not
+    // look at a person again leaves that person's entry as it was, so an incremental run every 15 minutes does not wipe what the
+    // nightly full run found. conflictList: { fionaPersonId, name, email, kind, strapiPersonId, ..., seenAt }; noEmailList: { fionaPersonId, name, seenAt }
+    conflictList: [],
+    noEmailList: [],
     // the Fiona persons held back for a same-name Strapi person, by what the films say (see filmEvidence.js): a shared film
     // confirms it (by Fiona film id or by title), several candidates share one, Fiona has films and none is shared, Fiona knows
     // no film of the person, the films could not be compared; `adopted` = confirmed ones the sync took over (switch on)
@@ -365,9 +370,34 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
 
   let scanCompleted = false
   let buildQueue = null // the waiting list to save with the job entry; null = leave it as it is
+  const evaluatedPersonIds = new Set() // the Fiona persons this run looked at one by one
+  let desiredPersonIds = null // every Fiona person that has to be in Strapi, once the desired state is known
+
+  // The three lists of persons somebody has to look at stay as they were for every person this run did not look at again. A person
+  // it looked at is listed again if it is still wrong and dropped if it is fine now. A completed full scan also drops the entries of
+  // persons that no longer have to be in Strapi at all. A dry run or a test run lists only what it finds itself.
+  const carryOverLists = () => {
+    if (dryRun || only) return
+    const previous = job?.last_stats
+    if (!previous || typeof previous !== 'object') return
+    const dropGone = mode === 'full' && scanCompleted && desiredPersonIds
+    for (const key of ['needsDecision', 'conflictList', 'noEmailList']) {
+      if (!Array.isArray(previous[key])) continue
+      const listed = new Set(stats[key].map(item => item.fionaPersonId))
+      for (const item of previous[key]) {
+        const id = item?.fionaPersonId
+        if (!id || listed.has(id) || evaluatedPersonIds.has(id)) continue
+        if (dropGone && !desiredPersonIds.has(id)) continue
+        if (stats[key].length >= MAX_LISTED_HOLDS) break
+        stats[key].push(item)
+        listed.add(id)
+      }
+    }
+  }
 
   const finish = async ({ save = true } = {}) => {
     stats.durationSec = Number(((Date.now() - startedMs) / 1000).toFixed(1))
+    carryOverLists()
     if (save && !dryRun && !only && job && typeof strapi.saveSyncJob === 'function') {
       const patch = {
         last_stats: stats,
@@ -831,11 +861,16 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
   // 6. Upsert desired persons -----------------------------------------------
   if (testRuleIds) stats.test.outsideRules = [...desired.values()].filter(entry => ![...entry.matchedRuleIds].some(id => testRuleIds.has(Number(id)))).length
   for (const id of decisions.keys()) if (!desired.has(id)) stats.decisions.unmatched.push(id)
+  const personName = fionaPerson => [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
+  // A Fiona person the sync skips because Strapi's records disagree (the e-mail or the login belongs to another person): somebody has to fix it in Strapi
+  const listConflict = ({ fionaPersonId, fionaPerson, email, kind, ...ids }) => {
+    if (stats.conflictList.length < MAX_LISTED_HOLDS) stats.conflictList.push({ fionaPersonId, name: personName(fionaPerson), email, kind, ...ids, seenAt: startedAt.toISOString() })
+  }
   // A Fiona person the sync does not create because Strapi may hold it already: the list below is what a person has to decide
   const holdBack = (fionaPersonId, fionaPerson, email, reason, candidates, film = null) => {
     const name = [fionaPerson.firstName, fionaPerson.lastName].filter(Boolean).join(' ')
     stats.persons.needsDecision++
-    if (stats.needsDecision.length < MAX_LISTED_HOLDS) stats.needsDecision.push({ fionaPersonId, name, email, reason, candidates: candidates.map(describeCandidate), ...(film ? { film } : {}) })
+    if (stats.needsDecision.length < MAX_LISTED_HOLDS) stats.needsDecision.push({ fionaPersonId, name, email, reason, candidates: candidates.map(describeCandidate), ...(film ? { film } : {}), seenAt: startedAt.toISOString() })
     warn(`person ${fionaPersonId} (${name}, ${email}) needs a decision: ${reason}, ${candidates.map(candidate => `#${candidate.id}`).join(', ')} — not created`)
   }
   // What the films say about a Fiona person and the same-name Strapi persons. Never throws: when the films cannot be compared
@@ -852,6 +887,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
     }
   }
   let written = 0 // persons this run writes: created, or updated because something differs
+  desiredPersonIds = new Set(desired.keys())
   for (const [fionaPersonId, want] of desired) {
     if (erroredPersonIds.has(fionaPersonId)) continue
     // a test run handles only the persons the chosen rules match
@@ -867,6 +903,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       const managed = managedByFionaId.get(fionaPersonId)
       if (managed?.fiona_synced_at && startedAt.getTime() - new Date(managed.fiona_synced_at).getTime() < BACKLOG_RECENT_HOURS * 3600 * 1000) continue
     }
+    evaluatedPersonIds.add(fionaPersonId)
     try {
       const fionaPerson = await fiona.getPerson(fionaPersonId, { accreditationIds: [...want.accreditationIds], level: want.level })
       if (want.level === 2) {
@@ -891,6 +928,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       const userPersonId = user?.person ? Number(relationId(user.person)) : null
       if (existing && userPersonId && userPersonId !== Number(existing.id)) {
         stats.persons.conflicts++
+        listConflict({ fionaPersonId, fionaPerson, email: fionaPerson.email || user?.email || null, kind: 'login-owns-other-person', strapiPersonId: Number(existing.id), otherStrapiPersonId: userPersonId, userId: Number(user.id) })
         log.error(`person ${fionaPersonId}: fiona_person_id points to person #${existing.id} but its MyPoff user #${user.id} owns person #${userPersonId} — skipped`)
         continue
       }
@@ -904,6 +942,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       const contactEmail = fionaPerson.email || user?.email || null
       if (!contactEmail) {
         stats.persons.skippedNoEmail++
+        if (stats.noEmailList.length < MAX_LISTED_HOLDS) stats.noEmailList.push({ fionaPersonId, name: personName(fionaPerson), seenAt: startedAt.toISOString() })
         warn(`person ${fionaPersonId} (${fionaPerson.firstName} ${fionaPerson.lastName}) has no email — skipped`)
         continue
       }
@@ -922,6 +961,7 @@ export async function runSync ({ dryRun = false, force = false, mode = 'full', b
       }
       if (existing?.fiona_person_id && existing.fiona_person_id !== fionaPersonId) {
         stats.persons.conflicts++
+        listConflict({ fionaPersonId, fionaPerson, email: contactEmail, kind: 'email-owned-by-other-fiona-person', strapiPersonId: Number(existing.id), otherFionaPersonId: existing.fiona_person_id })
         log.error(`person ${fionaPersonId}: email ${contactEmail} belongs to person #${existing.id} synced from Fiona person ${existing.fiona_person_id} — skipped`)
         continue
       }
