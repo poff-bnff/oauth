@@ -323,6 +323,7 @@ export function createPublicationClient ({
         occupation: record.currentOccupation,
         categories: record.categories,
         companies: record.companies,
+        meetingProgrammes: record.meetingProgrammes,
         films: record.films
       }
     },
