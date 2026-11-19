@@ -72,6 +72,11 @@
  *                the person still have the role and the Fiona MyPoff login link (a 404 from Fiona = no link)? Per person a category (role-ok is only
  *                counted; linked-role-missing, linked-to-missing-user, unlinked-role-ok, unlinked-role-missing, unlinked-no-user, unlinked-several-users,
  *                unlinked-no-email, fiona-error, strapi-error), counts, and `nextOffset` for the next page. Ids only: no names or e-mails.
+ *                { "mode": "roleRepair", "roleId": 15, "offset": 0, "limit": 20, "dryRun": false } — gives the role to the logins of the badge holders who lack it
+ *                (the same page of accreditations as roleAudit; at most 40 per call). A DRY RUN unless "dryRun": false is sent: it lists the users it would grant
+ *                (`users`, ids only). It only ADDS the role (every role the user has stays), writes once per user, checks each write by reading the user back,
+ *                never touches a blocked user or an alias (the main login gets it), and repairs only linked-role-missing and unlinked-role-missing (one login
+ *                found by the e-mail); add "categories": ["unlinked-role-missing"] to narrow it. Refused while a sync run is going (it writes).
  *                { "mode": "explain", "personIds": [..] } — read-only, at most 10 persons (Strapi ids): why does a person have or lack a
  *                festival edition or role? Shows the sync's fields on the person, the badges of each accreditation with their status,
  *                which rules match them (full profile, basic only, status not listed) and the editions and roles those give, what the
@@ -188,11 +193,11 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'xapiAccount', 'timings', 'whySynced', 'attention', 'links', 'roleAudit', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'xapiAccount', 'timings', 'whySynced', 'attention', 'links', 'roleAudit', 'roleRepair', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
-  const dryRun = ['renotify', 'merge', 'slugs', 'purge'].includes(mode) || sentDecisions ? body?.dryRun !== false : body?.dryRun === true
+  const dryRun = ['renotify', 'merge', 'slugs', 'purge', 'roleRepair'].includes(mode) || sentDecisions ? body?.dryRun !== false : body?.dryRun === true
   const personIds = Array.isArray(body?.personIds) ? body.personIds : []
   const all = body?.all === true
   const guestbookIds = Array.isArray(body?.guestbookIds) ? body.guestbookIds : []
@@ -223,10 +228,11 @@ export default defineEventHandler(async (event) => {
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
   const roleId = Number.isInteger(Number(body?.roleId)) && Number(body.roleId) > 0 ? Number(body.roleId) : 0 // roleAudit mode: the Strapi user-role whose badge holders are audited
+  const repairCategories = Array.isArray(body?.categories) ? body.categories.map(String) : [] // roleRepair mode: only these audit categories (default linked-role-missing and unlinked-role-missing)
   const linksOffset = Number.isInteger(Number(body?.offset)) && Number(body.offset) > 0 ? Number(body.offset) : 0 // links mode: where the page of managed persons starts
   const linksLimit = Number.isInteger(Number(body?.limit)) && Number(body.limit) > 0 ? Number(body.limit) : 0 // links mode: how many persons the page holds (default 50, at most 100)
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testMeetingProgrammes, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions, linksOffset, linksLimit, roleId })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testMeetingProgrammes, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions, linksOffset, linksLimit, roleId, repairCategories })
 
   return { ok: true, stats }
 })
