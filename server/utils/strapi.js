@@ -278,12 +278,16 @@ export async function loadFionaBadges (user, { timer = noopTimer } = {}) {
   const guestbooks = await timer.step('role sync › active guestbooks (Strapi)', () => getActiveFionaGuestbooks())
   const totalCalls = guestbooks.length * allIds.length
   let callNumber = 0
+  // what each read answered: a list of badges (ok, also an empty one), "no account under that id" (400/404) or trouble (anything else)
+  const reads = { total: 0, ok: 0, noAccount: 0, failed: 0 }
 
   for (const guestbookId of guestbooks) {
     for (const id of allIds) {
       try {
         const number = ++callNumber
         const fionaBadges = await timer.step(`role sync › Fiona badges call ${number}/${totalCalls}`, () => fetchFionaBadges(guestbookId, id))
+        reads.total++
+        reads.ok++
 
         if (Array.isArray(fionaBadges) && fionaBadges.length) {
           for (const badge of fionaBadges) {
@@ -301,13 +305,35 @@ export async function loadFionaBadges (user, { timer = noopTimer } = {}) {
       } catch (err) {
         // Log the individual fetch error, but the overall loadFionaBadges continues
         console.error('loadFionaBadges error (single ID/guestbook fetch failed)', { guestbookId, id, err })
+        reads.total++
+        if (NO_ACCOUNT_STATUSES.has(fionaStatusOf(err))) reads.noAccount++
+        else reads.failed++
       }
     }
   }
 
   user.badges = Array.from(consolidatedBadgesMap.values())
+  user.badgeReads = reads
 
   return user
+}
+
+// Fiona answers 400 (measured 2026-11-12) or 404 for an id it holds no MyPoff account under: the link is missing, or the id is an alias
+const NO_ACCOUNT_STATUSES = new Set([400, 404])
+const fionaStatusOf = err => err?.statusCode ?? err?.status ?? err?.response?.status
+
+/**
+ * Whether what Fiona answered is good enough to TAKE a badge role away from the user. Not when a read failed (a 5xx, a timeout, a
+ * throttle: that says nothing about the badges), nor when every read said "no account under that id" (the MyPoff link is gone: Fiona may
+ * well hold the badge, just not under this id). A "no account" for an alias id next to an answer for the main id is normal.
+ * No read at all (no guestbook is active: the festival is over) is trustworthy: the badge roles lapse then, by design.
+ * @param {{ total: number, ok: number, noAccount: number, failed: number } | null | undefined} reads null/undefined = the reading itself broke
+ */
+export function badgeReadsTrusted (reads) {
+  if (!reads) return false
+  if (reads.failed > 0) return false
+  if (reads.total === 0) return true
+  return reads.ok > 0
 }
 
 // --- ROLE VALIDATION LOGIC ---
@@ -331,7 +357,7 @@ function userHasMatchingBadge (userBadges, requiredBadgeName, requiredBadgeStatu
  * @param {boolean} isAlias - Flag to exclude badge-based roles for alias users.
  * @returns {Array<number>} An array of Role IDs to be assigned.
  */
-export async function validateUserRoles (user, allStrapiRoles, existingUserRoles, isAlias = false) {
+export async function validateUserRoles (user, allStrapiRoles, existingUserRoles, isAlias = false, { keepBadgeRoles = false } = {}) {
   const userBadges = user.badges || []
   const rolesToAssign = []
 
@@ -363,6 +389,11 @@ export async function validateUserRoles (user, allStrapiRoles, existingUserRoles
           roleIsAssignedByBadge = true
           break
         }
+      }
+
+      // Fiona could not be read (see badgeReadsTrusted): a badge role the user already has is not taken away on that account
+      if (!roleIsAssignedByBadge && keepBadgeRoles && existingRoleIds.has(role.id)) {
+        rolesToAssign.push(role)
       }
     } else {
       // **Process Non-Badge Roles** (PRESERVE if already assigned)
@@ -420,14 +451,17 @@ export async function updateUserAndAliasesRoles (mainUser, { timer = noopTimer }
   // 2. Load/Aggregate all badges ONTO the main user object (Resilience)
   let userWithBadges = mainUser
   let allUserBadges = []
+  let badgeReads = null // null = the reading itself broke (e.g. the active guestbooks could not be looked up)
 
   try {
     userWithBadges = await loadFionaBadges(mainUser, { timer })
     allUserBadges = userWithBadges.badges || []
+    badgeReads = userWithBadges.badgeReads || null
   } catch (err) {
-    console.error('Non-critical: Total failure fetching Fiona badges. Roles will only include non-badge-dependent roles.', err)
+    console.error('Non-critical: Total failure fetching Fiona badges. Badge roles the user already has are kept; none is granted.', err)
     userWithBadges.badges = []
   }
+  const keepBadgeRoles = !badgeReadsTrusted(badgeReads)
 
   // --- Process Main User ---
   const mainUserId = mainUser.id
@@ -442,8 +476,13 @@ export async function updateUserAndAliasesRoles (mainUser, { timer = noopTimer }
     userWithBadges,
     allStrapiRoles,
     mainUserExistingRoles,
-    false
+    false,
+    { keepBadgeRoles }
   )
+  if (keepBadgeRoles) {
+    // never the e-mail: the user id and what the Fiona reads answered
+    console.warn(`role sync: the Fiona badge read for user ${mainUser.id} is not trustworthy (${badgeReads ? JSON.stringify(badgeReads) : 'the reading broke'}), kept the badge roles the user already has`)
+  }
 
   // 5. Compare and conditionally update (NEW LOGIC)
   if (mainUserId && !areRoleArraysEqual(mainUserRoleIds, mainUserExistingRoleIds)) {
