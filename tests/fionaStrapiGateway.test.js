@@ -78,6 +78,17 @@ describe('createStrapiGateway', () => {
     expect(calls[0].url).toBe(`${STRAPI}/people?fiona_person_id_null=false&_limit=-1`)
   })
 
+  it('counts the managed people and reads them a page at a time, lowest id first (the links audit never reads them all at once)', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /people/count': 1650, 'GET /people?': [{ id: 3 }, { id: 4 }] })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+
+    expect(await gateway.countManagedPeople()).toBe(1650)
+    expect(calls[0].url).toBe(`${STRAPI}/people/count?fiona_person_id_null=false`)
+    expect(await gateway.findManagedPeoplePage(100, 50)).toEqual([{ id: 3 }, { id: 4 }])
+    expect(calls[1].url).toBe(`${STRAPI}/people?fiona_person_id_null=false&_sort=id:ASC&_start=100&_limit=50`)
+    expect(calls.every(call => call.method === 'GET')).toBe(true)
+  })
+
   it('looks a person up by fiona id, by email and by id, returning null when absent', async () => {
     const { fetch, calls } = fakeFetch({ 'GET /people?fiona_person_id=': [{ id: 5 }], 'GET /people/9': { id: 9 } })
     const gateway = createStrapiGateway({ fetch, ...deps() })

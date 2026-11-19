@@ -62,6 +62,11 @@
  *                distinct label with its persons and Strapi match, every chip field of the cards, and the labels that look like "stars".
  *                About 1,400 persons take a few minutes: start it with "background": true and read the result with {"mode":"status"}
  *                (under "last"); other runs are refused while it goes on. Writes nothing.
+ *                { "mode": "links", "personIds": [..] } or { "mode": "links", "offset": 0, "limit": 50 } — read-only, answered even while a sync
+ *                run is going, at most 100 persons (Strapi ids) per call: does Fiona still hold the MyPoff login link of the persons the sync
+ *                manages (GET /person/{id}/MyPoff/externalauthentications), and does it point at the login Strapi has on the person? Per person a
+ *                category (linked-ok, linked-to-alias, linked-to-missing-user, linked-other-user, linked-person-has-no-user, unlinked-repairable,
+ *                unlinked-no-user, fiona-error, strapi-error), counts, and `nextOffset` for the next page. Ids only: no names or e-mails.
  *                { "mode": "explain", "personIds": [..] } — read-only, at most 10 persons (Strapi ids): why does a person have or lack a
  *                festival edition or role? Shows the sync's fields on the person, the badges of each accreditation with their status,
  *                which rules match them (full profile, basic only, status not listed) and the editions and roles those give, what the
@@ -178,7 +183,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event).catch(() => ({}))
   const force = body?.force === true // lifts the per-run removal cap (NUXT_SYNC_MAX_REMOVALS)
-  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'xapiAccount', 'timings', 'whySynced', 'attention', 'status'].includes(body?.mode) ? body.mode : 'full'
+  const mode = ['full', 'incremental', 'auto', 'compare', 'renotify', 'photos', 'fields', 'twins', 'merge', 'slugs', 'purge', 'explain', 'lost', 'badges', 'appointments', 'programmes', 'roles', 'rolesCompare', 'liveAppointments', 'xapiAccount', 'timings', 'whySynced', 'attention', 'links', 'status'].includes(body?.mode) ? body.mode : 'full'
   // re-sending emails and merging persons must never happen by accident: a dry run unless dryRun is explicitly false
   // (so are decisions about Fiona persons the sync held back: they create or link persons)
   const sentDecisions = Array.isArray(body?.decisions) && body.decisions.length > 0
@@ -212,8 +217,10 @@ export default defineEventHandler(async (event) => {
   // a malformed list must never turn into an ordinary full run
   if (sentDecisions && decisions.length !== body.decisions.length) throw createError({ statusCode: 400, statusMessage: 'decisions must be [{ fionaPersonId, action: "adopt", personId } | { fionaPersonId, action: "create" }]' })
   const probe = body?.probe === true // photos mode: also try the Headshot download and the Biography read for at most 10 persons
+  const linksOffset = Number.isInteger(Number(body?.offset)) && Number(body.offset) > 0 ? Number(body.offset) : 0 // links mode: where the page of managed persons starts
+  const linksLimit = Number.isInteger(Number(body?.limit)) && Number(body.limit) > 0 ? Number(body.limit) : 0 // links mode: how many persons the page holds (default 50, at most 100)
 
-  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testMeetingProgrammes, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions })
+  const stats = await runFionaSync({ dryRun, force, mode, personIds, all, probe, guestbookIds, background, testRuleIds, testMaxPersons, testScope, fieldPaths, accreditationIds, userIds, editionId, testExtraFields, testAdoptByFilm, testMeetingProgrammes, testFionaPersonIds, mergePairs, mergeRetire, repointCredits, aliasLogins, moveToMain, ignoreEventivalIds, decisions, linksOffset, linksLimit })
 
   return { ok: true, stats }
 })
