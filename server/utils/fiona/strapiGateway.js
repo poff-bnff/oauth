@@ -139,6 +139,17 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
       return Array.isArray(people) ? people : []
     },
 
+    /** How many persons the sync manages (a Fiona person id is set), for the links audit's paging. Read only. */
+    async countManagedPeople () {
+      return Number(await get('/people/count?fiona_person_id_null=false')) || 0
+    },
+
+    /** One page of the managed persons, lowest id first: the links audit reads them a few at a time, never all at once. Read only. */
+    async findManagedPeoplePage (start, limit) {
+      const people = await get(`/people?fiona_person_id_null=false&_sort=id:ASC&_start=${Number(start) || 0}&_limit=${Number(limit) || 50}`)
+      return Array.isArray(people) ? people : []
+    },
+
     /**
      * Every person who carries a festival edition, lowest id first, read in pages of 100 (read only). Strapi 3 filters a
      * relation by id, but not every way of writing it is honoured: each one is tried on the cheap count first, and one that

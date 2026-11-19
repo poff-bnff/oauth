@@ -44,6 +44,7 @@ import { liveAppointmentsReport } from './fiona/liveAppointmentsReport.js'
 import { xapiAccountReport } from './fiona/xapiAccountReport.js'
 import { recentTimings } from './fiona/timingLog.js'
 import { whySyncedReport } from './fiona/whySynced.js'
+import { linkAudit } from './fiona/linkAudit.js'
 import { programmeReport } from './fiona/programmeReport.js'
 
 const config = useRuntimeConfig()
@@ -178,12 +179,19 @@ async function compareFionaSources () {
   return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
 }
 
-export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], userIds = [], editionId = 0, testExtraFields = false, testAdoptByFilm = false, testMeetingProgrammes = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [] } = {}) {
+export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], userIds = [], editionId = 0, testExtraFields = false, testAdoptByFilm = false, testMeetingProgrammes = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [], linksOffset = 0, linksLimit = 0 } = {}) {
   if (mode === 'status') return statusReport()
   // read-only and never refused by the run lock: the last timed requests (appointments, login) with the time of each step, optionally of the given Strapi user ids only
   if (mode === 'timings') return { mode, entries: recentTimings({ userIds }) }
   // read-only and never refused by the run lock: the persons somebody has to look at in Strapi (held back, conflicts, no e-mail), as the job entry saved them
   if (mode === 'attention') return { mode, ...(await attentionReport({ strapi: buildStrapiGateway(), jobKey: JOB_KEY })) }
+  // read-only and never refused by the run lock: does Fiona still hold the MyPoff login link of the persons the sync manages, and does it
+  // still point at the login Strapi has on the person? At most 100 persons per call (personIds, or a page: linksOffset + linksLimit).
+  if (mode === 'links') {
+    const xapi = buildXapiClient()
+    if (!xapi) throw new Error('links needs NUXT_FIONA_API_KEY')
+    return { mode, ...(await linkAudit({ personIds, offset: linksOffset, limit: linksLimit || undefined, strapi: buildStrapiGateway(), xapi, log })) }
+  }
   if (mode === 'auto') {
     const waiting = autoBackoff.check()
     if (waiting) {
