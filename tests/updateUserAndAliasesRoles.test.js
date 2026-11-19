@@ -55,7 +55,7 @@ function makeAlias (overrides = {}) {
 // Routes every request updateUserAndAliasesRoles can make: the two tokens, the roles list, the
 // active-guestbook lookup, Fiona badge fetches (keyed by Strapi user id), the alias lookup
 // mergeUserMy makes while loading the main user's own record, and the two user records themselves.
-function mockStrapi ({ roles = ROLES, main, alias, badgesById = {} } = {}) {
+function mockStrapi ({ roles = ROLES, main, alias, badgesById = {}, badgeErrorsById = {}, guestbooks = [{ guestbook_id: 'gb-1' }], guestbooksError = false } = {}) {
   const puts = []
 
   globalThis.$fetch = vi.fn().mockImplementation((url, opts = {}) => {
@@ -64,10 +64,18 @@ function mockStrapi ({ roles = ROLES, main, alias, badgesById = {} } = {}) {
     if (url.endsWith('/auth/local')) return { jwt: SERVICE_TOKEN }
     if (url.includes('/admin/login')) return { data: { token: ADMIN_JWT } }
     if (url.includes('/user-roles')) return roles
-    if (url.includes('/festival-editions?')) return [{ guestbook_id: 'gb-1' }]
+    if (url.includes('/festival-editions?')) {
+      if (guestbooksError) throw new Error('strapi is down')
+      return guestbooks
+    }
 
     const badgeMatch = url.match(/\/MyPoff\/(\d+)\/guestbook\/gb-1\/badges/)
-    if (badgeMatch) return badgesById[badgeMatch[1]] || []
+    if (badgeMatch) {
+      const status = badgeErrorsById[badgeMatch[1]]
+      // what Fiona answers instead of a badge list: 400 = no account under that id (the MyPoff link is gone), 5xx / 429 = trouble
+      if (status) throw Object.assign(new Error(`HTTP ${status}`), { statusCode: status })
+      return badgesById[badgeMatch[1]] || []
+    }
 
     if (url.includes('/users?id_in=41')) return alias ? [alias] : []
 
@@ -180,5 +188,103 @@ describe('updateUserAndAliasesRoles', () => {
       'role sync › update roles (Strapi)',
       'role sync › alias user read (Strapi)'
     ])
+  })
+  describe('when Fiona cannot be read, a role earned by a badge is not taken away', () => {
+    const press = [{ GuestbookBadge: { Description: 'Press' }, Status: { Description: 'Approved' } }]
+
+    it.each([500, 504, 429])('keeps the badge role when the Fiona read answers %i for every id', async (status) => {
+      const main = makeMain({ user_roles: [{ id: 7 }, { id: 5 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, badgeErrorsById: { 42: status, 41: status } })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([])
+    })
+
+    it('keeps the badge role when Fiona answers 400 "no account under that id" for every id (the MyPoff link is gone)', async () => {
+      const main = makeMain({ user_roles: [{ id: 7 }, { id: 5 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, badgeErrorsById: { 42: 400, 41: 400 } })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([])
+    })
+
+    it('keeps the badge role when ONE read fails, even though the other answered with no badge', async () => {
+      const main = makeMain({ user_roles: [{ id: 7 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, badgeErrorsById: { 41: 500 }, badgesById: { 42: [] } })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([])
+    })
+
+    it('keeps the badge role when the active guestbooks cannot be looked up', async () => {
+      const main = makeMain({ user_roles: [{ id: 7 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, guestbooksError: true })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([])
+    })
+
+    it('still grants a role a badge proves while another read failed, and keeps the others', async () => {
+      const main = makeMain({ user_roles: [{ id: 5 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, badgeErrorsById: { 42: 500 }, badgesById: { 41: press } })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([{ id: 42, body: { user_roles: [7, 5] } }])
+    })
+
+    it('still takes the badge role away when Fiona answered and the person holds no matching badge (the read is trustworthy)', async () => {
+      const main = makeMain({ user_roles: [{ id: 7 }, { id: 5 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, badgesById: { 42: [], 41: [] } })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([{ id: 42, body: { user_roles: [5] } }])
+    })
+
+    it('trusts the read when the main id answered and only the alias id is unknown to Fiona (a 400 for an alias is normal)', async () => {
+      const main = makeMain({ user_roles: [{ id: 7 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, badgesById: { 42: [] }, badgeErrorsById: { 41: 400 } })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([{ id: 42, body: { user_roles: [] } }])
+    })
+
+    it('still lets badge roles lapse when no guestbook is active any more (the festival is over: nothing is read, nothing is failed)', async () => {
+      const main = makeMain({ user_roles: [{ id: 7 }] })
+      const alias = makeAlias({ user_roles: [] })
+      const { puts } = mockStrapi({ main, alias, guestbooks: [] })
+
+      await updateUserAndAliasesRoles(main)
+
+      expect(puts).toEqual([{ id: 42, body: { user_roles: [] } }])
+    })
+
+    it('says in the log that it kept the badge roles, without naming the person by e-mail', async () => {
+      const main = makeMain({ user_roles: [{ id: 7 }] })
+      const alias = makeAlias({ user_roles: [] })
+      mockStrapi({ main, alias, badgeErrorsById: { 42: 500, 41: 500 } })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      await updateUserAndAliasesRoles(main)
+
+      const text = warn.mock.calls.flat().join(' ')
+      warn.mockRestore()
+      expect(text).toMatch(/kept the badge roles/i)
+      expect(text).toContain('42')
+      expect(text).not.toContain('@')
+    })
   })
 })
