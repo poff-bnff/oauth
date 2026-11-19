@@ -89,6 +89,21 @@ describe('createStrapiGateway', () => {
     expect(calls.every(call => call.method === 'GET')).toBe(true)
   })
 
+  it('finds the logins with an e-mail, exactly first and then in lower case, and only reads (the role audit)', async () => {
+    const { fetch, calls } = fakeFetch({ 'GET /users?email=kadri': [], 'GET /users?email=Kadri': [] })
+    const gateway = createStrapiGateway({ fetch, ...deps() })
+    expect(await gateway.findUsersByEmail('Kadri.Kauts@poff.ee')).toEqual([])
+    expect(calls.map(call => call.url)).toEqual([
+      `${STRAPI}/users?email=Kadri.Kauts%40poff.ee&_limit=10`,
+      `${STRAPI}/users?email=kadri.kauts%40poff.ee&_limit=10`
+    ])
+
+    const found = fakeFetch({ 'GET /users?email=a%40b.ee': [{ id: 3 }, { id: 4 }] })
+    expect(await createStrapiGateway({ fetch: found.fetch, ...deps() }).findUsersByEmail('a@b.ee')).toEqual([{ id: 3 }, { id: 4 }])
+    expect(found.calls).toHaveLength(1)
+    expect([...calls, ...found.calls].every(call => call.method === 'GET')).toBe(true)
+  })
+
   it('looks a person up by fiona id, by email and by id, returning null when absent', async () => {
     const { fetch, calls } = fakeFetch({ 'GET /people?fiona_person_id=': [{ id: 5 }], 'GET /people/9': { id: 9 } })
     const gateway = createStrapiGateway({ fetch, ...deps() })

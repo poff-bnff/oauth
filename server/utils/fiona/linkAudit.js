@@ -35,6 +35,24 @@ const statusOf = err => err?.statusCode ?? err?.status ?? err?.response?.status
 const shortMessage = err => String(err?.message || err).slice(0, 200)
 
 /**
+ * The MyPoff links Fiona holds for a person: { linkIds, answer } (`answer` = 'empty' for an empty list, 'status-400' / 'status-404' when
+ * Fiona answers that it holds none: measured 2026-11-19, a person without a link answers 404 Not Found) or { error } when the read failed
+ * (a failed read is never "no link"). Read only.
+ */
+export async function readMyPoffLinks (xapi, fionaPersonId) {
+  try {
+    const answer = await xapi.getRaw(`/person/${encodeURIComponent(fionaPersonId)}/${PROVIDER}/externalauthentications`)
+    const entries = Array.isArray(answer) ? answer : []
+    const linkIds = [...new Set(entries.map(entry => entry?.externalIdentification ?? entry?.ExternalIdentification).filter(usableId).map(value => String(value).trim()))]
+    return { linkIds, answer: 'empty' }
+  } catch (err) {
+    const status = statusOf(err)
+    if (NO_LINK_STATUSES.has(status)) return { linkIds: [], answer: `status-${status}` }
+    return { error: shortMessage(err) }
+  }
+}
+
+/**
  * @param {{ personIds?: number[], offset?: number, limit?: number, strapi: object, xapi: object, log?: object }} options
  *   personIds = Strapi person ids (at most 100); otherwise the managed persons, lowest id first, `limit` (at most 100) from `offset`
  *   strapi needs findPersonById, countManagedPeople, findManagedPeoplePage and getUser; xapi needs getRaw
@@ -94,7 +112,7 @@ export async function linkAudit ({ personIds = [], offset = 0, limit = DEFAULT_L
   }
 
   async function classify ({ person, base, personUserId }) {
-    const read = await readLinks(person.fiona_person_id)
+    const read = await readMyPoffLinks(xapi, person.fiona_person_id)
     if (read.error) return { ...base, category: 'fiona-error', error: read.error }
     if (read.linkIds.length > 1) multipleLinks++
 
@@ -111,19 +129,6 @@ export async function linkAudit ({ personIds = [], offset = 0, limit = DEFAULT_L
     if (relationId(linkedUser.mainUser)) return { ...withIds, category: 'linked-to-alias' }
     if (!personUserId) return { ...withIds, category: 'linked-person-has-no-user' }
     return { ...withIds, category: groupOf(ownUser, personUserId) === Number(linkedUser.id) ? 'linked-ok' : 'linked-other-user' }
-  }
-
-  async function readLinks (fionaPersonId) {
-    try {
-      const answer = await xapi.getRaw(`/person/${encodeURIComponent(fionaPersonId)}/${PROVIDER}/externalauthentications`)
-      const entries = Array.isArray(answer) ? answer : []
-      const linkIds = [...new Set(entries.map(entry => entry?.externalIdentification ?? entry?.ExternalIdentification).filter(usableId).map(value => String(value).trim()))]
-      return { linkIds, answer: 'empty' }
-    } catch (err) {
-      const status = statusOf(err)
-      if (NO_LINK_STATUSES.has(status)) return { linkIds: [], answer: `status-${status}` }
-      return { error: shortMessage(err) }
-    }
   }
 
   return { total, offset: requested.length ? 0 : start, limit: requested.length ? requested.length : pageSize, nextOffset, audited: people.length, counts, multipleLinks, persons: listed, skipped }
