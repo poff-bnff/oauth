@@ -115,6 +115,21 @@ describe('roleAudit', () => {
     expect(report.persons.find(item => item.fionaPersonId === 'p2')).toMatchObject({ fionaAnswer: 'empty', userId: 22 })
   })
 
+  it('looks at the MAIN login when the user found by e-mail is an alias (badge roles only live on the main login)', async () => {
+    const users = [
+      { ...user(21, { roles: [], mainUser: { id: 20 } }), email: 'h1@example.com' },
+      user(20, { roles: [15] }),
+      { ...user(23, { roles: [], mainUser: { id: 22 } }), email: 'h2@example.com' },
+      user(22, { roles: [5] })
+    ]
+    const { report } = await audit({ holders: [holder(1, { link: 404 }), holder(2, { link: 404 })], users })
+
+    expect(categoryOf(report, 'p1')).toBe('unlinked-role-ok')
+    expect(report.persons.find(item => item.fionaPersonId === 'p1').userId).toBe(20)
+    expect(categoryOf(report, 'p2')).toBe('unlinked-role-missing')
+    expect(report.persons.find(item => item.fionaPersonId === 'p2').userId).toBe(22)
+  })
+
   it('says so when an unlinked person has no Strapi user, several, or no e-mail in Fiona', async () => {
     const users = [{ ...user(31, { roles: [] }), email: 'h2@example.com' }, { ...user(32, { roles: [15] }), email: 'h2@example.com' }]
     const { report } = await audit({

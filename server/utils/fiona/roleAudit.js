@@ -14,8 +14,8 @@
  *   role-ok                  linked, and the login (the main login when the link is an alias) has the role
  *   linked-role-missing      linked, the login lacks the role
  *   linked-to-missing-user   the link is a Strapi user that does not exist
- *   unlinked-role-ok         no link in Fiona, the Strapi user found by e-mail has the role
- *   unlinked-role-missing    no link in Fiona, the Strapi user found by e-mail lacks the role
+ *   unlinked-role-ok         no link in Fiona, the Strapi user found by e-mail (its main login, for an alias) has the role
+ *   unlinked-role-missing    no link in Fiona, the Strapi user found by e-mail (its main login, for an alias) lacks the role
  *   unlinked-no-user         no link, no Strapi user with the e-mail
  *   unlinked-several-users   no link, several Strapi users with the e-mail (`userIds`)
  *   unlinked-no-email        no link, and Fiona holds no e-mail for the person
@@ -138,7 +138,10 @@ export async function roleAudit ({ roleId, guestbookId = '', offset = 0, limit =
     if (!found.length) return { ...base, category: 'unlinked-no-user', fionaAnswer: read.answer }
     if (found.length > 1) return { ...base, category: 'unlinked-several-users', fionaAnswer: read.answer, userIds: found.map(item => Number(item.id)).sort((a, b) => a - b), anyHasRole: found.some(hasRole) }
     const [only] = found
-    return { ...base, category: hasRole(only) ? 'unlinked-role-ok' : 'unlinked-role-missing', fionaAnswer: read.answer, userId: Number(only.id), ...(strapiPersonOf(only) ? { strapiPersonId: strapiPersonOf(only) } : {}) }
+    // badge roles go to the main login: when the login with this e-mail is an alias, the main login is the one to look at
+    const mainOfOnly = relationId(only.mainUser) ? Number(relationId(only.mainUser)) : null
+    const holder = mainOfOnly ? (await userOf(mainOfOnly)) || only : only
+    return { ...base, category: hasRole(holder) ? 'unlinked-role-ok' : 'unlinked-role-missing', fionaAnswer: read.answer, userId: Number(holder.id), ...(strapiPersonOf(holder) ? { strapiPersonId: strapiPersonOf(holder) } : {}) }
   }
 
   return { roleId: Number(role.id), guestbookId: guestbook, total: accreditations.length, offset: start, limit: pageSize, nextOffset, audited: page.length, qualifying, counts, skipped, persons: listed }
