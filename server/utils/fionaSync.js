@@ -45,6 +45,7 @@ import { xapiAccountReport } from './fiona/xapiAccountReport.js'
 import { recentTimings } from './fiona/timingLog.js'
 import { whySyncedReport } from './fiona/whySynced.js'
 import { linkAudit } from './fiona/linkAudit.js'
+import { roleAudit } from './fiona/roleAudit.js'
 import { programmeReport } from './fiona/programmeReport.js'
 
 const config = useRuntimeConfig()
@@ -179,7 +180,7 @@ async function compareFionaSources () {
   return { mode: 'compare', guestbookIds, ...(await compareSources({ xapi, publication, guestbookIds, log })) }
 }
 
-export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], userIds = [], editionId = 0, testExtraFields = false, testAdoptByFilm = false, testMeetingProgrammes = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [], linksOffset = 0, linksLimit = 0 } = {}) {
+export async function runFionaSync ({ dryRun = false, force = false, mode = 'full', personIds = [], all = false, probe = false, guestbookIds = [], background = false, testRuleIds = [], testMaxPersons = 0, fieldPaths = [], accreditationIds = [], userIds = [], editionId = 0, testExtraFields = false, testAdoptByFilm = false, testMeetingProgrammes = false, testFionaPersonIds = [], testScope = 'all', mergePairs = [], mergeRetire = 'hide', repointCredits = false, aliasLogins = false, moveToMain = [], ignoreEventivalIds = false, decisions = [], linksOffset = 0, linksLimit = 0, roleId = 0 } = {}) {
   if (mode === 'status') return statusReport()
   // read-only and never refused by the run lock: the last timed requests (appointments, login) with the time of each step, optionally of the given Strapi user ids only
   if (mode === 'timings') return { mode, entries: recentTimings({ userIds }) }
@@ -191,6 +192,15 @@ export async function runFionaSync ({ dryRun = false, force = false, mode = 'ful
     const xapi = buildXapiClient()
     if (!xapi) throw new Error('links needs NUXT_FIONA_API_KEY')
     return { mode, ...(await linkAudit({ personIds, offset: linksOffset, limit: linksLimit || undefined, strapi: buildStrapiGateway(), xapi, log })) }
+  }
+  // read-only and never refused by the run lock: who holds a badge that earns the Strapi role `roleId`, and do they still have the role and the
+  // Fiona MyPoff login link? A page of accreditations per call (linksOffset + linksLimit, at most 40) of the first of `guestbookIds` or the active guestbook.
+  if (mode === 'roleAudit') {
+    const xapi = buildXapiClient()
+    if (!xapi) throw new Error('roleAudit needs NUXT_FIONA_API_KEY')
+    if (!roleId) throw new Error('roleAudit needs roleId (the Strapi user-role id)')
+    const loadRole = async id => (await fetchStrapiUserRolesGraphql()).find(role => Number(role.id) === Number(id)) || null
+    return { mode, ...(await roleAudit({ roleId, guestbookId: guestbookIds[0] || '', offset: linksOffset, limit: linksLimit || undefined, loadRole, strapi: buildStrapiGateway(), xapi, log })) }
   }
   if (mode === 'auto') {
     const waiting = autoBackoff.check()

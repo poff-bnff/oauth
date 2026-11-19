@@ -321,6 +321,19 @@ export function createStrapiGateway ({ fetch, config, getAdminToken, getActiveFi
     },
 
     /**
+     * The logins with an e-mail (read only; the role audit's way from a Fiona person with no MyPoff link to the Strapi login). The e-mail
+     * as given first, and in lower case when that finds none and differs: Strapi compares the text exactly.
+     */
+    async findUsersByEmail (email) {
+      const text = String(email ?? '').trim()
+      if (!text) return []
+      const read = async value => asList(await get(`/users?email=${encodeURIComponent(value)}&_limit=10`))
+      const found = await read(text)
+      if (found.length || text === text.toLowerCase()) return found
+      return await read(text.toLowerCase())
+    },
+
+    /**
      * Find the login user by email or create it. Creation goes through the admin
      * user route (`POST /users`), NOT `/auth/local/register`: the user is created
      * as confirmed and Strapi sends no confirmation mail. Strapi assigns the
